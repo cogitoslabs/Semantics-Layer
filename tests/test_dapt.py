@@ -63,7 +63,7 @@ def test_evaluate_qa_accuracy(mock_model, mock_tokenizer):
     
     # Mock tokenizer.encode to return token ID 5 for A
     def mock_encode(text, *args, **kwargs):
-        if text == "A":
+        if text.strip() == "A":
             return [5]
         return [6]
         

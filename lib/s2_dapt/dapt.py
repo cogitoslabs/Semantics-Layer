@@ -17,6 +17,7 @@ def evaluate_perplexity(model: Any, tokenizer: Any, dataset: List[Dict[str, Any]
     model.eval()
     total_loss = 0.0
     total_tokens = 0
+    max_length = 512
     
     # Enable padding configuration
     if tokenizer.pad_token is None:
@@ -27,20 +28,29 @@ def evaluate_perplexity(model: Any, tokenizer: Any, dataset: List[Dict[str, Any]
             text = item.get("text", "")
             if not text.strip():
                 continue
-            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-            input_ids = inputs["input_ids"].to(model.device)
-            attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids)).to(model.device)
+            # Tokenize the entire text without truncation
+            inputs = tokenizer(text, return_tensors="pt")
+            input_ids = inputs["input_ids"]
             
-            if input_ids.size(1) <= 1:
+            seq_len = input_ids.size(1)
+            if seq_len <= 1:
                 continue
                 
-            labels = input_ids.clone()
-            
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            loss = outputs.loss
-            num_tokens = input_ids.size(1)
-            total_loss += loss.item() * num_tokens
-            total_tokens += num_tokens
+            # Split input_ids into chunks of size max_length
+            for i in range(0, seq_len, max_length):
+                chunk_ids = input_ids[:, i : i + max_length].to(model.device)
+                
+                if chunk_ids.size(1) <= 1:
+                    continue
+                    
+                chunk_labels = chunk_ids.clone()
+                chunk_attention_mask = torch.ones_like(chunk_ids).to(model.device)
+                
+                outputs = model(input_ids=chunk_ids, attention_mask=chunk_attention_mask, labels=chunk_labels)
+                loss = outputs.loss
+                num_tokens = chunk_ids.size(1) - 1
+                total_loss += loss.item() * num_tokens
+                total_tokens += num_tokens
             
     if total_tokens == 0:
         return float("inf")
@@ -55,8 +65,8 @@ def evaluate_qa_accuracy(model: Any, tokenizer: Any, probe_questions: List[Dict[
     
     with torch.no_grad():
         for q in probe_questions:
-            # We construct the question prompt with a trailing space
-            prompt = f"Question: {q['question']}\nAnswer: "
+            # We construct the question prompt ending with colon (no trailing space)
+            prompt = f"Question: {q['question']}\nAnswer:"
             inputs = tokenizer(prompt, return_tensors="pt")
             input_ids = inputs["input_ids"].to(model.device)
             attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids)).to(model.device)
@@ -68,10 +78,10 @@ def evaluate_qa_accuracy(model: Any, tokenizer: Any, probe_questions: List[Dict[
             
             option_probs = {}
             for opt in options:
-                # Tokenize the single option letter "A", "B", "C", "D"
-                opt_token_ids = tokenizer.encode(opt, add_special_tokens=False)
+                # Tokenize the option with a leading space (e.g., " A")
+                opt_token_ids = tokenizer.encode(" " + opt, add_special_tokens=False)
                 if len(opt_token_ids) > 0:
-                    opt_token_id = opt_token_ids[0]
+                    opt_token_id = opt_token_ids[-1]
                     option_probs[opt] = next_token_probs[opt_token_id].item()
                 else:
                     option_probs[opt] = 0.0
@@ -156,13 +166,17 @@ def run_dapt_pipeline(
                 continue
                 
             labels = input_ids.clone()
-            # We ignore padding tokens in loss calculation
-            if tokenizer.pad_token_id is not None:
-                labels[labels == tokenizer.pad_token_id] = -100
+            # We ignore padding tokens in loss calculation using attention mask
+            if attention_mask is not None:
+                labels[attention_mask == 0] = -100
                 
             outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
             loss = outputs.loss
             loss.backward()
+            
+            # Gradient clipping to stabilize training
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             
             epoch_loss += loss.item()
