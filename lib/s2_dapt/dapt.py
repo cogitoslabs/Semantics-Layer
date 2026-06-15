@@ -94,6 +94,97 @@ def evaluate_qa_accuracy(model: Any, tokenizer: Any, probe_questions: List[Dict[
     return (correct / total) * 100 if total > 0 else 0.0
 
 
+def prepare_training_blocks(tokenizer: Any, train_docs: List[Dict[str, Any]], block_size: int = 512) -> List[List[int]]:
+    train_chunks = []
+    
+    eos_id = tokenizer.eos_token_id
+    if eos_id is None or not isinstance(eos_id, int):
+        eos_id = 0
+        
+    for doc in train_docs:
+        text = doc.get("text", "")
+        if not text.strip():
+            continue
+        tokens = tokenizer.encode(text, add_special_tokens=False)
+        train_chunks.extend(tokens)
+        train_chunks.append(eos_id)
+        
+    tokenized_train_blocks = []
+    for i in range(0, len(train_chunks) - block_size + 1, block_size):
+        tokenized_train_blocks.append(train_chunks[i : i + block_size])
+        
+    if not tokenized_train_blocks and train_chunks:
+        tokenized_train_blocks.append(train_chunks)
+        
+    return tokenized_train_blocks
+
+
+def train_epoch(
+    model: Any,
+    tokenizer: Any,
+    optimizer: Any,
+    batches: List[List[List[int]]],
+    device: torch.device,
+    eos_id: int
+) -> float:
+    model.train()
+    epoch_loss = 0.0
+    num_batches = 0
+    
+    for batch in batches:
+        optimizer.zero_grad()
+        
+        max_batch_len = max(len(block) for block in batch)
+        
+        pad_id = tokenizer.pad_token_id
+        if pad_id is None or not isinstance(pad_id, int):
+            pad_id = eos_id
+            
+        input_ids_list = []
+        attention_mask_list = []
+        for block in batch:
+            pad_len = max_batch_len - len(block)
+            padded_block = block + [pad_id] * pad_len
+            input_ids_list.append(padded_block)
+            attention_mask_list.append([1] * len(block) + [0] * pad_len)
+            
+        input_ids = torch.tensor(input_ids_list, dtype=torch.long).to(device)
+        attention_mask = torch.tensor(attention_mask_list, dtype=torch.long).to(device)
+        
+        if input_ids.size(1) <= 1:
+            continue
+            
+        labels = input_ids.clone()
+        if attention_mask is not None:
+            labels[attention_mask == 0] = -100
+            
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+        loss = outputs.loss
+        loss.backward()
+        
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+        optimizer.step()
+        
+        epoch_loss += loss.item()
+        num_batches += 1
+        
+    return epoch_loss / num_batches if num_batches > 0 else 0.0
+
+
+def log_improvement_summary(
+    initial_ppl: float,
+    initial_qa_acc: float,
+    final_ppl: float,
+    final_qa_acc: float
+) -> None:
+    print("\n=== DAPT IMPROVEMENT SUMMARY ===")
+    ppl_diff = initial_ppl - final_ppl
+    qa_diff = final_qa_acc - initial_qa_acc
+    print(f"Perplexity: {initial_ppl:.4f} -> {final_ppl:.4f} (Change: {-ppl_diff/initial_ppl * 100:.2f}%)")
+    print(f"QA Accuracy: {initial_qa_acc:.2f}% -> {final_qa_acc:.2f}% (Change: {qa_diff:+.2f}%)")
+
+
 def run_dapt_pipeline(
     model_name: str,
     corpus_path: str,
@@ -140,32 +231,8 @@ def run_dapt_pipeline(
     
     # Prepare training chunks by tokenizing the entire text of each document without truncation
     print("Tokenizing and chunking training documents...")
-    train_chunks = []
-    
-    # Safely get EOS token ID
-    eos_id = tokenizer.eos_token_id
-    if eos_id is None or not isinstance(eos_id, int):
-        eos_id = 0
-        
-    for doc in train_docs:
-        text = doc.get("text", "")
-        if not text.strip():
-            continue
-        tokens = tokenizer.encode(text, add_special_tokens=False)
-        train_chunks.extend(tokens)
-        train_chunks.append(eos_id)
-        
-    # Split training tokens into blocks of 512 tokens
-    block_size = 512
-    tokenized_train_blocks = []
-    for i in range(0, len(train_chunks) - block_size + 1, block_size):
-        tokenized_train_blocks.append(train_chunks[i : i + block_size])
-        
-    # Fallback to whatever tokens we have if the corpus is too small to form a full block
-    if not tokenized_train_blocks and train_chunks:
-        tokenized_train_blocks.append(train_chunks)
-        
-    print(f"Created {len(tokenized_train_blocks)} training blocks of size {block_size}.")
+    tokenized_train_blocks = prepare_training_blocks(tokenizer, train_docs)
+    print(f"Created {len(tokenized_train_blocks)} training blocks of size 512.")
     
     # Run CPT / DAPT Training
     print("\n=== STARTING CONTINUED PRETRAINING (CPT/DAPT) ===")
@@ -176,53 +243,12 @@ def run_dapt_pipeline(
     for i in range(0, len(tokenized_train_blocks), batch_size):
         batches.append(tokenized_train_blocks[i : i + batch_size])
         
-    for epoch in range(epochs):
-        model.train()
-        epoch_loss = 0.0
-        num_batches = 0
+    eos_id = tokenizer.eos_token_id
+    if eos_id is None or not isinstance(eos_id, int):
+        eos_id = 0
         
-        for batch in batches:
-            optimizer.zero_grad()
-            
-            # Since blocks might be of different sizes in the fallback/partial cases,
-            # we pad dynamically to max length in the batch.
-            max_batch_len = max(len(block) for block in batch)
-            
-            pad_id = tokenizer.pad_token_id
-            if pad_id is None or not isinstance(pad_id, int):
-                pad_id = eos_id
-                
-            input_ids_list = []
-            attention_mask_list = []
-            for block in batch:
-                pad_len = max_batch_len - len(block)
-                padded_block = block + [pad_id] * pad_len
-                input_ids_list.append(padded_block)
-                attention_mask_list.append([1] * len(block) + [0] * pad_len)
-                
-            input_ids = torch.tensor(input_ids_list, dtype=torch.long).to(device)
-            attention_mask = torch.tensor(attention_mask_list, dtype=torch.long).to(device)
-            
-            if input_ids.size(1) <= 1:
-                continue
-                
-            labels = input_ids.clone()
-            if attention_mask is not None:
-                labels[attention_mask == 0] = -100
-                
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            loss = outputs.loss
-            loss.backward()
-            
-            # Gradient clipping to stabilize training
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
-            optimizer.step()
-            
-            epoch_loss += loss.item()
-            num_batches += 1
-            
-        avg_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
+    for epoch in range(epochs):
+        avg_loss = train_epoch(model, tokenizer, optimizer, batches, device, eos_id)
         print(f"Epoch {epoch+1}/{epochs} | Average Loss: {avg_loss:.4f}")
         
     # Save model and tokenizer
@@ -239,8 +265,4 @@ def run_dapt_pipeline(
     print(f"Final QA Accuracy: {final_qa_acc:.2f}%")
     
     # Comparison Summary
-    print("\n=== DAPT IMPROVEMENT SUMMARY ===")
-    ppl_diff = initial_ppl - final_ppl
-    qa_diff = final_qa_acc - initial_qa_acc
-    print(f"Perplexity: {initial_ppl:.4f} -> {final_ppl:.4f} (Change: {-ppl_diff/initial_ppl * 100:.2f}%)")
-    print(f"QA Accuracy: {initial_qa_acc:.2f}% -> {final_qa_acc:.2f}% (Change: {qa_diff:+.2f}%)")
+    log_improvement_summary(initial_ppl, initial_qa_acc, final_ppl, final_qa_acc)
