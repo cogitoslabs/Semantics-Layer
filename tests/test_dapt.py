@@ -13,6 +13,8 @@ def mock_tokenizer():
     tokenizer = MagicMock()
     tokenizer.pad_token = None
     tokenizer.eos_token = "<|im_end|>"
+    tokenizer.eos_token_id = 2
+    tokenizer.pad_token_id = 3
     
     # Mock tokenization outputs
     def mock_tokenize_fn(text, *args, **kwargs):

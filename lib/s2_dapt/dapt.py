@@ -138,14 +138,43 @@ def run_dapt_pipeline(
     print(f"Initial Perplexity: {initial_ppl:.4f}")
     print(f"Initial QA Accuracy: {initial_qa_acc:.2f}%")
     
+    # Prepare training chunks by tokenizing the entire text of each document without truncation
+    print("Tokenizing and chunking training documents...")
+    train_chunks = []
+    
+    # Safely get EOS token ID
+    eos_id = tokenizer.eos_token_id
+    if eos_id is None or not isinstance(eos_id, int):
+        eos_id = 0
+        
+    for doc in train_docs:
+        text = doc.get("text", "")
+        if not text.strip():
+            continue
+        tokens = tokenizer.encode(text, add_special_tokens=False)
+        train_chunks.extend(tokens)
+        train_chunks.append(eos_id)
+        
+    # Split training tokens into blocks of 512 tokens
+    block_size = 512
+    tokenized_train_blocks = []
+    for i in range(0, len(train_chunks) - block_size + 1, block_size):
+        tokenized_train_blocks.append(train_chunks[i : i + block_size])
+        
+    # Fallback to whatever tokens we have if the corpus is too small to form a full block
+    if not tokenized_train_blocks and train_chunks:
+        tokenized_train_blocks.append(train_chunks)
+        
+    print(f"Created {len(tokenized_train_blocks)} training blocks of size {block_size}.")
+    
     # Run CPT / DAPT Training
     print("\n=== STARTING CONTINUED PRETRAINING (CPT/DAPT) ===")
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     
     # Batch inputs
     batches = []
-    for i in range(0, len(train_docs), batch_size):
-        batches.append(train_docs[i:i+batch_size])
+    for i in range(0, len(tokenized_train_blocks), batch_size):
+        batches.append(tokenized_train_blocks[i : i + batch_size])
         
     for epoch in range(epochs):
         model.train()
@@ -154,19 +183,30 @@ def run_dapt_pipeline(
         
         for batch in batches:
             optimizer.zero_grad()
-            texts = [item.get("text", "") for item in batch]
-            if not any(texts):
-                continue
+            
+            # Since blocks might be of different sizes in the fallback/partial cases,
+            # we pad dynamically to max length in the batch.
+            max_batch_len = max(len(block) for block in batch)
+            
+            pad_id = tokenizer.pad_token_id
+            if pad_id is None or not isinstance(pad_id, int):
+                pad_id = eos_id
                 
-            inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
-            input_ids = inputs["input_ids"].to(device)
-            attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids)).to(device)
+            input_ids_list = []
+            attention_mask_list = []
+            for block in batch:
+                pad_len = max_batch_len - len(block)
+                padded_block = block + [pad_id] * pad_len
+                input_ids_list.append(padded_block)
+                attention_mask_list.append([1] * len(block) + [0] * pad_len)
+                
+            input_ids = torch.tensor(input_ids_list, dtype=torch.long).to(device)
+            attention_mask = torch.tensor(attention_mask_list, dtype=torch.long).to(device)
             
             if input_ids.size(1) <= 1:
                 continue
                 
             labels = input_ids.clone()
-            # We ignore padding tokens in loss calculation using attention mask
             if attention_mask is not None:
                 labels[attention_mask == 0] = -100
                 
