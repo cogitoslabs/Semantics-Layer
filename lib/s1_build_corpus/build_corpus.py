@@ -47,6 +47,8 @@ class CorpusBuilder:
         total_tokens = 0
         doc_index = 0
 
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
         with (
             open(self.output_path, "w", encoding="utf-8") as out,
             ProcessPoolExecutor(
