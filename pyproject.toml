@@ -1,0 +1,20 @@
+[project]
+name = "semantics"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.43.29",
+    "doclayout-yolo>=0.0.4",
+    "docling>=2.102.1",
+    "python-dotenv>=1.0.0",
+    "hf-xet>=1.5.1",
+    "pydrive2>=1.21.3",
+    "tiktoken>=0.13.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]
