@@ -13,48 +13,68 @@ def load_jsonl(file_path: str) -> List[Dict[str, Any]]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def evaluate_perplexity(model: Any, tokenizer: Any, dataset: List[Dict[str, Any]]) -> float:
+def evaluate_perplexity(
+    model: Any,
+    tokenizer: Any,
+    dataset: List[Dict[str, Any]],
+    block_size: int = 512
+) -> float:
     model.eval()
     total_loss = 0.0
     total_tokens = 0
-    max_length = 512
-    
-    # Enable padding configuration
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
 
-    with torch.no_grad():
-        for item in dataset:
-            text = item.get("text", "")
-            if not text.strip():
-                continue
-            # Tokenize the entire text without truncation
-            inputs = tokenizer(text, return_tensors="pt")
-            input_ids = inputs["input_ids"]
-            
-            seq_len = input_ids.size(1)
-            if seq_len <= 1:
-                continue
-                
-            # Split input_ids into chunks of size max_length
-            for i in range(0, seq_len, max_length):
-                chunk_ids = input_ids[:, i : i + max_length].to(model.device)
-                
-                if chunk_ids.size(1) <= 1:
+    # Prevent warning by temporarily increasing model_max_length during evaluation
+    orig_max_len = getattr(tokenizer, "model_max_length", None)
+    tokenizer.model_max_length = 100_000_000
+
+    try:
+        with torch.no_grad():
+            for item in dataset:
+                text = item.get("text", "")
+                if not text.strip():
                     continue
-                    
-                chunk_labels = chunk_ids.clone()
-                chunk_attention_mask = torch.ones_like(chunk_ids).to(model.device)
-                
-                outputs = model(input_ids=chunk_ids, attention_mask=chunk_attention_mask, labels=chunk_labels)
-                loss = outputs.loss
-                num_tokens = chunk_ids.size(1) - 1
-                total_loss += loss.item() * num_tokens
-                total_tokens += num_tokens
-            
+
+                tokens = tokenizer.encode(
+                    text,
+                    add_special_tokens=False
+                )
+
+                if tokenizer.eos_token_id is not None:
+                    tokens.append(tokenizer.eos_token_id)
+
+                for start in range(0, len(tokens), block_size):
+                    chunk = tokens[start:start + block_size]
+
+                    if len(chunk) < 2:
+                        continue
+
+                    input_ids = torch.tensor(
+                        [chunk],
+                        dtype=torch.long,
+                        device=model.device
+                    )
+
+                    attention_mask = torch.ones_like(input_ids)
+
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=input_ids
+                    )
+
+                    num_tokens = len(chunk) - 1
+
+                    total_loss += outputs.loss.item() * num_tokens
+                    total_tokens += num_tokens
+    finally:
+        if orig_max_len is not None:
+            tokenizer.model_max_length = orig_max_len
+
     if total_tokens == 0:
         return float("inf")
-    return math.exp(total_loss / total_tokens)
+
+    avg_nll = total_loss / total_tokens
+    return math.exp(avg_nll)
 
 
 def evaluate_qa_accuracy(model: Any, tokenizer: Any, probe_questions: List[Dict[str, Any]]) -> float:
@@ -101,13 +121,21 @@ def prepare_training_blocks(tokenizer: Any, train_docs: List[Dict[str, Any]], bl
     if eos_id is None or not isinstance(eos_id, int):
         eos_id = 0
         
-    for doc in train_docs:
-        text = doc.get("text", "")
-        if not text.strip():
-            continue
-        tokens = tokenizer.encode(text, add_special_tokens=False)
-        train_chunks.extend(tokens)
-        train_chunks.append(eos_id)
+    # Prevent warning by temporarily increasing model_max_length during tokenization
+    orig_max_len = getattr(tokenizer, "model_max_length", None)
+    tokenizer.model_max_length = 100_000_000
+
+    try:
+        for doc in train_docs:
+            text = doc.get("text", "")
+            if not text.strip():
+                continue
+            tokens = tokenizer.encode(text, add_special_tokens=False)
+            train_chunks.extend(tokens)
+            train_chunks.append(eos_id)
+    finally:
+        if orig_max_len is not None:
+            tokenizer.model_max_length = orig_max_len
         
     tokenized_train_blocks = []
     for i in range(0, len(train_chunks) - block_size + 1, block_size):
@@ -131,6 +159,29 @@ def train_epoch(
     epoch_loss = 0.0
     num_batches = 0
     
+    use_cuda = device.type == "cuda"
+    dtype = torch.bfloat16 if (use_cuda and torch.cuda.is_bf16_supported()) else torch.float16
+    
+    if use_cuda and dtype == torch.float16:
+        if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+            scaler = torch.amp.GradScaler("cuda")
+        else:
+            scaler = torch.cuda.amp.GradScaler()
+    else:
+        scaler = None
+
+    if use_cuda:
+        if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
+            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=dtype)
+        else:
+            autocast_ctx = torch.cuda.amp.autocast(dtype=dtype)
+    else:
+        # Dummy context manager for CPU
+        class DummyCtx:
+            def __enter__(self): pass
+            def __exit__(self, exc_type, exc_val, exc_tb): pass
+        autocast_ctx = DummyCtx()
+        
     for batch in batches:
         optimizer.zero_grad()
         
@@ -158,14 +209,21 @@ def train_epoch(
         if attention_mask is not None:
             labels[attention_mask == 0] = -100
             
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-        loss = outputs.loss
-        loss.backward()
-        
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        
-        optimizer.step()
-        
+        with autocast_ctx:
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+            loss = outputs.loss
+
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            
         epoch_loss += loss.item()
         num_batches += 1
         
@@ -201,10 +259,23 @@ def run_dapt_pipeline(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         
-    model = AutoModelForCausalLM.from_pretrained(model_name)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Enable mixed-precision loading and optimized attention on GPU
+    if device.type == "cuda":
+        torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        attn_implementation = "sdpa"
+    else:
+        torch_dtype = torch.float32
+        attn_implementation = "eager"
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch_dtype,
+        attn_implementation=attn_implementation
+    )
     model.to(device)
-    print(f"Model loaded successfully on device: {device}")
+    print(f"Model loaded successfully on device: {device} (dtype: {torch_dtype}, attn: {attn_implementation})")
     
     # Load datasets
     corpus_docs = load_jsonl(corpus_path)
@@ -216,8 +287,8 @@ def run_dapt_pipeline(
     if not probe_questions:
         print(f"[Warning] Probe QA dataset at '{probe_qa_path}' is empty or not found.")
         
-    # Split corpus into Train (75%) and Validation (25%)
-    val_size = max(1, int(len(corpus_docs) * 0.25))
+    # Split corpus into Train (80%) and Validation (20%)
+    val_size = max(2, int(len(corpus_docs) * 0.20))
     train_docs = corpus_docs[:-val_size]
     val_docs = corpus_docs[-val_size:]
     print(f"Corpus split: {len(train_docs)} training docs, {len(val_docs)} validation docs.")

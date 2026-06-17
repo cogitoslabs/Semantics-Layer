@@ -44,17 +44,38 @@ def mock_docling():
         yield mock_converter_cls, mock_instance
 
 
+@pytest.fixture(autouse=True)
+def mock_pdfium():
+    with patch("pypdfium2.PdfDocument") as mock_pdf_cls:
+        mock_doc = MagicMock()
+        mock_doc.__len__.return_value = 5
+        mock_doc.__enter__.return_value = mock_doc
+        mock_pdf_cls.return_value = mock_doc
+        yield mock_pdf_cls
+
+
 def test_worker_init_and_task(mock_gpu_queue, mock_docling):
     # Initialize worker
     worker_init(mock_gpu_queue)
     
-    # Run task
-    result = worker_task("test.pdf", "dummy_path.pdf")
+    # Run task with chunk_size=3 to verify overlap chunking works
+    # mock_pdfium returns 5 pages.
+    # With chunk_size=3, stride = 2:
+    # Chunk 0: (1, 3)
+    # Chunk 1: (3, 5)
+    result = worker_task("test.pdf", "dummy_path.pdf", chunk_size=3)
     
     assert result.succeeded
     assert result.filename == "test.pdf"
-    assert "neuroscience" in result.text
-    assert result.token_count > 0
+    assert len(result.chunks) == 2
+    assert result.chunks[0].chunk_index == 0
+    assert result.chunks[0].page_range == (1, 3)
+    assert "neuroscience" in result.chunks[0].text
+    assert result.chunks[0].token_count > 0
+    assert result.chunks[1].chunk_index == 1
+    assert result.chunks[1].page_range == (3, 5)
+    assert "neuroscience" in result.chunks[1].text
+    assert result.chunks[1].token_count > 0
 
 
 def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
@@ -84,11 +105,18 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
                 mock_as_completed.return_value = [mock_future]
                 
                 # Mock future.result() to return a successful ExtractionResult
+                from lib.s1_build_corpus.worker import ChunkResult
                 dummy_text = "This is a neuroscience reasoning and retrieval test document. " * 10
                 mock_future.result.return_value = ExtractionResult(
                     filename="paper.pdf",
-                    text=dummy_text,
-                    token_count=50,
+                    chunks=[
+                        ChunkResult(
+                            chunk_index=0,
+                            text=dummy_text,
+                            token_count=50,
+                            page_range=(1, 3)
+                        )
+                    ],
                     status="SUCCESS"
                 )
 
@@ -96,7 +124,8 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
                     storage=storage,
                     output_path=output_jsonl,
                     available_gpus="0",
-                    workers_per_gpu=1
+                    workers_per_gpu=1,
+                    chunk_size=3
                 )
                 builder.build()
 
@@ -107,5 +136,7 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
             assert len(lines) == 1
             record = json.loads(lines[0])
             assert record["source_file"] == "paper.pdf"
+            assert record["chunk_id"] == 0
+            assert record["page_range"] == [1, 3]
             assert record["token_count"] == 50
             assert "neuroscience" in record["text"]

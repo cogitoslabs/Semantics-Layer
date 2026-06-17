@@ -33,6 +33,11 @@ def s1() -> None:
     except ValueError:
         workers_per_gpu = 1
 
+    try:
+        chunk_size = int(os.getenv("CHUNK_SIZE", "10"))
+    except ValueError:
+        chunk_size = 10
+
     print("Initializing corpus building pipeline using Docling parser")
 
     try:
@@ -45,6 +50,7 @@ def s1() -> None:
             gdrive_folder_id=gdrive_folder_id,
             available_gpus=available_gpus,
             workers_per_gpu=workers_per_gpu,
+            chunk_size=chunk_size,
         )
     except Exception as e:
         print(f"Error executing corpus builder: {e}", file=sys.stderr)
@@ -96,6 +102,7 @@ if __name__ == "__main__":
         help="Pipeline step to execute: s1 (Corpus Construction), s2 (Domain Adaptive Pretraining)"
     )
     args = parser.parse_args()
+    print(f"Args step are : {args.step}")
     
     if args.step == "s1" or args.step == "all":
         s1()
