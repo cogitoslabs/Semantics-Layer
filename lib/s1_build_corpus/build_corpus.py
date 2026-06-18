@@ -11,8 +11,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .storage import get_adapter, StorageAdapter
+from lib.utils import setup_logger, get_logger, get_adapter, StorageAdapter
 from .worker import worker_init, worker_task, ExtractionResult
+
+logger = get_logger("s1.build")
 
 
 class CorpusBuilder:
@@ -40,10 +42,9 @@ class CorpusBuilder:
 
 
     def build(self) -> None:
-        print(
+        logger.info(
             f"[START] {self.name} pipeline | "
-            f"{self.total_workers} workers | GPUs {self.gpu_ids}",
-            flush=True
+            f"{self.total_workers} workers | GPUs {self.gpu_ids}"
         )
 
         gpu_queue = self._make_gpu_queue()
@@ -72,10 +73,9 @@ class CorpusBuilder:
                     total_tokens += chunk.token_count
                     out.write(json.dumps(self._record(doc_index, filename, chunk)) + "\n")
                     out.flush()
-                    print(
+                    logger.info(
                         f"[OK] #{doc_index} {filename} (chunk {chunk.chunk_index}) | "
-                        f"{chunk.token_count:,} tokens | cumulative {total_tokens:,}",
-                        flush=True
+                        f"{chunk.token_count:,} tokens | cumulative {total_tokens:,}"
                     )
                     doc_index += 1
 
@@ -114,16 +114,15 @@ class CorpusBuilder:
                                 if not already_sent:
                                     chunk_queue.put((result.filename, chunk))
                         else:
-                            print(f"[SKIP] {result.filename} | {result.status}", flush=True)
+                            logger.warning(f"[SKIP] {result.filename} | {result.status}")
             finally:
                 # Signal the writer thread to stop and wait for it
                 chunk_queue.put(None)
                 writer_thread.join()
 
-        print(
-            f"\n[DONE] {self.name} - {doc_index} chunks from documents, "
-            f"{total_tokens:,} tokens -> {self.output_path}",
-            flush=True
+        logger.info(
+            f"[DONE] {self.name} - {doc_index} chunks from documents, "
+            f"{total_tokens:,} tokens -> {self.output_path}"
         )
 
     # ------------------------------------------------------------------
@@ -172,6 +171,8 @@ def run_corpus_builder(
     Unified entry point for the corpus builder pipeline.
     Instantiates the storage adapter and corpus builder, then executes the pipeline.
     """
+    setup_logger("s1.build", log_dir=Path("logs"), log_filename="corpus_building.log")
+    
     storage = get_adapter(
         target=storage_target,
         local_directory_path=local_directory_path,

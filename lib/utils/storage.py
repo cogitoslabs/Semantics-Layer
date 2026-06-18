@@ -105,4 +105,3 @@ def get_adapter(
     raise ValueError(
         f"Unknown STORAGE_TARGET '{target}'. Expected: local, s3, or gdrive."
     )
-

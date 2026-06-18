@@ -4,7 +4,7 @@ import tempfile
 from unittest.mock import MagicMock, patch
 import pytest
 
-from lib.s1_build_corpus.storage import StorageAdapter
+from lib.utils import StorageAdapter
 from lib.s1_build_corpus.worker import worker_init, worker_task, ExtractionResult
 from lib.s1_build_corpus.build_corpus import CorpusBuilder, run_corpus_builder
 

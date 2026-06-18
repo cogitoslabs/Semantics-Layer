@@ -1,11 +1,10 @@
-import os
 import sys
-from dotenv import load_dotenv
 import time
 import argparse
 
 from lib.s1_build_corpus import run_corpus_builder
 from lib.s2_dapt import run_dapt_pipeline
+from lib.utils import PipelineConfig
 
 
 def calculate_time(func):
@@ -18,39 +17,20 @@ def calculate_time(func):
     return wrapper
 
 @calculate_time
-def s1() -> None:
-    # Load environment variables from .env file
-    output_path = os.getenv("OUTPUT_PATH", "./domain_dapt_corpus.jsonl")
-    storage_target = os.getenv("STORAGE_TARGET", "local")
-    local_directory_path = os.getenv("LOCAL_DIRECTORY_PATH", ".")
-    aws_bucket_name = os.getenv("AWS_BUCKET_NAME")
-    aws_prefix = os.getenv("AWS_PREFIX", "")
-    gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
-    available_gpus = os.getenv("AVAILABLE_GPUS", "0")
-    
-    try:
-        workers_per_gpu = int(os.getenv("WORKERS_PER_GPU", "1"))
-    except ValueError:
-        workers_per_gpu = 1
-
-    try:
-        chunk_size = int(os.getenv("CHUNK_SIZE", "10"))
-    except ValueError:
-        chunk_size = 10
-
+def s1(cfg: PipelineConfig) -> None:
     print("Initializing corpus building pipeline using Docling parser")
 
     try:
         run_corpus_builder(
-            output_path=output_path,
-            storage_target=storage_target,
-            local_directory_path=local_directory_path,
-            aws_bucket_name=aws_bucket_name,
-            aws_prefix=aws_prefix,
-            gdrive_folder_id=gdrive_folder_id,
-            available_gpus=available_gpus,
-            workers_per_gpu=workers_per_gpu,
-            chunk_size=chunk_size,
+            output_path=str(cfg.build.output_path),
+            storage_target=cfg.build.storage_target,
+            local_directory_path=cfg.build.local_directory_path,
+            aws_bucket_name=cfg.build.aws_bucket_name,
+            aws_prefix=cfg.build.aws_prefix,
+            gdrive_folder_id=cfg.build.gdrive_folder_id,
+            available_gpus=cfg.build.available_gpus,
+            workers_per_gpu=cfg.build.workers_per_gpu,
+            chunk_size=cfg.build.chunk_size,
         )
     except Exception as e:
         print(f"Error executing corpus builder: {e}", file=sys.stderr)
@@ -58,33 +38,18 @@ def s1() -> None:
 
 
 @calculate_time
-def s2() -> None:
-    # Load DAPT environment variables from .env file
-    model_name = os.getenv("BASE_MODEL_NAME", "Qwen/Qwen2.5-0.5B")
-    corpus_path = os.getenv("OUTPUT_PATH", "./data/dapt/domain_dapt_corpus.jsonl")
-    probe_qa_path = os.getenv("PROBE_QA_PATH", "./data/dapt/probe_qa.jsonl")
-    output_dir = os.getenv("DAPT_OUTPUT_DIR", "./models/dapt_model")
-    
-    try:
-        epochs = int(os.getenv("DAPT_EPOCHS", "3"))
-        lr = float(os.getenv("DAPT_LR", "5e-5"))
-        batch_size = int(os.getenv("DAPT_BATCH_SIZE", "2"))
-    except ValueError:
-        epochs = 3
-        lr = 5e-5
-        batch_size = 2
-
-    print(f"Initializing DAPT Continued Pretraining on model: {model_name}")
+def s2(cfg: PipelineConfig) -> None:
+    print(f"Initializing DAPT Continued Pretraining on model: {cfg.model.base_model_name}")
 
     try:
         run_dapt_pipeline(
-            model_name=model_name,
-            corpus_path=corpus_path,
-            probe_qa_path=probe_qa_path,
-            epochs=epochs,
-            lr=lr,
-            batch_size=batch_size,
-            output_dir=output_dir,
+            model_name=cfg.model.base_model_name,
+            corpus_path=str(cfg.build.output_path),
+            probe_qa_path=str(cfg.data.qa_probe_path),
+            epochs=cfg.corpus.max_corpus_passes,
+            lr=cfg.optimizer.learning_rate,
+            batch_size=cfg.optimizer.train_batch_size,
+            output_dir=str(cfg.storage.checkpoint_dir),
         )
     except Exception as e:
         print(f"Error executing DAPT pipeline: {e}", file=sys.stderr)
@@ -92,8 +57,6 @@ def s2() -> None:
 
 
 if __name__ == "__main__":
-    load_dotenv()
-    
     parser = argparse.ArgumentParser(description="Semantics Layer Pipeline")
     parser.add_argument(
         "--step",
@@ -104,9 +67,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(f"Args step are : {args.step}")
     
+    # Instantiate and validate configuration
+    cfg = PipelineConfig()
+    cfg.validate()
+    cfg.ensure_dirs()
+    
     if args.step == "s1" or args.step == "all":
-        s1()
+        s1(cfg)
     if args.step == "s2" or args.step == "all":
-        s2()
+        s2(cfg)
 
 

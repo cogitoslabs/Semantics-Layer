@@ -1,0 +1,7 @@
+2026-06-17T20:06:44 | INFO     | dapt.pipeline | Initialized Weights & Biases run: None
+2026-06-17T20:06:44 | INFO     | dapt.pipeline | Using device: cpu
+2026-06-17T20:06:44 | ERROR    | dapt.pipeline | Required evaluation files are missing:
+PPL corpus file not found: C:\Users\rajav\AppData\Local\Temp\tmp88l7n8u1\missing_ppl.txt
+Vocab cloze file not found: C:\Users\rajav\AppData\Local\Temp\tmp88l7n8u1\missing_vocab.json
+Anatomical prompts file not found: C:\Users\rajav\AppData\Local\Temp\tmp88l7n8u1\missing_prompts.json
+Anatomical references file not found: C:\Users\rajav\AppData\Local\Temp\tmp88l7n8u1\missing_references.json

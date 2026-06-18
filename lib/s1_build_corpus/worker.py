@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import tiktoken
+from lib.utils.logger import get_logger
+
+logger = get_logger("s1.worker")
 
 
 # Process-local state set during initialisation
@@ -86,7 +89,7 @@ def worker_init(
     _docling_converter = DocumentConverter(
         format_options={InputFormat.PDF: pdf_format_option}
     )
-    print(f"[WORKER INIT] Docling ready on {device} (GPU {gpu_id} requested)")
+    logger.info(f"[WORKER INIT] Docling ready on {device} (GPU {gpu_id} requested)")
 
 
 def worker_task(

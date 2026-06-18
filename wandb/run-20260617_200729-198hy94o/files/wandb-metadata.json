@@ -1,0 +1,15 @@
+{
+  "os": "Windows-11-10.0.26200-SP0",
+  "python": "CPython 3.12.13",
+  "startedAt": "2026-06-17T14:37:29.335108Z",
+  "program": "-m pytest.__main__",
+  "git": {
+    "remote": "https://github.com/cogitoslabs/Semantics-Layer.git",
+    "commit": "2217d5665ddd069f14d0f8aa3803fa902031a972"
+  },
+  "email": "raja.valiveti@cogitoslabs.com",
+  "root": "E:\\Projects\\CND\\Semantics",
+  "host": "Rando",
+  "executable": "E:\\Projects\\CND\\Semantics\\.venv\\Scripts\\python.exe",
+  "writerId": "6wrmvlpp6quihpzz4dd7q6541pqu1a6j"
+}

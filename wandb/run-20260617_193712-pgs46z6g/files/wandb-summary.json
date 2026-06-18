@@ -1,0 +1,1 @@
+{"eval/eval_count":1,"_step":0,"_timestamp":1.7817055179806259e+09,"_runtime":313,"eval/perplexity":14.102747749670206,"eval/retrieval_precision":0.5,"eval/tokens_processed":0,"eval/terminology_coverage":0,"eval/qa_accuracy":0.3333333333333333,"_wandb":{"runtime":313}}

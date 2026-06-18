@@ -1,10 +1,31 @@
 import json
 import math
 import os
-from typing import Any, Dict, List
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import random
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+import torch
+from torch.optim import AdamW
+from torch.utils.data import DataLoader, TensorDataset
+from transformers import AutoModelForCausalLM, AutoTokenizer, get_linear_schedule_with_warmup
+
+from lib.utils import DAPTConfig
+from lib.s2_dapt.evaluation.eval_runner import run_all_probes
+from lib.s2_dapt.evaluation.gate_logic import (
+    DAPTDecision,
+    check_convergence_gates,
+    handle_hard_cap,
+    log_gate_status,
+)
+from lib.utils.checkpoint import save_checkpoint, select_best_checkpoint
+from lib.utils.logger import setup_logger, get_logger, MetricsWriter
+
+logger = get_logger("dapt")
+
+
+# ── Backward-compatible helper functions ──────────────────────────────────────
 
 def load_jsonl(file_path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(file_path):
@@ -85,20 +106,17 @@ def evaluate_qa_accuracy(model: Any, tokenizer: Any, probe_questions: List[Dict[
     
     with torch.no_grad():
         for q in probe_questions:
-            # We construct the question prompt ending with colon (no trailing space)
             prompt = f"Question: {q['question']}\nAnswer:"
             inputs = tokenizer(prompt, return_tensors="pt")
             input_ids = inputs["input_ids"].to(model.device)
             attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids)).to(model.device)
             
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-            # Next token logits is the last position of the output sequence
             next_token_logits = outputs.logits[0, -1, :]
             next_token_probs = torch.softmax(next_token_logits, dim=-1)
             
             option_probs = {}
             for opt in options:
-                # Tokenize the option with a leading space (e.g., " A")
                 opt_token_ids = tokenizer.encode(" " + opt, add_special_tokens=False)
                 if len(opt_token_ids) > 0:
                     opt_token_id = opt_token_ids[-1]
@@ -121,7 +139,6 @@ def prepare_training_blocks(tokenizer: Any, train_docs: List[Dict[str, Any]], bl
     if eos_id is None or not isinstance(eos_id, int):
         eos_id = 0
         
-    # Prevent warning by temporarily increasing model_max_length during tokenization
     orig_max_len = getattr(tokenizer, "model_max_length", None)
     tokenizer.model_max_length = 100_000_000
 
@@ -146,102 +163,31 @@ def prepare_training_blocks(tokenizer: Any, train_docs: List[Dict[str, Any]], bl
         
     return tokenized_train_blocks
 
+# ── Model/Tokenizer loader ────────────────────────────────────────────────────
 
-def train_epoch(
-    model: Any,
-    tokenizer: Any,
-    optimizer: Any,
-    batches: List[List[List[int]]],
-    device: torch.device,
-    eos_id: int
-) -> float:
-    model.train()
-    epoch_loss = 0.0
-    num_batches = 0
-    
-    use_cuda = device.type == "cuda"
-    dtype = torch.bfloat16 if (use_cuda and torch.cuda.is_bf16_supported()) else torch.float16
-    
-    if use_cuda and dtype == torch.float16:
-        if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
-            scaler = torch.amp.GradScaler("cuda")
-        else:
-            scaler = torch.cuda.amp.GradScaler()
+def load_model_and_tokenizer(cfg: DAPTConfig, device: torch.device):
+    """Load model and tokenizer with GPU optimizations if applicable."""
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model.base_model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    if device.type == "cuda":
+        torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        attn_implementation = "sdpa"
     else:
-        scaler = None
+        torch_dtype = torch.float32
+        attn_implementation = "eager"
 
-    if use_cuda:
-        if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
-            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=dtype)
-        else:
-            autocast_ctx = torch.cuda.amp.autocast(dtype=dtype)
-    else:
-        # Dummy context manager for CPU
-        class DummyCtx:
-            def __enter__(self): pass
-            def __exit__(self, exc_type, exc_val, exc_tb): pass
-        autocast_ctx = DummyCtx()
-        
-    for batch in batches:
-        optimizer.zero_grad()
-        
-        max_batch_len = max(len(block) for block in batch)
-        
-        pad_id = tokenizer.pad_token_id
-        if pad_id is None or not isinstance(pad_id, int):
-            pad_id = eos_id
-            
-        input_ids_list = []
-        attention_mask_list = []
-        for block in batch:
-            pad_len = max_batch_len - len(block)
-            padded_block = block + [pad_id] * pad_len
-            input_ids_list.append(padded_block)
-            attention_mask_list.append([1] * len(block) + [0] * pad_len)
-            
-        input_ids = torch.tensor(input_ids_list, dtype=torch.long).to(device)
-        attention_mask = torch.tensor(attention_mask_list, dtype=torch.long).to(device)
-        
-        if input_ids.size(1) <= 1:
-            continue
-            
-        labels = input_ids.clone()
-        if attention_mask is not None:
-            labels[attention_mask == 0] = -100
-            
-        with autocast_ctx:
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            loss = outputs.loss
-
-        if scaler is not None:
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            
-        epoch_loss += loss.item()
-        num_batches += 1
-        
-    return epoch_loss / num_batches if num_batches > 0 else 0.0
+    model = AutoModelForCausalLM.from_pretrained(
+        cfg.model.base_model_name,
+        dtype=torch_dtype,
+        attn_implementation=attn_implementation
+    )
+    model.to(device)
+    return model, tokenizer
 
 
-def log_improvement_summary(
-    initial_ppl: float,
-    initial_qa_acc: float,
-    final_ppl: float,
-    final_qa_acc: float
-) -> None:
-    print("\n=== DAPT IMPROVEMENT SUMMARY ===")
-    ppl_diff = initial_ppl - final_ppl
-    qa_diff = final_qa_acc - initial_qa_acc
-    print(f"Perplexity: {initial_ppl:.4f} -> {final_ppl:.4f} (Change: {-ppl_diff/initial_ppl * 100:.2f}%)")
-    print(f"QA Accuracy: {initial_qa_acc:.2f}% -> {final_qa_acc:.2f}% (Change: {qa_diff:+.2f}%)")
-
+# ── Main pipeline entry point ─────────────────────────────────────────────────
 
 def run_dapt_pipeline(
     model_name: str,
@@ -252,88 +198,483 @@ def run_dapt_pipeline(
     batch_size: int = 2,
     output_dir: str = "./outputs/dapt_model"
 ) -> None:
-    print(f"Loading base model and tokenizer: {model_name}")
-    
-    # Load tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Enable mixed-precision loading and optimized attention on GPU
-    if device.type == "cuda":
-        torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-        attn_implementation = "sdpa"
-    else:
-        torch_dtype = torch.float32
-        attn_implementation = "eager"
+    # 1. Load config and override defaults with parameters
+    cfg = DAPTConfig()
+    if model_name:
+        cfg.model.base_model_name = model_name
+    if probe_qa_path:
+        cfg.data.qa_probe_path = Path(probe_qa_path)
+    if epochs:
+        cfg.corpus.max_corpus_passes = epochs
+    if lr:
+        cfg.optimizer.learning_rate = lr
+    if batch_size:
+        cfg.optimizer.train_batch_size = batch_size
+    if output_dir:
+        cfg.storage.checkpoint_dir = Path(output_dir)
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch_dtype,
-        attn_implementation=attn_implementation
+    # Validate config and build directories
+    cfg.validate()
+    cfg.ensure_dirs()
+
+    # Set up logger
+    setup_logger(
+        name="dapt",
+        log_dir=cfg.storage.log_dir,
+        level=cfg.misc.log_level,
     )
-    model.to(device)
-    print(f"Model loaded successfully on device: {device} (dtype: {torch_dtype}, attn: {attn_implementation})")
-    
-    # Load datasets
+    global logger
+    logger = get_logger("dapt.pipeline")
+
+    logger.info(cfg.summary())
+
+    # Set up Weights & Biases if enabled
+    if cfg.wandb.enabled:
+        try:
+            import wandb
+            # API Key Login
+            if cfg.wandb.api_key and cfg.wandb.api_key != "your_api_key_here":
+                wandb.login(key=cfg.wandb.api_key)
+            else:
+                os.environ.pop("WANDB_API_KEY", None)
+                logger.warning(
+                    "WANDB_ENABLED is True, but no valid WANDB_API_KEY was found. "
+                    "Setting W&B to offline mode to prevent interactive prompt blocking."
+                )
+                os.environ["WANDB_MODE"] = "offline"
+
+            wandb.init(
+                project=cfg.wandb.project,
+                entity=cfg.wandb.entity,
+                name=cfg.wandb.run_name,
+                config={
+                    "base_model": cfg.model.base_model_name,
+                    "dtype": cfg.model.model_dtype,
+                    "learning_rate": cfg.optimizer.learning_rate,
+                    "batch_size": cfg.optimizer.train_batch_size,
+                    "warmup_steps": cfg.optimizer.warmup_steps,
+                    "max_seq_len": cfg.model.max_seq_len,
+                    "total_corpus_tokens": cfg.corpus.total_corpus_tokens,
+                    "eval_interval_tokens": cfg.corpus.eval_interval_tokens,
+                    "qa_acc_threshold": cfg.gates.qa_acc_threshold,
+                    "ppl_improvement_threshold": cfg.gates.ppl_improvement_threshold,
+                }
+            )
+            logger.info(f"Initialized Weights & Biases run: {wandb.run.name if wandb.run else ''}")
+        except ImportError:
+            logger.warning("wandb is not installed. Disabling Weights & Biases logging.")
+            cfg.wandb.enabled = False
+
+    # Set seed
+    random.seed(cfg.misc.seed)
+    np.random.seed(cfg.misc.seed)
+    torch.manual_seed(cfg.misc.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(cfg.misc.seed)
+
+    # Device config
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+
+    # Load model & tokenizer
+    model, tokenizer = load_model_and_tokenizer(cfg, device)
+
+    # 2. Check that all required evaluation files exist
+    missing_files = []
+    for name, path in [
+        ("QA probe", cfg.data.qa_probe_path),
+        ("PPL corpus", cfg.data.ppl_corpus_path),
+        ("Vocab cloze", cfg.data.vocab_cloze_path),
+        ("Anatomical prompts", cfg.data.anatomical_prompts_path),
+        ("Anatomical references", cfg.data.anatomical_references_path),
+    ]:
+        if not path.exists():
+            missing_files.append(f"{name} file not found: {path}")
+
+    if missing_files:
+        error_msg = "Required evaluation files are missing:\n" + "\n".join(missing_files)
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+
+    # 3. Load pretraining corpus and split 80/20 into train/validation splits
+    logger.info(f"Loading pretraining corpus from {corpus_path}")
     corpus_docs = load_jsonl(corpus_path)
-    probe_questions = load_jsonl(probe_qa_path)
-    
     if not corpus_docs:
-        print(f"[Warning] Pretraining corpus at '{corpus_path}' is empty or not found.")
+        logger.warning(f"Pretraining corpus at '{corpus_path}' is empty or not found. Cannot proceed.")
         return
-    if not probe_questions:
-        print(f"[Warning] Probe QA dataset at '{probe_qa_path}' is empty or not found.")
-        
-    # Split corpus into Train (80%) and Validation (20%)
+
     val_size = max(2, int(len(corpus_docs) * 0.20))
+    # Make sure we don't try to split more than exists
+    if len(corpus_docs) <= val_size:
+        val_size = max(1, len(corpus_docs) // 2)
+
     train_docs = corpus_docs[:-val_size]
     val_docs = corpus_docs[-val_size:]
-    print(f"Corpus split: {len(train_docs)} training docs, {len(val_docs)} validation docs.")
-    
-    # Evaluate BEFORE CPT
-    print("\n=== EVALUATION BEFORE CPT ===")
-    initial_ppl = evaluate_perplexity(model, tokenizer, val_docs)
-    initial_qa_acc = evaluate_qa_accuracy(model, tokenizer, probe_questions)
-    print(f"Initial Perplexity: {initial_ppl:.4f}")
-    print(f"Initial QA Accuracy: {initial_qa_acc:.2f}%")
-    
-    # Prepare training chunks by tokenizing the entire text of each document without truncation
-    print("Tokenizing and chunking training documents...")
-    tokenized_train_blocks = prepare_training_blocks(tokenizer, train_docs)
-    print(f"Created {len(tokenized_train_blocks)} training blocks of size 512.")
-    
-    # Run CPT / DAPT Training
-    print("\n=== STARTING CONTINUED PRETRAINING (CPT/DAPT) ===")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    
-    # Batch inputs
-    batches = []
-    for i in range(0, len(tokenized_train_blocks), batch_size):
-        batches.append(tokenized_train_blocks[i : i + batch_size])
+    logger.info(f"Corpus split: {len(train_docs)} training docs, {len(val_docs)} validation docs.")
+
+    # Write validation texts to ppl_corpus_path for perplexity evaluation
+    val_text = "\n".join(doc.get("text", "") for doc in val_docs if doc.get("text", "").strip())
+    with open(cfg.data.ppl_corpus_path, "w", encoding="utf-8") as f:
+        f.write(val_text)
+    logger.info(f"Written validation split text to {cfg.data.ppl_corpus_path} for perplexity probe.")
+
+    # Tokenize and chunk training documents
+    logger.info("Tokenizing and chunking training documents...")
+    tokenized_train_blocks = prepare_training_blocks(tokenizer, train_docs, block_size=cfg.model.max_seq_len)
+    logger.info(f"Created {len(tokenized_train_blocks)} training blocks of size {cfg.model.max_seq_len}.")
+
+    if not tokenized_train_blocks:
+        logger.warning("No training blocks were created. Check the training documents.")
+        return
+
+    # Build Dataloader
+    input_ids_tensor = torch.tensor(tokenized_train_blocks, dtype=torch.long)
+    dataset = TensorDataset(input_ids_tensor)
+
+    def collate_fn(batch):
+        input_ids_list = [b[0] for b in batch]
+        max_len = max(len(ids) for ids in input_ids_list)
+        pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         
-    eos_id = tokenizer.eos_token_id
-    if eos_id is None or not isinstance(eos_id, int):
-        eos_id = 0
+        padded_ids = []
+        attention_mask = []
+        for ids in input_ids_list:
+            pad_len = max_len - len(ids)
+            padded_ids.append(torch.cat([ids, torch.full((pad_len,), pad_id, dtype=torch.long)]))
+            attention_mask.append(torch.cat([torch.ones(len(ids), dtype=torch.long), torch.zeros(pad_len, dtype=torch.long)]))
+            
+        padded_ids = torch.stack(padded_ids)
+        attention_mask = torch.stack(attention_mask)
         
-    for epoch in range(epochs):
-        avg_loss = train_epoch(model, tokenizer, optimizer, batches, device, eos_id)
-        print(f"Epoch {epoch+1}/{epochs} | Average Loss: {avg_loss:.4f}")
+        labels = padded_ids.clone()
+        labels[attention_mask == 0] = -100
         
-    # Save model and tokenizer
+        return {
+            "input_ids": padded_ids,
+            "attention_mask": attention_mask,
+            "labels": labels
+        }
+
+    train_dataloader = DataLoader(
+        dataset,
+        batch_size=cfg.optimizer.train_batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        pin_memory=(device.type == "cuda"),
+        num_workers=0,
+    )
+
+    # Build Optimizer & Scheduler
+    estimated_steps = len(train_dataloader) * cfg.corpus.max_corpus_passes
+    optimizer = AdamW(
+        model.parameters(),
+        lr=cfg.optimizer.learning_rate,
+        weight_decay=cfg.optimizer.weight_decay,
+    )
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=cfg.optimizer.warmup_steps,
+        num_training_steps=estimated_steps,
+    )
+
+    # Initialize State
+    state = {
+        "tokens_processed" : 0,
+        "last_eval_at"     : 0,
+        "eval_count"       : 0,
+        "perplexity_history" : [],
+        "qa_acc_history"     : [],
+        "term_cov_history"   : [],
+        "ret_prec_history"   : [],
+        "eval_history"       : [],
+        "convergence_met"  : False,
+        "last_checkpoint"  : None,
+        "steps_completed"  : 0,
+    }
+
+    metrics_writer = MetricsWriter(cfg.storage.metrics_log_file)
+    last_checkpoint_path: Optional[Path] = None
+
+    use_cuda = (device.type == "cuda")
+    scaler = None
+    if use_cuda:
+        torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        if torch_dtype == torch.float16:
+            if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+                scaler = torch.amp.GradScaler("cuda")
+            else:
+                scaler = torch.cuda.amp.GradScaler()
+        autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch_dtype) if hasattr(torch, "amp") else torch.cuda.amp.autocast(dtype=torch_dtype)
+    else:
+        class DummyCtx:
+            def __enter__(self): pass
+            def __exit__(self, exc_type, exc_val, exc_tb): pass
+        autocast_ctx = DummyCtx()
+
+    def count_tokens(b) -> int:
+        if "attention_mask" in b:
+            return int(b["attention_mask"].sum().item())
+        return int(b["input_ids"].numel())
+
+    # 4. Run baseline evaluation on the unmodified base model
+    logger.info("Running baseline evaluation on the base model...")
+    state["eval_count"] += 1
+    state["last_eval_at"] = 0
+    metrics = run_all_probes(
+        model=model,
+        tokenizer=tokenizer,
+        cfg=cfg,
+        state=state,
+        metrics_writer=metrics_writer,
+        device=str(device),
+    )
+    state["eval_history"].append(metrics)
+
+    # 5. Training loop
+    model.train()
+    logger.info("Starting pretraining loop...")
+    for epoch in range(cfg.corpus.max_corpus_passes):
+        logger.info(f"\n{'#'*60}\n  Corpus pass {epoch + 1}/{cfg.corpus.max_corpus_passes}\n{'#'*60}")
+
+        for batch in train_dataloader:
+            # Check hard cap
+            if state["tokens_processed"] >= cfg.corpus.hard_stop_tokens:
+                logger.warning("Hard cap token count reached inside epoch loop. Breaking.")
+                break
+
+            # Forward & Backward pass
+            input_ids = batch["input_ids"].to(device)
+            labels = batch["labels"].to(device)
+            attention_mask = batch.get("attention_mask", None)
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(device)
+
+            optimizer.zero_grad()
+            with autocast_ctx:
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                )
+                loss = outputs.loss
+
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optimizer.max_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optimizer.max_grad_norm)
+                optimizer.step()
+
+            scheduler.step()
+
+            # Increment steps completed
+            state["steps_completed"] = state.get("steps_completed", 0) + 1
+
+            # Log to WandB at step intervals
+            if cfg.wandb.enabled and state["steps_completed"] % cfg.wandb.log_interval_steps == 0:
+                try:
+                    import wandb
+                    current_lr = optimizer.param_groups[0]["lr"]
+                    wandb.log({
+                        "train/loss": float(loss.item()),
+                        "train/learning_rate": float(current_lr),
+                        "train/tokens_processed": int(state["tokens_processed"]),
+                        "train/step": int(state["steps_completed"]),
+                    })
+                except Exception as e:
+                    logger.warning(f"Error logging to wandb during training: {e}")
+
+            # Increment tokens processed
+            batch_tokens = count_tokens(batch)
+            state["tokens_processed"] += batch_tokens
+
+            # Check evaluation interval
+            tokens_since_eval = state["tokens_processed"] - state["last_eval_at"]
+            if tokens_since_eval < cfg.corpus.eval_interval_tokens:
+                continue
+
+            # Run evaluation
+            state["eval_count"] += 1
+            state["last_eval_at"] = state["tokens_processed"]
+
+            # Save checkpoint
+            last_checkpoint_path = save_checkpoint(
+                model=model,
+                optimizer=optimizer,
+                state=state,
+                checkpoint_dir=cfg.storage.checkpoint_dir,
+                keep_last=cfg.storage.checkpoint_keep_last,
+            )
+            state["last_checkpoint"] = str(last_checkpoint_path)
+
+            # Evaluate probes
+            metrics = run_all_probes(
+                model=model,
+                tokenizer=tokenizer,
+                cfg=cfg,
+                state=state,
+                metrics_writer=metrics_writer,
+                device=str(device),
+            )
+            state["eval_history"].append(metrics)
+
+            model.train()
+
+            # Check convergence gates
+            decision, gate_details = check_convergence_gates(
+                state=state,
+                qa_acc_threshold          = cfg.gates.qa_acc_threshold,
+                ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
+                ppl_plateau_window        = cfg.gates.ppl_plateau_window,
+                term_cov_threshold        = cfg.gates.term_cov_threshold,
+                ret_prec_threshold        = cfg.gates.ret_prec_threshold,
+                hard_stop_tokens          = cfg.corpus.hard_stop_tokens,
+                total_corpus_tokens       = cfg.corpus.total_corpus_tokens,
+            )
+
+            log_gate_status(
+                state=state,
+                gate_details=gate_details,
+                decision=decision,
+                qa_threshold   = cfg.gates.qa_acc_threshold,
+                ppl_threshold  = cfg.gates.ppl_improvement_threshold,
+                ppl_window     = cfg.gates.ppl_plateau_window,
+                term_threshold = cfg.gates.term_cov_threshold,
+                ret_threshold  = cfg.gates.ret_prec_threshold,
+                total_corpus_tokens = cfg.corpus.total_corpus_tokens,
+            )
+
+            if cfg.wandb.enabled:
+                try:
+                    import wandb
+                    wandb.log({
+                        "gate/qa_gate": int(gate_details["qa_gate_passed"]),
+                        "gate/ppl_gate": int(gate_details["ppl_gate_passed"]),
+                        "gate/secondary_gate": int(gate_details["secondary_gate_passed"]),
+                        "gate/decision": decision.name,
+                    })
+                except Exception as e:
+                    logger.warning(f"Error logging gate status to wandb: {e}")
+
+            if decision == DAPTDecision.CONVERGED:
+                logger.info("✅  DAPT CONVERGED. Selecting best checkpoint for Phase 0.5 hand-off.")
+                state["convergence_met"] = True
+                best_ckpt = select_best_checkpoint(
+                    eval_history              = state["eval_history"],
+                    checkpoint_dir            = cfg.storage.checkpoint_dir,
+                    ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
+                    manifest_path             = cfg.storage.best_checkpoint_manifest,
+                )
+                
+                os.makedirs(output_dir, exist_ok=True)
+                model.save_pretrained(output_dir)
+                tokenizer.save_pretrained(output_dir)
+                logger.info(f"Converged model saved to: {output_dir}")
+                if cfg.wandb.enabled:
+                    try:
+                        import wandb
+                        wandb.finish()
+                    except Exception:
+                        pass
+                return
+
+            elif decision == DAPTDecision.HARD_CAP:
+                _, risk_report = handle_hard_cap(
+                    state=state,
+                    gate_details=gate_details,
+                    last_checkpoint_path  = last_checkpoint_path,
+                    risk_report_path      = cfg.storage.risk_report_path,
+                    qa_acc_threshold      = cfg.gates.qa_acc_threshold,
+                    qa_low_threshold      = cfg.gates.qa_low_threshold,
+                    ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
+                    term_cov_threshold        = cfg.gates.term_cov_threshold,
+                    ret_prec_threshold        = cfg.gates.ret_prec_threshold,
+                    total_corpus_tokens   = cfg.corpus.total_corpus_tokens,
+                )
+                
+                os.makedirs(output_dir, exist_ok=True)
+                model.save_pretrained(output_dir)
+                tokenizer.save_pretrained(output_dir)
+                logger.warning(f"Model saved to output_dir after hard cap: {output_dir}. Non-convergence risk report generated.")
+                if cfg.wandb.enabled:
+                    try:
+                        import wandb
+                        wandb.finish()
+                    except Exception:
+                        pass
+                return
+
+        # End of epoch
+        logger.info(f"Completed corpus pass {epoch + 1}. Total tokens: {state['tokens_processed']/1e9:.2f}B")
+
+    # 5. Final check if not converged by end of passes
+    logger.warning("Training loop exhausted without a convergence decision. Running final gate check.")
+    if state["tokens_processed"] > state["last_eval_at"]:
+        state["eval_count"] += 1
+        state["last_eval_at"] = state["tokens_processed"]
+        last_checkpoint_path = save_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            state=state,
+            checkpoint_dir=cfg.storage.checkpoint_dir,
+            keep_last=cfg.storage.checkpoint_keep_last,
+        )
+        state["last_checkpoint"] = str(last_checkpoint_path)
+        metrics = run_all_probes(
+            model=model,
+            tokenizer=tokenizer,
+            cfg=cfg,
+            state=state,
+            metrics_writer=metrics_writer,
+            device=str(device),
+        )
+        state["eval_history"].append(metrics)
+
+    decision, gate_details = check_convergence_gates(
+        state=state,
+        qa_acc_threshold          = cfg.gates.qa_acc_threshold,
+        ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
+        ppl_plateau_window        = cfg.gates.ppl_plateau_window,
+        term_cov_threshold        = cfg.gates.term_cov_threshold,
+        ret_prec_threshold        = cfg.gates.ret_prec_threshold,
+        hard_stop_tokens          = cfg.corpus.hard_stop_tokens,
+        total_corpus_tokens       = cfg.corpus.total_corpus_tokens,
+    )
+
     os.makedirs(output_dir, exist_ok=True)
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
-    print(f"Trained model saved to: {output_dir}")
-    
-    # Evaluate AFTER CPT
-    print("\n=== EVALUATION AFTER CPT ===")
-    final_ppl = evaluate_perplexity(model, tokenizer, val_docs)
-    final_qa_acc = evaluate_qa_accuracy(model, tokenizer, probe_questions)
-    print(f"Final Perplexity: {final_ppl:.4f}")
-    print(f"Final QA Accuracy: {final_qa_acc:.2f}%")
-    
-    # Comparison Summary
-    log_improvement_summary(initial_ppl, initial_qa_acc, final_ppl, final_qa_acc)
+
+    if decision == DAPTDecision.CONVERGED:
+        best_ckpt = select_best_checkpoint(
+            eval_history              = state["eval_history"],
+            checkpoint_dir            = cfg.storage.checkpoint_dir,
+            ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
+            manifest_path             = cfg.storage.best_checkpoint_manifest,
+        )
+        logger.info(f"DAPT training finished. Selected best checkpoint: {best_ckpt}")
+    else:
+        _, risk_report = handle_hard_cap(
+            state=state,
+            gate_details=gate_details,
+            last_checkpoint_path  = last_checkpoint_path,
+            risk_report_path      = cfg.storage.risk_report_path,
+            qa_acc_threshold      = cfg.gates.qa_acc_threshold,
+            qa_low_threshold      = cfg.gates.qa_low_threshold,
+            ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
+            term_cov_threshold        = cfg.gates.term_cov_threshold,
+            ret_prec_threshold        = cfg.gates.ret_prec_threshold,
+            total_corpus_tokens   = cfg.corpus.total_corpus_tokens,
+        )
+        logger.warning("DAPT completed without convergence. Non-convergence risk report generated.")
+
+    if cfg.wandb.enabled:
+        try:
+            import wandb
+            wandb.finish()
+        except Exception:
+            pass

@@ -1,0 +1,257 @@
+[
+  {
+    "prompt": "Third , HM had suffered severe damage to the ___ , and so the research identified this area as of crucial importance in long-term memory .",
+    "target_term": "hippocampus",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "Patients with damage to the ___ have impaired recollection but intact familiarity , w hereas those with damage to the perirhinal system have impaired familiarity but intact recollection .",
+    "target_term": "hippocampus",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "Recollection is associated with more activation in the ___ than the perirhinal cortex , w hereas the opposite is the case for familiarity (Diana et al .",
+    "target_term": "hippocampus",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "Individuals exposed to threat-related information typically show activation of the ___ (part of the limbic system; Sander , 2009) .",
+    "target_term": "amygdala",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "This led many researchers to conclude the ___ is central to a fear system .",
+    "target_term": "amygdala",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "Other research has shown the processing of most emotions is associated with ___ activation (Lindquist et al .",
+    "target_term": "amygdala",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "In contrast , information -integration performance early on is associated with activation in the putamen (part of the ___ \u2013 see Glossary) , w hich is involved in procedural memory .",
+    "target_term": "striatum",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "It is probably relevant that there was less activation of the ___ (a brain area strongly associated with implicit learning) in older adults .",
+    "target_term": "striatum",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "In contrast , the ___ has been linked to implicit learning .",
+    "target_term": "striatum",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "Across more than 3 , 000 studies , brain areas such as the dorsolateral ___ cortex and anterior cingulate cortex were activated in 20% of them in spite of the huge diversity of tasks involved .",
+    "target_term": "prefrontal",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "75 in medial ___ cortex (BA9/10) and +0 .",
+    "target_term": "prefrontal",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": ", dorsolateral ___ cortex , anterior cingulate cortex and anterior insula) were activated in 20% of the studies .",
+    "target_term": "prefrontal",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "- Control depends on a visual representation located in the superior parietal lobe combined with motor processes in the ___ (see Figure 4 .",
+    "target_term": "cerebellum",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "Control involved an independent brain network including the superior parietal lobe , the ___ and the supramarginale gyrus (see Figure 4 .",
+    "target_term": "cerebellum",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "The brain areas involved included the inferior parietal lobule , the posterior inferior frontal gyrus , the ventral premotor cortex , the dorsal premotor cortex , the superior parietal lobule , the middle temporal gyrus and the ___ .",
+    "target_term": "cerebellum",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "It transmits information from the retina to V1 and then V2 (both discussed shortly) via the lateral geniculate nuclei of the ___ .",
+    "target_term": "thalamus",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "After the optic chiasma , the optic tract proceeds to the lateral geniculate nucleus (LGN) , w hich is part of the ___ .",
+    "target_term": "thalamus",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "Crick discussed parts of the brain, such as the ___, that seem to be involved in the attentional mechanisms that underlie visual awareness.",
+    "target_term": "thalamus",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "First , the cerebral ___ is divided into four main divisions or lobes (see Figure 1 .",
+    "target_term": "cortex",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "The main gyri (or ridges; gyrus is the singular) within the cerebral ___ are shown in Figure 1 .",
+    "target_term": "cortex",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "3  The four lobes , or divisions , of the cerebral ___ in the left hemisphere .",
+    "target_term": "cortex",
+    "category": "anatomy"
+  },
+  {
+    "prompt": "First , there are brain -imaging techniques of which functional magnetic resonance imaging (___) (discussed later) is probably the best known .",
+    "target_term": "fMRI",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "- Functional magnetic resonance imaging (___): This technique involves imaging blood oxygenation using an MRI machine (described later) .",
+    "target_term": "fMRI",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Event -related ___ is generally very informative and has become markedly more popular recently .",
+    "target_term": "fMRI",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "It has often been argued that TMS or rTMS causes a very brief \" ___ \" , a lesion being a structural alteration caused by brain damage .",
+    "target_term": "lesion",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "It is often claimed that it creates a short - lived \u201c ___ \u201d .",
+    "target_term": "lesion",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "As mentioned earlier , they often create a \" temporary ___ \" so the role of any given brain area in task performance can be assessed .",
+    "target_term": "lesion",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Both caffeine and alcohol also increase activity of the chemical ___, which produces feelings of pleasure.",
+    "target_term": "dopamine",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Adenosine, glutamate, and ___ are all neurotransmitters, molecules that enable one neuron to influence another.",
+    "target_term": "dopamine",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "They are generally treated with Ritalin, which stimulates areas of the brain involved in filtering information by increasing the activity of neurotransmitters such as ___.",
+    "target_term": "dopamine",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Particularly impressive is the coverage of neuroscience and ___ along with excellent sections on computational models of cognition .",
+    "target_term": "neuropsychology",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "(Albert Einstein)  ## Contents  Preface Visual tour (how to use this book) 1 Approaches to human cognition Introduction Cognitive psychology Cognitive ___ Cognitive neuroscience: the brain in action Computational cognitive science Comparisons of major approaches Outline of this book Chapter summary Further reading PART I Visual perception and attention 2 Basic processes in visual perception Introduction Vision and the brain Two visual systems: perception and action Colour vision Depth perception Perception without awareness Chapter summary Further reading 3 Object and face recognition Introduction Pattern recognition Perceptual organisation Approaches to object recognition Face recognition Visual imagery Chapter summary Further reading 4 Perception , motion and action Introduction Direct perception Visually guided action Planning\u2013control model Perception of human motion Change blindness Chapter summary Further reading 5 Attention and performance Introduction Focused auditory attention Focused visual attention Disorders of visual attention Visual search Cross -modal effects Divided attention: dual -task performance Automatic processing Chapter summary Further reading PART II Memory 6 Learning , memory and forgetting Introduction Architecture of memory Working memory Working memory capacity Levels of processing Learning through retrieval Implicit learning Forgetting from long-term memory Chapter summary Further reading 7 Long-term memory systems Introduction Declarative memory Episodic memory Semantic memory Non -declarative memory Beyond declarative and non-declarative memory Chapter summary Further reading 8 Everyday memory Introduction Autobiographical memory: introduction Memories across the lifetime Theoretical approaches to autobiographical memory Eyewitness testimony Enhancing eyewitness memory Prospective memory Theoretical perspectives on prospective memory Chapter summary Further reading PART III Language 9 Reading and speech perception Introduction Reading: introduction Word recognition Reading aloud Reading: eye-movement research Speech perception: introduction Listening to speech Context effects Theories of speech perception Cognitive neuropsychology Chapter summary Further reading 10 Language comprehension Introduction Parsing: overview Models of parsing Pragmatics Individual differences: working memory capacity Discourse processing: inferences Discourse comprehension: theoretical approaches Chapter summary Further reading 11 Language production Introduction Speech planning Speech errors Theories of speech production Cognitive neuropsychology: speech production Speech as communication Writing: the main processes Spelling Chapter summary Further reading PART IV Thinking and reasoning 12 Problem solving and expertise Introduction Problem solving: introduction Gestalt approach: insight and role of experience Problem -solving strategies Analogical problem solving Expertise Chess -playing expertise Medical expertise Brain plasticity Deliberate practice Chapter summary Further reading 13 Judgement and decision making Introduction Judgement research Judgement theories Decision making under risk Decision making: emotional and social factors Complex decision making Chapter summary Further reading 14 Reasoning and hypothesis testing Introduction Hypothesis testing Deductive reasoning Theories of deductive reasoning Brain systems in reasoning Informal reasoning Are humans rational?",
+    "target_term": "neuropsychology",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "For example , cognitive ___ is an important and influential approach that involves focusing on the effects of brain damage as a way of understanding cognition in healthy individuals .",
+    "target_term": "neuropsychology",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "The seventh edition has been thoroughly updated throughout , and includes:  - extended coverage of cognitive ___ - additional content on computational cognitive science - new and updated case studies demonstrating real life applications of cognitive psychology - a fully updated companion website .",
+    "target_term": "neuroscience",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Note , however , that the term \" cognitive ___ \" is increasingly used to describe this approach .",
+    "target_term": "neuroscience",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "This interest is reflected in the substantial upsurge of scientific research within cognitive psychology and cognitive ___ .",
+    "target_term": "neuroscience",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "With a strong focus on considering human ___ in context , the book has been designed to help students develop a thorough understanding of the fundamentals of cognitive psychology , providing them with detailed knowledge of the very latest advances in the field .",
+    "target_term": "cognition",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "He is the best -selling author of a number of textbooks including Fundamentals of ___ (2006) , Memory (with Alan Baddeley and Michael Anderson , 2014) and Fundamentals of Psychology (2009) .",
+    "target_term": "cognition",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Chapter summary Further reading PART V Broadening horizons 15 ___ and emotion Introduction Appraisal theories Emotion regulation Affect and cognition: attention and memory Affect and cognition: judgement and decision making Anxiety , depression and cognitive biases Cognitive bias modification Chapter summary Further reading 16 Consciousness Introduction Functions of consciousness Assessing consciousness and conscious experience Global workspace theoretical approach Is consciousness unitary?",
+    "target_term": "cognition",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "These processes include attention , ___ , learning , memory , language , problem solving , reasoning and thinking .",
+    "target_term": "perception",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Researchers have shown great ingenuity in designing experiments to reveal the processes involved in attention , ___ , learning , memory , reasoning and so on .",
+    "target_term": "perception",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Findings such as these have exciting implications for  understanding the brain  \u2019  s precise role in visual ___  .",
+    "target_term": "perception",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "For example , someone taking their first driving lesson finds it almost impossible to change gear , steer accurately and pay ___ to other road users at the same time .",
+    "target_term": "attention",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "In fact , the leading cognitive neuropsychologist Max Coltheart (see photo) and many other cognitive neuropsychologists pay little ___ to the brain itself .",
+    "target_term": "attention",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "For example , Corbetta and Shulman (2002; see Chapter 5) used findings from cognitive neuroscience to identify two ___ networks , one concerned with goal-directed attention and the other with stimulusdriven attention .",
+    "target_term": "attention",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "(2000) studied three such tasks: the ___ task; the anti-saccade task; and the stopsignal task .",
+    "target_term": "Stroop",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "On the ___ task , participants name the colour in which colour words are presented (e .",
+    "target_term": "Stroop",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "For example , it is used on the ___ task , w hich involves naming the colours in which words are printed .",
+    "target_term": "Stroop",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "One key assumption is ___ , meaning the cognitive system consists of numerous modules or processors operating fairly independently or separately of each other .",
+    "target_term": "modularity",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "<!-- image -->  Is the ___ assumption correct?",
+    "target_term": "modularity",
+    "category": "cognitive_psychology"
+  },
+  {
+    "prompt": "Probably the majority position is that the human cognitive system exhibits some ___ , but cognitive neuropsychologists often exaggerate its importance .",
+    "target_term": "modularity",
+    "category": "cognitive_psychology"
+  }
+]

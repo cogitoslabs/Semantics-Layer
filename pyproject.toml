@@ -12,6 +12,9 @@ dependencies = [
     "hf-xet>=1.5.1",
     "pydrive2>=1.21.3",
     "tiktoken>=0.13.0",
+    "bert-score>=0.3.13",
+    "wandb>=0.16.0",
+    "tqdm>=4.66.0",
 ]
 
 [dependency-groups]

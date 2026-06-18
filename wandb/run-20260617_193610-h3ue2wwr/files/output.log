@@ -1,0 +1,26 @@
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Initialized Weights & Biases run: None
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Using device: cpu
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Loading pretraining corpus from C:\Users\rajav\AppData\Local\Temp\tmpqzpnjcxb\corpus.jsonl
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Corpus split: 1 training docs, 2 validation docs.
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Written validation split text to C:\Users\rajav\AppData\Local\Temp\tmpqzpnjcxb\ppl_held_out.txt for perplexity probe.
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Tokenizing and chunking training documents...
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Created 1 training blocks of size 512.
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Running baseline evaluation on the base model...
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Starting pretraining loop...
+2026-06-17T19:36:12 | INFO     | dapt.pipeline |
+############################################################
+  Corpus pass 1/1
+############################################################
+2026-06-17T19:36:12 | INFO     | dapt.pipeline | Completed corpus pass 1. Total tokens: 0.00B
+2026-06-17T19:36:12 | WARNING  | dapt.pipeline | Training loop exhausted without a convergence decision. Running final gate check.
+2026-06-17T19:36:12 | WARNING  | dapt.checkpoint | Failed to save torch checkpoint (this is expected if using mocks in unit tests): Can't pickle <class 'unittest.mock.MagicMock'>: it's not the same object as unittest.mock.MagicMock
+2026-06-17T19:36:12 | WARNING  | dapt.gates |
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  HARD CAP reached — gates NOT fully met
+  Failed gates: ['QA accuracy 0.0000 < threshold 0.55 (gap: 0.5500)', 'PPL plateau not reached (insufficient eval history)', 'Neither secondary gate met: term_cov=0.0000 (need >=0.8), ret_prec=0.0000 (need >=0.6)']
+  Recommended action (Priority 1): CORPUS_QUALITY_AUDIT
+  Rationale: QA accuracy is very low (0.0000 < 0.4) after 0.0 corpus passes. This strongly suggests insufficient high-signal content. Actions: (a) remove low-density boilerplate from corpus, (b) add more review articles and textbooks, (c) prefer PubMed Central full-text over abstracts-only.
+  Risk report: logs\dapt_hard_cap_risk_report.json
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+2026-06-17T19:36:12 | WARNING  | dapt.pipeline | DAPT completed without convergence. Non-convergence risk report generated.
