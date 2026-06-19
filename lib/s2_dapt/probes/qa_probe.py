@@ -92,32 +92,26 @@ def eval_qa_accuracy(
     """
     Run Probe A and return accuracy plus per-cluster diagnostics.
     """
-    # Dynamically load from either JSON or JSONL format
+    # Load from JSONL format with early-stopping for max_samples
     qa_items: List[Dict[str, Any]] = []
     try:
         with open(qa_probe_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                qa_items = data
-            elif isinstance(data, dict):
-                qa_items = [data]
-    except (json.JSONDecodeError, TypeError, ValueError):
-        # Fallback to JSONL
-        qa_items = []
-        with open(qa_probe_path, "r", encoding="utf-8") as f:
             for line in f:
-                if line.strip():
-                    try:
-                        qa_items.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    qa_items.append(json.loads(line_str))
+                    if max_samples is not None and len(qa_items) >= max_samples:
+                        break
+                except json.JSONDecodeError:
+                    pass
+    except FileNotFoundError:
+        logger.error(f"QA probe file not found at {qa_probe_path}")
 
     if not qa_items:
         logger.warning(f"No QA probe questions found at {qa_probe_path}")
         return {"accuracy": 0.0, "correct": 0, "total": 0, "per_cluster_accuracy": {}}
-
-    if max_samples is not None:
-        qa_items = qa_items[:max_samples]
 
     model.eval()
     correct = 0
