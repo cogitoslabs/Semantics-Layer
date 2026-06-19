@@ -58,10 +58,23 @@ def load_ppl_corpus(
     """
     logger.info(f"Loading PPL corpus from: {ppl_corpus_path} (max {max_tokens/1e6:.1f}M tokens)")
 
-    with open(ppl_corpus_path, "r", encoding="utf-8") as f:
-        text = f.read()
+    token_ids = []
+    # Temporarily set model_max_length to prevent warnings on large lines/documents
+    orig_max_len = getattr(tokenizer, "model_max_length", None)
+    tokenizer.model_max_length = 100_000_000
 
-    token_ids = tokenizer.encode(text, add_special_tokens=False)
+    try:
+        with open(ppl_corpus_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                tokens = tokenizer.encode(line, add_special_tokens=False)
+                token_ids.extend(tokens)
+                if len(token_ids) >= max_tokens:
+                    break
+    finally:
+        if orig_max_len is not None:
+            tokenizer.model_max_length = orig_max_len
 
     if len(token_ids) > max_tokens:
         logger.info(

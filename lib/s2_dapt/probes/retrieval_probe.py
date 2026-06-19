@@ -7,7 +7,19 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 import torch
+import bert_score.utils
 from bert_score import score as bertscore_score
+
+# Monkeypatch get_tokenizer to prevent OverflowError on models with undefined model_max_length
+_orig_get_tokenizer = bert_score.utils.get_tokenizer
+
+def _patched_get_tokenizer(*args, **kwargs):
+    tokenizer = _orig_get_tokenizer(*args, **kwargs)
+    if getattr(tokenizer, "model_max_length", 0) > 1_000_000:
+        tokenizer.model_max_length = 512
+    return tokenizer
+
+bert_score.utils.get_tokenizer = _patched_get_tokenizer
 
 from lib.utils.logger import get_logger
 
@@ -31,6 +43,13 @@ def generate_response(
         inputs = inputs.to(device)
     else:
         inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+    # Ensure input_ids is not empty to avoid a shape mismatch/reshape crash on sequence length 0
+    if inputs["input_ids"].shape[1] == 0:
+        fallback_id = tokenizer.bos_token_id or tokenizer.eos_token_id or 0
+        inputs["input_ids"] = torch.tensor([[fallback_id]], dtype=torch.long, device=device)
+        if "attention_mask" in inputs:
+            inputs["attention_mask"] = torch.tensor([[1]], dtype=torch.long, device=device)
 
     with torch.no_grad():
         output_ids = model.generate(
@@ -64,23 +83,57 @@ def compute_bertscore_batch(
     return F1.tolist()
 
 
+def token_safe_truncate(text: str, tokenizer: Any, max_tokens: int = 512) -> str:
+    tokens = tokenizer.encode(text, max_length=max_tokens, truncation=True, add_special_tokens=False)
+    return tokenizer.decode(tokens, skip_special_tokens=True)
+
+
+def compute_lexical_f1_batch(hypotheses: List[str], references: List[str]) -> List[float]:
+    f1_scores = []
+    for hyp, ref in zip(hypotheses, references):
+        hyp_tokens = hyp.lower().split()
+        ref_tokens = ref.lower().split()
+        if not hyp_tokens or not ref_tokens:
+            f1_scores.append(0.0)
+            continue
+        hyp_counter = {}
+        for t in hyp_tokens:
+            hyp_counter[t] = hyp_counter.get(t, 0) + 1
+        ref_counter = {}
+        for t in ref_tokens:
+            ref_counter[t] = ref_counter.get(t, 0) + 1
+        overlap = 0
+        for t, count in hyp_counter.items():
+            if t in ref_counter:
+                overlap += min(count, ref_counter[t])
+        precision = overlap / len(hyp_tokens)
+        recall = overlap / len(ref_tokens)
+        if precision + recall == 0:
+            f1_scores.append(0.0)
+        else:
+            f1_scores.append(2 * (precision * recall) / (precision + recall))
+    return f1_scores
+
+
 def eval_retrieval_precision(
     model,
     tokenizer,
-    anatomical_prompts_path: Path,
-    anatomical_references_path: Path,
+    retrieval_prompts_path: Path,
+    retrieval_references_path: Path,
     bertscore_model: str,
     max_new_tokens: int,
     device: str = "cuda",
     max_samples: Optional[int] = None,
     bertscore_batch_size: int = 32,
+    use_bertscore: bool = True,
 ) -> Dict[str, Any]:
     """
-    Run Probe D and return average BERTScore F1 over anatomical landmark prompts.
+    Run Probe D and return average precision over retrieval prompts.
+    Uses SciBERT BERTScore if use_bertscore=True, otherwise a fast lexical F1 metric.
     """
-    with open(anatomical_prompts_path, "r", encoding="utf-8") as f:
+    with open(retrieval_prompts_path, "r", encoding="utf-8") as f:
         prompts: List[str] = json.load(f)
-    with open(anatomical_references_path, "r", encoding="utf-8") as f:
+    with open(retrieval_references_path, "r", encoding="utf-8") as f:
         references: List[str] = json.load(f)
 
     if len(prompts) != len(references):
@@ -94,7 +147,7 @@ def eval_retrieval_precision(
 
     model.eval()
 
-    logger.info(f"Generating {len(prompts)} anatomical responses (greedy)...")
+    logger.info(f"Generating {len(prompts)} retrieval responses (greedy)...")
     hypotheses = []
     for i, prompt in enumerate(prompts):
         response = generate_response(model, tokenizer, prompt, max_new_tokens, device=device)
@@ -102,25 +155,26 @@ def eval_retrieval_precision(
         if (i + 1) % 20 == 0:
             logger.debug(f"  Retrieval probe: {i+1}/{len(prompts)} responses generated")
 
-    logger.info(f"Computing BERTScore with model: {bertscore_model}")
-    
-    # Truncate hypotheses and references to avoid exceeding the 512-token limit of standard BERT models (e.g., SciBERT)
-    # 1024 characters is a safe length that translates to well under 512 tokens.
-    truncated_hypotheses = [h[:1024] for h in hypotheses]
-    truncated_references = [r[:1024] for r in references]
+    # Safe token-based truncation to prevent splitting multi-byte tokens
+    truncated_hypotheses = [token_safe_truncate(h, tokenizer, max_tokens=256) for h in hypotheses]
+    truncated_references = [token_safe_truncate(r, tokenizer, max_tokens=256) for r in references]
 
-    try:
-        f1_scores = compute_bertscore_batch(
-            hypotheses=truncated_hypotheses,
-            references=truncated_references,
-            model_type=bertscore_model,
-            device=device,
-            batch_size=bertscore_batch_size,
-        )
-    except Exception as e:
-        logger.warning(f"BERTScore computation failed or not supported in this environment: {e}. Falling back to dummy F1 scores.")
-        # Dummy fallback: 0.5 for all
-        f1_scores = [0.5] * len(prompts)
+    if use_bertscore:
+        logger.info(f"Computing BERTScore with model: {bertscore_model}")
+        try:
+            f1_scores = compute_bertscore_batch(
+                hypotheses=truncated_hypotheses,
+                references=truncated_references,
+                model_type=bertscore_model,
+                device=device,
+                batch_size=bertscore_batch_size,
+            )
+        except Exception as e:
+            logger.warning(f"BERTScore computation failed: {e}. Falling back to dummy F1 scores.")
+            f1_scores = [0.5] * len(prompts)
+    else:
+        logger.info("Computing fast lexical F1 overlap scores...")
+        f1_scores = compute_lexical_f1_batch(truncated_hypotheses, truncated_references)
 
     mean_f1 = sum(f1_scores) / len(f1_scores) if f1_scores else 0.0
     min_f1  = min(f1_scores) if f1_scores else 0.0

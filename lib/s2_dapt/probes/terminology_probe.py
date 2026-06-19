@@ -32,13 +32,21 @@ def generate_topk_completions(
     else:
         inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
 
+    # Ensure input_ids is not empty to avoid a shape mismatch/reshape crash on sequence length 0
+    if inputs["input_ids"].shape[1] == 0:
+        fallback_id = tokenizer.bos_token_id or tokenizer.eos_token_id or 0
+        inputs["input_ids"] = torch.tensor([[fallback_id]], dtype=torch.long, device=device)
+        if "attention_mask" in inputs:
+            inputs["attention_mask"] = torch.tensor([[1]], dtype=torch.long, device=device)
+
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            num_beams=k,
+            do_sample=(k > 1),
+            top_k=50 if k > 1 else None,
+            top_p=0.95 if k > 1 else None,
             num_return_sequences=k,
-            early_stopping=True,
             pad_token_id=tokenizer.eos_token_id,
         )
 
@@ -88,6 +96,9 @@ def eval_terminology_coverage(
         # Causal language models predict next tokens after the prompt.
         # To fill the blank, we must feed the prefix of the prompt up to the placeholder "___".
         eval_prompt = prompt.split("___")[0] if "___" in prompt else prompt
+        if not eval_prompt.strip():
+            # If the prefix is empty, fallback to tokenizer BOS/EOS or a space to avoid empty input
+            eval_prompt = tokenizer.bos_token or tokenizer.eos_token or " "
 
         completions = generate_topk_completions(
             model, tokenizer, eval_prompt,

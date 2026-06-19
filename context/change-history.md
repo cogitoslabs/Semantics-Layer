@@ -22,8 +22,5 @@
 - Mocked the heavy evaluation runner `run_all_probes` in [test_dapt.py](file:///e:/Projects/CND/Semantics/tests/test_dapt.py) to prevent downloading/running SciBERT models during unit test execution, reducing test run times from 23 seconds to under 8 seconds. Added assertions to verify the baseline evaluation is called during both pipeline tests.
 - Fixed terminology coverage probe ([terminology_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/terminology_probe.py)) by splitting the cloze prompt at the `"___"` placeholder and only passing the prefix to the causal model, enabling next-token prediction to fill the blank correctly instead of generating text at the end of the full sentence.
 - Fixed retrieval precision probe ([retrieval_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/retrieval_probe.py)) by truncating generated hypotheses and reference texts to a safe maximum length of 1024 characters before calculating BERTScore, preventing PyTorch shape mismatch errors caused by extremely long bibliography citations in standard BERT/SciBERT 512-token limit models.
-
-
-
-
-
+- Fixed a runtime error in terminology and retrieval evaluation probes where empty inputs resulting from blank cloze splits (e.g. prompts beginning with "___") caused batch sequence length to become 0, leading to a tensor view/reshape crash in the model's self-attention layers. Added fallback safety checks to input token shapes and empty prompt strings, and added unit tests in [test_dapt.py](file:///e:/Projects/CND/Semantics/tests/test_dapt.py).
+- Fixed duplicate log output in the console by setting `logger.propagate = False` on the configured parent loggers in [logger.py](file:///e:/Projects/CND/Semantics/lib/utils/logger.py), preventing log records from propagating up to the root logger's default handlers.

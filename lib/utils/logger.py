@@ -36,6 +36,7 @@ def setup_logger(
 
     logger = logging.getLogger(name)
     logger.setLevel(numeric_level)
+    logger.propagate = False
 
     # Avoid duplicate handlers on re-import
     if logger.handlers:

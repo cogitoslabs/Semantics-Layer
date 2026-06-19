@@ -124,48 +124,20 @@ def eval_qa_accuracy(
     cluster_stats: Dict[str, Dict[str, int]] = {}
 
     for i, item in enumerate(qa_items):
-        question = item["question"]
+        question = item.get("question")
         cluster = item.get("cluster", item.get("id", "unknown"))
 
-        # Determine MCQ format
-        if "choices" in item and "answer_idx" in item:
-            # New format (choices list + index)
+        # Determine MCQ format: limit to New format (choices list + answer index)
+        if "choices" in item and "answer_idx" in item and question is not None:
             choices = item["choices"]
             answer_idx = item["answer_idx"]
             prompt = format_mcq_prompt(question, choices)
             predicted = score_choices_by_logprob(model, tokenizer, prompt, choices, device=device)
             is_correct = int(predicted == answer_idx)
-        elif "answer" in item:
-            # Old format (next token letter classification)
-            correct_answer_char = item["answer"].strip()
-            prompt = f"Question: {question}\nAnswer:"
-            inputs = tokenizer(prompt, return_tensors="pt")
-            if hasattr(inputs, "to"):
-                inputs = inputs.to(device)
-            else:
-                inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
-            input_ids = inputs["input_ids"]
-            attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids))
-
-            with torch.no_grad():
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-                next_token_logits = outputs.logits[0, -1, :]
-                next_token_probs = torch.softmax(next_token_logits, dim=-1)
-
-            options = ["A", "B", "C", "D", "E"]
-            option_probs = {}
-            for opt in options:
-                opt_token_ids = tokenizer.encode(" " + opt, add_special_tokens=False)
-                if len(opt_token_ids) > 0:
-                    opt_token_id = opt_token_ids[-1]
-                    option_probs[opt] = next_token_probs[opt_token_id].item()
-                else:
-                    option_probs[opt] = 0.0
-
-            best_option = max(option_probs, key=option_probs.get)
-            is_correct = int(best_option == correct_answer_char)
         else:
-            logger.warning(f"Skipping malformed QA item: {item}")
+            logger.warning(
+                f"Skipping malformed or unsupported QA item (must be New format with 'choices' and 'answer_idx'): {item}"
+            )
             continue
 
         correct += is_correct

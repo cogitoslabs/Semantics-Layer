@@ -1,22 +1,21 @@
 {
   "dapt_outcome": "HARD_CAP_NOT_CONVERGED",
-  "last_checkpoint": "C:\\Users\\rajav\\AppData\\Local\\Temp\\tmpw0r6bm2w\\out_model\\dapt_eval_0002.pt",
-  "tokens_processed": 2,
-  "corpus_passes": 1e-06,
+  "last_checkpoint": "C:\\Users\\rajav\\AppData\\Local\\Temp\\tmp77ryb0wb\\out_model\\dapt_eval_0002.pt",
+  "tokens_processed": 512,
+  "corpus_passes": 0.000256,
   "final_metrics": {
-    "qa_accuracy": 0.0,
-    "perplexity": null,
+    "qa_accuracy": 1.0,
+    "perplexity": Infinity,
     "term_coverage": 0.0,
     "retrieval_precision": 0.0
   },
   "failed_gates": [
-    "QA accuracy 0.0000 < threshold 0.55 (gap: 0.5500)",
     "PPL plateau not reached (insufficient eval history)",
     "Neither secondary gate met: term_cov=0.0000 (need >=0.8), ret_prec=0.0000 (need >=0.6)"
   ],
   "remediation": {
-    "priority": 1,
-    "action": "CORPUS_QUALITY_AUDIT",
-    "rationale": "QA accuracy is very low (0.0000 < 0.4) after 0.0 corpus passes. This strongly suggests insufficient high-signal content. Actions: (a) remove low-density boilerplate from corpus, (b) add more review articles and textbooks, (c) prefer PubMed Central full-text over abstracts-only."
+    "priority": 3,
+    "action": "PROCEED_WITH_RISK_FLAG",
+    "rationale": "QA accuracy is near threshold but perplexity plateau or secondary gates may not be fully cleared. Downstream phases may compensate. Action: proceed but document all metric gaps in the risk report and monitor Phase 1+ validation metrics closely."
   }
 }

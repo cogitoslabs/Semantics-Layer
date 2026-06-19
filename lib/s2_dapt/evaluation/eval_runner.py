@@ -28,21 +28,21 @@ def run_all_probes(
     state: Dict[str, Any],
     metrics_writer: MetricsWriter,
     device: str = "cuda",
+    run_slow_probes: bool = True,
+    use_bertscore: bool = True,
 ) -> Dict[str, Any]:
     """
-    Run all four probes in sequence, update state, write metrics to JSONL.
+    Run probes in sequence (all four or just the fast ones), update state, write metrics to JSONL.
 
     Returns the full metrics dict for this evaluation checkpoint.
-
-    Order: PPL first (cheapest, most stable), then QA, then terminology,
-    then retrieval (most expensive due to BERTScore).
     """
     eval_start = time.time()
     logger.info(
         f"\n{'='*62}\n"
         f"  Starting Eval #{state['eval_count']} | "
         f"Tokens: {state['tokens_processed']/1e3:.1f}K | "
-        f"Pass: {state['tokens_processed']/cfg.corpus.total_corpus_tokens:.3f}x\n"
+        f"Pass: {state['tokens_processed']/cfg.corpus.total_corpus_tokens:.3f}x | "
+        f"Slow probes={run_slow_probes} (SciBERT={use_bertscore})\n"
         f"{'='*62}"
     )
 
@@ -72,31 +72,47 @@ def run_all_probes(
     qa_elapsed = time.time() - t0
 
     # ── Probe C: Terminology Coverage ─────────────────────────────────────────
-    logger.info("  Running Probe 3: Terminology Coverage...")
-    t0 = time.time()
-    term_result = eval_terminology_coverage(
-        model=model,
-        tokenizer=tokenizer,
-        vocab_cloze_path=cfg.data.vocab_cloze_path,
-        top_k=cfg.probes.term_cov_top_k,
-        max_new_tokens=cfg.probes.term_cov_max_new_tokens,
-        device=device,
-    )
-    term_elapsed = time.time() - t0
+    if run_slow_probes:
+        logger.info("  Running Probe 3: Terminology Coverage...")
+        t0 = time.time()
+        term_result = eval_terminology_coverage(
+            model=model,
+            tokenizer=tokenizer,
+            vocab_cloze_path=cfg.data.vocab_cloze_path,
+            top_k=cfg.probes.term_cov_top_k,
+            max_new_tokens=cfg.probes.term_cov_max_new_tokens,
+            device=device,
+        )
+        term_elapsed = time.time() - t0
+    else:
+        logger.info("  Skipping Probe 3: Terminology Coverage (carrying forward last metric)...")
+        term_result = {
+            "coverage": state["term_cov_history"][-1] if state.get("term_cov_history") else 0.0,
+            "per_category": state["eval_history"][-1].get("per_category_term", {}) if state.get("eval_history") else {},
+        }
+        term_elapsed = 0.0
 
     # ── Probe D: Retrieval Precision ──────────────────────────────────────────
-    logger.info("  Running Probe 4: Retrieval Precision (BERTScore)...")
-    t0 = time.time()
-    ret_result = eval_retrieval_precision(
-        model=model,
-        tokenizer=tokenizer,
-        anatomical_prompts_path=cfg.data.anatomical_prompts_path,
-        anatomical_references_path=cfg.data.anatomical_references_path,
-        bertscore_model=cfg.probes.bertscore_model,
-        max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
-        device=device,
-    )
-    ret_elapsed = time.time() - t0
+    if run_slow_probes:
+        logger.info("  Running Probe 4: Retrieval Precision...")
+        t0 = time.time()
+        ret_result = eval_retrieval_precision(
+            model=model,
+            tokenizer=tokenizer,
+            retrieval_prompts_path=cfg.data.retrieval_prompts_path,
+            retrieval_references_path=cfg.data.retrieval_references_path,
+            bertscore_model=cfg.probes.bertscore_model,
+            max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
+            device=device,
+            use_bertscore=use_bertscore,
+        )
+        ret_elapsed = time.time() - t0
+    else:
+        logger.info("  Skipping Probe 4: Retrieval Precision (carrying forward last metric)...")
+        ret_result = {
+            "precision": state["ret_prec_history"][-1] if state.get("ret_prec_history") else 0.0,
+        }
+        ret_elapsed = 0.0
 
     total_elapsed = time.time() - eval_start
 
