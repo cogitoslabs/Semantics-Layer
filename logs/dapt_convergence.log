@@ -7912,3 +7912,241 @@ Retrieval references file not found: C:\Users\rajav\AppData\Local\Temp\tmp1ijf64
 2026-06-19T15:55:49 | INFO     | dapt.probe.retrieval | Generating 2 retrieval responses (greedy)...
 2026-06-19T15:55:49 | INFO     | dapt.probe.retrieval | Computing fast lexical F1 overlap scores...
 2026-06-19T15:55:49 | INFO     | dapt.probe.retrieval | Probe D — Retrieval Precision: 1.0000 (min=1.000, max=1.000, n=2, low-scoring=0)
+2026-06-19T16:10:47 | INFO     | dapt.pipeline | 
+============================================================
+  DAPT Step 0.3 Configuration
+============================================================
+  Model           : dummy-model
+  Corpus tokens   : 2000.0K
+  Max passes      : 1
+  Hard stop       : 2000.0K tokens
+  Eval interval   : 500K tokens
+  Slow eval int   : 500K tokens
+  QA gate         : >= 55%
+  PPL gate        : < 2.0% for 2 consecutive evals
+  Term cov gate   : >= 80%
+  Ret prec gate   : >= 60%
+  Checkpoint dir  : C:\Users\rajav\AppData\Local\Temp\tmp408tr6oj\out_model
+  Log dir         : logs
+============================================================
+
+2026-06-19T16:10:47 | INFO     | dapt.pipeline | Using device: cpu
+2026-06-19T16:10:53 | INFO     | dapt.training_helpers | Initialized Weights & Biases run: None
+2026-06-19T16:10:53 | INFO     | dapt.pipeline | Loading memory-mapped training tokens from C:\Users\rajav\AppData\Local\Temp\tmp408tr6oj\train_tokens.npy
+2026-06-19T16:10:53 | INFO     | dapt.pipeline | Loaded 1 training blocks of size 512.
+2026-06-19T16:10:53 | INFO     | dapt.training_helpers | Using Adafactor optimizer for CPU training.
+2026-06-19T16:10:53 | INFO     | dapt.pipeline | Running baseline evaluation on the base model...
+2026-06-19T16:10:53 | INFO     | dapt.pipeline | Starting pretraining loop...
+2026-06-19T16:10:53 | INFO     | dapt.pipeline | 
+############################################################
+  Corpus pass 1/1
+############################################################
+2026-06-19T16:10:53 | INFO     | dapt.pipeline | Completed corpus pass 1. Total tokens: 0.00B
+2026-06-19T16:10:53 | WARNING  | dapt.pipeline | Training loop exhausted without a convergence decision. Running final gate check.
+2026-06-19T16:10:53 | WARNING  | dapt.checkpoint | Failed to save torch checkpoint (this is expected if using mocks in unit tests): Can't pickle <class 'unittest.mock.MagicMock'>: it's not the same object as unittest.mock.MagicMock
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner | 
+==============================================================
+  Starting Eval #2 | Tokens: 0.5K | Pass: 0.000x | Slow probes=False (SciBERT=False)
+==============================================================
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Running Probe 1: Perplexity...
+2026-06-19T16:10:53 | INFO     | dapt.probe.perplexity | Loading PPL corpus from: C:\Users\rajav\AppData\Local\Temp\tmp408tr6oj\ppl_held_out.txt (max 10.0M tokens)
+2026-06-19T16:10:53 | INFO     | dapt.probe.perplexity | PPL corpus ready: 0.00M tokens, 0 sequences
+2026-06-19T16:10:53 | INFO     | dapt.probe.perplexity | Probe B — Perplexity: inf  (NLL: inf nats, tokens: 0)
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Running Probe 2: QA Accuracy...
+2026-06-19T16:10:53 | INFO     | dapt.probe.qa | Probe A — QA Accuracy: 1.0000 (1/1)
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Skipping Probe 3: Terminology Coverage (carrying forward last metric)...
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Skipping Probe 4: Retrieval Precision (carrying forward last metric)...
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner | 
+  Eval #2 summary:
+    PPL=inf  QA=1.000  Term=0.000  Ret=0.000  (elapsed: 0s)
+
+2026-06-19T16:10:53 | INFO     | dapt.gates | 
+--------------------------------------------------------------
+  Gate Status @ Eval #  2
+--------------------------------------------------------------
+  Tokens processed : 0.00B
+  Corpus pass      : 0.000x
+
+  PRIMARY GATES (both required for convergence)
+  [PASS] QA Accuracy   : 1.0000  (threshold >= 0.55)
+  [FAIL] PPL Plateau   : improvements = [n/a (need >=2 evals)]  (need <2.0% for 2 consecutive)
+  PPL history      : [inf]
+
+  SECONDARY GATES (at least one required)
+  [FAIL] Term Coverage : 0.0000  (threshold >= 0.8)
+  [FAIL] Ret Precision : 0.0000  (threshold >= 0.6)
+
+  DECISION -> CONTINUE
+--------------------------------------------------------------
+
+2026-06-19T16:10:53 | WARNING  | dapt.training_helpers | Error logging gate status to wandb: 'qa_gate_passed'
+2026-06-19T16:10:53 | INFO     | dapt.checkpoint | Best checkpoint selected: eval #1 (QA acc=50.0000) → C:\Users\rajav\AppData\Local\Temp\tmp408tr6oj\out_model\dapt_eval_0001.pt
+2026-06-19T16:10:53 | INFO     | dapt.training_helpers | Loading best checkpoint for final SciBERT evaluation: C:\Users\rajav\AppData\Local\Temp\tmp408tr6oj\out_model\dapt_eval_0001.pt
+2026-06-19T16:10:53 | INFO     | dapt.checkpoint | Loading checkpoint: C:\Users\rajav\AppData\Local\Temp\tmp408tr6oj\out_model\dapt_eval_0001.pt
+2026-06-19T16:10:53 | WARNING  | dapt.checkpoint | Failed to load checkpoint from C:\Users\rajav\AppData\Local\Temp\tmp408tr6oj\out_model\dapt_eval_0001.pt (expected if dummy mock file): [Errno 2] No such file or directory: 'C:\\Users\\rajav\\AppData\\Local\\Temp\\tmp408tr6oj\\out_model\\dapt_eval_0001.pt'
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner | 
+==============================================================
+  Starting Eval #3 | Tokens: 0.5K | Pass: 0.000x | Slow probes=True (SciBERT=True)
+==============================================================
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Running Probe 1: Perplexity...
+2026-06-19T16:10:53 | INFO     | dapt.probe.perplexity | Probe B — Perplexity: inf  (NLL: inf nats, tokens: 0)
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Running Probe 2: QA Accuracy...
+2026-06-19T16:10:53 | INFO     | dapt.probe.qa | Probe A — QA Accuracy: 1.0000 (1/1)
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Running Probe 3: Terminology Coverage...
+2026-06-19T16:10:53 | INFO     | dapt.probe.terminology | Probe C — Terminology Coverage: 0.0000 (0/1)
+  Per-category: {'dummy': 0.0}
+  Sample missed terms: ['dummy term']
+2026-06-19T16:10:53 | INFO     | dapt.eval_runner |   Running Probe 4: Retrieval Precision...
+2026-06-19T16:10:53 | INFO     | dapt.probe.retrieval | Generating 1 retrieval responses (greedy)...
+2026-06-19T16:10:53 | INFO     | dapt.probe.retrieval | Computing BERTScore with model: allenai/scibert_scivocab_uncased
+2026-06-19T16:10:54 | WARNING  | dapt.probe.retrieval | BERTScore computation failed: torch.cat(): expected a non-empty list of Tensors. Falling back to dummy F1 scores.
+2026-06-19T16:10:54 | INFO     | dapt.probe.retrieval | Probe D — Retrieval Precision: 0.5000 (min=0.500, max=0.500, n=1, low-scoring=0)
+2026-06-19T16:10:54 | INFO     | dapt.eval_runner | 
+  Eval #3 summary:
+    PPL=inf  QA=1.000  Term=0.000  Ret=0.500  (elapsed: 1s)
+
+2026-06-19T16:10:54 | WARNING  | dapt.gates | 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  HARD CAP reached — gates NOT fully met
+  Failed gates: ['PPL plateau not reached (insufficient eval history)', 'Neither secondary gate met: term_cov=0.0000 (need >=0.8), ret_prec=0.0000 (need >=0.6)']
+  Recommended action (Priority 3): PROCEED_WITH_RISK_FLAG
+  Rationale: QA accuracy is near threshold but perplexity plateau or secondary gates may not be fully cleared. Downstream phases may compensate. Action: proceed but document all metric gaps in the risk report and monitor Phase 1+ validation metrics closely.
+  Risk report: logs\dapt_hard_cap_risk_report.json
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+2026-06-19T16:10:54 | WARNING  | dapt.pipeline | DAPT completed without convergence. Non-convergence risk report generated.
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | 
+============================================================
+  DAPT Step 0.3 Configuration
+============================================================
+  Model           : dummy-model
+  Corpus tokens   : 2000.0K
+  Max passes      : 1
+  Hard stop       : 2000.0K tokens
+  Eval interval   : 500K tokens
+  Slow eval int   : 500K tokens
+  QA gate         : >= 55%
+  PPL gate        : < 2.0% for 2 consecutive evals
+  Term cov gate   : >= 80%
+  Ret prec gate   : >= 60%
+  Checkpoint dir  : C:\Users\rajav\AppData\Local\Temp\tmp1ekpjj5d\out_model
+  Log dir         : logs
+============================================================
+
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | Using device: cpu
+2026-06-19T16:10:57 | INFO     | dapt.training_helpers | Initialized Weights & Biases run: 
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | Loading memory-mapped training tokens from C:\Users\rajav\AppData\Local\Temp\tmp1ekpjj5d\train_tokens.npy
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | Loaded 1 training blocks of size 512.
+2026-06-19T16:10:57 | INFO     | dapt.training_helpers | Using Adafactor optimizer for CPU training.
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | Running baseline evaluation on the base model...
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | Starting pretraining loop...
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | 
+############################################################
+  Corpus pass 1/1
+############################################################
+2026-06-19T16:10:57 | INFO     | dapt.pipeline | Completed corpus pass 1. Total tokens: 0.00B
+2026-06-19T16:10:57 | WARNING  | dapt.pipeline | Training loop exhausted without a convergence decision. Running final gate check.
+2026-06-19T16:10:57 | WARNING  | dapt.checkpoint | Failed to save torch checkpoint (this is expected if using mocks in unit tests): Can't pickle <class 'unittest.mock.MagicMock'>: it's not the same object as unittest.mock.MagicMock
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner | 
+==============================================================
+  Starting Eval #2 | Tokens: 0.5K | Pass: 0.000x | Slow probes=False (SciBERT=False)
+==============================================================
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Running Probe 1: Perplexity...
+2026-06-19T16:10:57 | INFO     | dapt.probe.perplexity | Loading PPL corpus from: C:\Users\rajav\AppData\Local\Temp\tmp1ekpjj5d\ppl_held_out.txt (max 10.0M tokens)
+2026-06-19T16:10:57 | INFO     | dapt.probe.perplexity | PPL corpus ready: 0.00M tokens, 0 sequences
+2026-06-19T16:10:57 | INFO     | dapt.probe.perplexity | Probe B — Perplexity: inf  (NLL: inf nats, tokens: 0)
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Running Probe 2: QA Accuracy...
+2026-06-19T16:10:57 | INFO     | dapt.probe.qa | Probe A — QA Accuracy: 1.0000 (1/1)
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Skipping Probe 3: Terminology Coverage (carrying forward last metric)...
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Skipping Probe 4: Retrieval Precision (carrying forward last metric)...
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner | 
+  Eval #2 summary:
+    PPL=inf  QA=1.000  Term=0.000  Ret=0.000  (elapsed: 0s)
+
+2026-06-19T16:10:57 | INFO     | dapt.gates | 
+--------------------------------------------------------------
+  Gate Status @ Eval #  2
+--------------------------------------------------------------
+  Tokens processed : 0.00B
+  Corpus pass      : 0.000x
+
+  PRIMARY GATES (both required for convergence)
+  [PASS] QA Accuracy   : 1.0000  (threshold >= 0.55)
+  [FAIL] PPL Plateau   : improvements = [n/a (need >=2 evals)]  (need <2.0% for 2 consecutive)
+  PPL history      : [inf]
+
+  SECONDARY GATES (at least one required)
+  [FAIL] Term Coverage : 0.0000  (threshold >= 0.8)
+  [FAIL] Ret Precision : 0.0000  (threshold >= 0.6)
+
+  DECISION -> CONTINUE
+--------------------------------------------------------------
+
+2026-06-19T16:10:57 | WARNING  | dapt.training_helpers | Error logging gate status to wandb: 'qa_gate_passed'
+2026-06-19T16:10:57 | INFO     | dapt.checkpoint | Best checkpoint selected: eval #1 (QA acc=50.0000) → C:\Users\rajav\AppData\Local\Temp\tmp1ekpjj5d\out_model\dapt_eval_0001.pt
+2026-06-19T16:10:57 | INFO     | dapt.training_helpers | Loading best checkpoint for final SciBERT evaluation: C:\Users\rajav\AppData\Local\Temp\tmp1ekpjj5d\out_model\dapt_eval_0001.pt
+2026-06-19T16:10:57 | INFO     | dapt.checkpoint | Loading checkpoint: C:\Users\rajav\AppData\Local\Temp\tmp1ekpjj5d\out_model\dapt_eval_0001.pt
+2026-06-19T16:10:57 | WARNING  | dapt.checkpoint | Failed to load checkpoint from C:\Users\rajav\AppData\Local\Temp\tmp1ekpjj5d\out_model\dapt_eval_0001.pt (expected if dummy mock file): [Errno 2] No such file or directory: 'C:\\Users\\rajav\\AppData\\Local\\Temp\\tmp1ekpjj5d\\out_model\\dapt_eval_0001.pt'
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner | 
+==============================================================
+  Starting Eval #3 | Tokens: 0.5K | Pass: 0.000x | Slow probes=True (SciBERT=True)
+==============================================================
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Running Probe 1: Perplexity...
+2026-06-19T16:10:57 | INFO     | dapt.probe.perplexity | Probe B — Perplexity: inf  (NLL: inf nats, tokens: 0)
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Running Probe 2: QA Accuracy...
+2026-06-19T16:10:57 | INFO     | dapt.probe.qa | Probe A — QA Accuracy: 1.0000 (1/1)
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Running Probe 3: Terminology Coverage...
+2026-06-19T16:10:57 | INFO     | dapt.probe.terminology | Probe C — Terminology Coverage: 0.0000 (0/1)
+  Per-category: {'dummy': 0.0}
+  Sample missed terms: ['dummy term']
+2026-06-19T16:10:57 | INFO     | dapt.eval_runner |   Running Probe 4: Retrieval Precision...
+2026-06-19T16:10:57 | INFO     | dapt.probe.retrieval | Generating 1 retrieval responses (greedy)...
+2026-06-19T16:10:57 | INFO     | dapt.probe.retrieval | Computing BERTScore with model: allenai/scibert_scivocab_uncased
+2026-06-19T16:10:58 | WARNING  | dapt.probe.retrieval | BERTScore computation failed: torch.cat(): expected a non-empty list of Tensors. Falling back to dummy F1 scores.
+2026-06-19T16:10:58 | INFO     | dapt.probe.retrieval | Probe D — Retrieval Precision: 0.5000 (min=0.500, max=0.500, n=1, low-scoring=0)
+2026-06-19T16:10:58 | INFO     | dapt.eval_runner | 
+  Eval #3 summary:
+    PPL=inf  QA=1.000  Term=0.000  Ret=0.500  (elapsed: 1s)
+
+2026-06-19T16:10:58 | WARNING  | dapt.gates | 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  HARD CAP reached — gates NOT fully met
+  Failed gates: ['PPL plateau not reached (insufficient eval history)', 'Neither secondary gate met: term_cov=0.0000 (need >=0.8), ret_prec=0.0000 (need >=0.6)']
+  Recommended action (Priority 3): PROCEED_WITH_RISK_FLAG
+  Rationale: QA accuracy is near threshold but perplexity plateau or secondary gates may not be fully cleared. Downstream phases may compensate. Action: proceed but document all metric gaps in the risk report and monitor Phase 1+ validation metrics closely.
+  Risk report: logs\dapt_hard_cap_risk_report.json
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+2026-06-19T16:10:58 | WARNING  | dapt.pipeline | DAPT completed without convergence. Non-convergence risk report generated.
+2026-06-19T16:10:58 | INFO     | dapt.pipeline | 
+============================================================
+  DAPT Step 0.3 Configuration
+============================================================
+  Model           : dummy-model
+  Corpus tokens   : 2000.0K
+  Max passes      : 1
+  Hard stop       : 2000.0K tokens
+  Eval interval   : 500K tokens
+  Slow eval int   : 500K tokens
+  QA gate         : >= 55%
+  PPL gate        : < 2.0% for 2 consecutive evals
+  Term cov gate   : >= 80%
+  Ret prec gate   : >= 60%
+  Checkpoint dir  : C:\Users\rajav\AppData\Local\Temp\tmpdih0tu7t\out_model
+  Log dir         : logs
+============================================================
+
+2026-06-19T16:10:58 | INFO     | dapt.pipeline | Using device: cpu
+2026-06-19T16:11:00 | INFO     | dapt.training_helpers | Initialized Weights & Biases run: None
+2026-06-19T16:11:00 | ERROR    | dapt.training_helpers | Required evaluation files are missing:
+PPL corpus file not found: C:\Users\rajav\AppData\Local\Temp\tmpdih0tu7t\missing_ppl.txt
+Vocab cloze file not found: C:\Users\rajav\AppData\Local\Temp\tmpdih0tu7t\missing_vocab.json
+Retrieval prompts file not found: C:\Users\rajav\AppData\Local\Temp\tmpdih0tu7t\missing_prompts.json
+Retrieval references file not found: C:\Users\rajav\AppData\Local\Temp\tmpdih0tu7t\missing_references.json
+2026-06-19T16:11:00 | INFO     | dapt.probe.qa | Probe A — QA Accuracy: 1.0000 (1/1)
+2026-06-19T16:11:00 | INFO     | dapt.probe.terminology | Probe C — Terminology Coverage: 0.0000 (0/2)
+  Per-category: {'cat1': 0.0, 'cat2': 0.0}
+  Sample missed terms: ['Dopamine', 'blank']
+2026-06-19T16:11:00 | INFO     | dapt.probe.retrieval | Generating 2 retrieval responses (greedy)...
+2026-06-19T16:11:00 | INFO     | dapt.probe.retrieval | Computing fast lexical F1 overlap scores...
+2026-06-19T16:11:00 | INFO     | dapt.probe.retrieval | Probe D — Retrieval Precision: 1.0000 (min=1.000, max=1.000, n=2, low-scoring=0)

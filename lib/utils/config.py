@@ -120,7 +120,7 @@ class OptimizerConfig:
     weight_decay: float            = field(default_factory=lambda: _get("WEIGHT_DECAY", 0.01, float))
     warmup_steps: int              = field(default_factory=lambda: _get("WARMUP_STEPS", 1000, int))
     max_grad_norm: float           = field(default_factory=lambda: _get("MAX_GRAD_NORM", 1.0, float))
-    train_batch_size: int          = field(default_factory=lambda: _get("DAPT_BATCH_SIZE", 2, int))
+    train_batch_size: int          = field(default_factory=lambda: _get("TRAIN_BATCH_SIZE", 2, int))
     eval_batch_size: int           = field(default_factory=lambda: _get("EVAL_BATCH_SIZE", 4, int))
     gradient_accumulation_steps: int = field(default_factory=lambda: _get("GRADIENT_ACCUMULATION_STEPS", 1, int))
 
