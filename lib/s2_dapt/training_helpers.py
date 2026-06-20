@@ -63,13 +63,18 @@ def setup_training_environment(cfg: DAPTConfig, device: torch.device):
 def verify_eval_files(cfg: DAPTConfig) -> None:
     """Verify that all files needed for probe evaluation exist on disk."""
     missing_files = []
-    for name, path in [
-        ("QA probe", cfg.data.qa_probe_path),
-        ("PPL corpus", cfg.data.ppl_corpus_path),
-        ("Vocab cloze", cfg.data.vocab_cloze_path),
-        ("Retrieval prompts", cfg.data.retrieval_prompts_path),
-        ("Retrieval references", cfg.data.retrieval_references_path),
-    ]:
+    checks = []
+    if cfg.probes.run_qa:
+        checks.append(("QA probe", cfg.data.qa_probe_path))
+    if cfg.probes.run_perplexity:
+        checks.append(("PPL corpus", cfg.data.ppl_corpus_path))
+    if cfg.probes.run_terminology:
+        checks.append(("Vocab cloze", cfg.data.vocab_cloze_path))
+    if cfg.probes.run_retrieval:
+        checks.append(("Retrieval prompts", cfg.data.retrieval_prompts_path))
+        checks.append(("Retrieval references", cfg.data.retrieval_references_path))
+
+    for name, path in checks:
         if not path.exists():
             missing_files.append(f"{name} file not found: {path}")
 
@@ -175,6 +180,10 @@ def handle_evaluation_cycle(
         ret_prec_threshold        = cfg.gates.ret_prec_threshold,
         hard_stop_tokens          = cfg.corpus.hard_stop_tokens,
         total_corpus_tokens       = cfg.corpus.total_corpus_tokens,
+        run_qa                    = cfg.probes.run_qa,
+        run_perplexity            = cfg.probes.run_perplexity,
+        run_terminology           = cfg.probes.run_terminology,
+        run_retrieval             = cfg.probes.run_retrieval,
     )
 
     log_gate_status(
@@ -187,15 +196,19 @@ def handle_evaluation_cycle(
         term_threshold = cfg.gates.term_cov_threshold,
         ret_threshold  = cfg.gates.ret_prec_threshold,
         total_corpus_tokens = cfg.corpus.total_corpus_tokens,
+        run_qa                = cfg.probes.run_qa,
+        run_perplexity        = cfg.probes.run_perplexity,
+        run_terminology       = cfg.probes.run_terminology,
+        run_retrieval         = cfg.probes.run_retrieval,
     )
 
     if cfg.wandb.enabled:
         try:
             import wandb
             wandb.log({
-                "gate/qa_gate": int(gate_details["qa_gate_passed"]),
-                "gate/ppl_gate": int(gate_details["ppl_gate_passed"]),
-                "gate/secondary_gate": int(gate_details["secondary_gate_passed"]),
+                "gate/qa_gate": int(gate_details["qa_gate"]),
+                "gate/ppl_gate": int(gate_details["ppl_gate"]),
+                "gate/secondary_gate": int(gate_details["secondary_gate"]),
                 "gate/decision": decision.name,
             })
         except Exception as e:
@@ -210,6 +223,10 @@ def run_final_eval(model, tokenizer, cfg, state, metrics_writer, device):
         checkpoint_dir            = cfg.storage.checkpoint_dir,
         ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
         manifest_path             = cfg.storage.best_checkpoint_manifest,
+        run_qa                    = cfg.probes.run_qa,
+        run_perplexity            = cfg.probes.run_perplexity,
+        run_terminology           = cfg.probes.run_terminology,
+        run_retrieval             = cfg.probes.run_retrieval,
     )
     
     if best_ckpt:

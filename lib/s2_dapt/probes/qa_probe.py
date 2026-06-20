@@ -119,7 +119,7 @@ def eval_qa_accuracy(
 
     for i, item in enumerate(qa_items):
         question = item.get("question")
-        cluster = item.get("cluster", item.get("id", "unknown"))
+        cluster = item.get("cluster", "unknown")
 
         # Determine MCQ format: limit to New format (choices list + answer index)
         if "choices" in item and "answer_idx" in item and question is not None:

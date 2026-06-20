@@ -123,11 +123,21 @@ def format_gate_status(
     term_threshold: float,
     ret_threshold: float,
     decision: str,
+    run_qa: bool = True,
+    run_perplexity: bool = True,
+    run_terminology: bool = True,
+    run_retrieval: bool = True,
+    qa_history: list = None,
+    term_history: list = None,
+    ret_history: list = None,
 ) -> str:
     """Produce a human-readable gate status block for logging."""
-    tick = lambda b: "[PASS]" if b else "[FAIL]"
+    tick = lambda b, active=True: "[PASS]" if b else ("[SKIP]" if not active else "[FAIL]")
     ppl_str = ", ".join(f"{p:.2f}%" for p in ppl_improvements) if ppl_improvements else "n/a (need >=2 evals)"
     ppl_vals = ", ".join(f"{p:.3f}" for p in ppl_history)
+    qa_vals = ", ".join(f"{q:.4f}" for q in qa_history) if qa_history else "n/a"
+    term_vals = ", ".join(f"{t:.4f}" for t in term_history) if term_history else "n/a"
+    ret_vals = ", ".join(f"{r:.4f}" for r in ret_history) if ret_history else "n/a"
 
     return (
         f"\n{'-'*62}\n"
@@ -137,13 +147,16 @@ def format_gate_status(
         f"  Corpus pass      : {tokens_processed/total_corpus_tokens:.3f}x\n"
         f"\n"
         f"  PRIMARY GATES (both required for convergence)\n"
-        f"  {tick(qa_gate)} QA Accuracy   : {qa_acc:.4f}  (threshold >= {qa_threshold})\n"
-        f"  {tick(ppl_gate)} PPL Plateau   : improvements = [{ppl_str}]  (need <{ppl_threshold}% for {ppl_window} consecutive)\n"
+        f"  {tick(qa_gate, run_qa)} QA Accuracy   : {qa_acc:.4f}  (threshold >= {qa_threshold})\n"
+        f"  QA history       : [{qa_vals}]\n"
+        f"  {tick(ppl_gate, run_perplexity)} PPL Plateau   : improvements = [{ppl_str}]  (need <{ppl_threshold}% for {ppl_window} consecutive)\n"
         f"  PPL history      : [{ppl_vals}]\n"
         f"\n"
         f"  SECONDARY GATES (at least one required)\n"
-        f"  {tick(term_cov >= term_threshold)} Term Coverage : {term_cov:.4f}  (threshold >= {term_threshold})\n"
-        f"  {tick(ret_prec >= ret_threshold)} Ret Precision : {ret_prec:.4f}  (threshold >= {ret_threshold})\n"
+        f"  {tick(term_cov >= term_threshold, run_terminology)} Term Coverage : {term_cov:.4f}  (threshold >= {term_threshold})\n"
+        f"  Term history     : [{term_vals}]\n"
+        f"  {tick(ret_prec >= ret_threshold, run_retrieval)} Ret Precision : {ret_prec:.4f}  (threshold >= {ret_threshold})\n"
+        f"  Ret history      : [{ret_vals}]\n"
         f"\n"
         f"  DECISION -> {decision}\n"
         f"{'-'*62}\n"

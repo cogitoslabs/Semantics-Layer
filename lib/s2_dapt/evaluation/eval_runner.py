@@ -43,74 +43,109 @@ def run_all_probes(
         f"Tokens: {state['tokens_processed']/1e3:.1f}K | "
         f"Pass: {state['tokens_processed']/cfg.corpus.total_corpus_tokens:.3f}x | "
         f"Slow probes={run_slow_probes} (SciBERT={use_bertscore})\n"
+        f"  Active probes: PPL={cfg.probes.run_perplexity}, QA={cfg.probes.run_qa}, "
+        f"Term={cfg.probes.run_terminology}, Ret={cfg.probes.run_retrieval}\n"
         f"{'='*62}"
     )
 
     # ── Probe B: Perplexity (cheapest — run first) ────────────────────────────
-    logger.info("  Running Probe 1: Perplexity...")
-    t0 = time.time()
-    ppl_result = eval_perplexity(
-        model=model,
-        tokenizer=tokenizer,
-        ppl_corpus_path=cfg.data.ppl_corpus_path,
-        max_tokens=cfg.probes.perplexity_eval_tokens,
-        seq_len=cfg.model.max_seq_len,
-        batch_size=cfg.optimizer.eval_batch_size,
-        device=device,
-    )
-    ppl_elapsed = time.time() - t0
-
-    # ── Probe A: QA Accuracy ──────────────────────────────────────────────────
-    logger.info("  Running Probe 2: QA Accuracy...")
-    t0 = time.time()
-    qa_result = eval_qa_accuracy(
-        model=model,
-        tokenizer=tokenizer,
-        qa_probe_path=cfg.data.qa_probe_path,
-        device=device,
-    )
-    qa_elapsed = time.time() - t0
-
-    # ── Probe C: Terminology Coverage ─────────────────────────────────────────
-    if run_slow_probes:
-        logger.info("  Running Probe 3: Terminology Coverage...")
+    if cfg.probes.run_perplexity:
+        logger.info("  Running Probe 1: Perplexity...")
         t0 = time.time()
-        term_result = eval_terminology_coverage(
+        ppl_result = eval_perplexity(
             model=model,
             tokenizer=tokenizer,
-            vocab_cloze_path=cfg.data.vocab_cloze_path,
-            top_k=cfg.probes.term_cov_top_k,
-            max_new_tokens=cfg.probes.term_cov_max_new_tokens,
+            ppl_corpus_path=cfg.data.ppl_corpus_path,
+            max_tokens=cfg.probes.perplexity_eval_tokens,
+            seq_len=cfg.model.max_seq_len,
+            batch_size=cfg.optimizer.eval_batch_size,
             device=device,
         )
-        term_elapsed = time.time() - t0
+        ppl_elapsed = time.time() - t0
     else:
-        logger.info("  Skipping Probe 3: Terminology Coverage (carrying forward last metric)...")
+        logger.info("  Skipping Probe 1: Perplexity (disabled)...")
+        ppl_result = {
+            "perplexity": 0.0,
+            "avg_nll_nats": 0.0,
+        }
+        ppl_elapsed = 0.0
+
+    # ── Probe A: QA Accuracy ──────────────────────────────────────────────────
+    if cfg.probes.run_qa:
+        logger.info("  Running Probe 2: QA Accuracy...")
+        t0 = time.time()
+        qa_result = eval_qa_accuracy(
+            model=model,
+            tokenizer=tokenizer,
+            qa_probe_path=cfg.data.qa_probe_path,
+            device=device,
+        )
+        qa_elapsed = time.time() - t0
+    else:
+        logger.info("  Skipping Probe 2: QA Accuracy (disabled)...")
+        qa_result = {
+            "accuracy": 0.0,
+            "correct": 0,
+            "total": 0,
+            "per_cluster_accuracy": {},
+        }
+        qa_elapsed = 0.0
+
+    # ── Probe C: Terminology Coverage ─────────────────────────────────────────
+    if cfg.probes.run_terminology:
+        if run_slow_probes:
+            logger.info("  Running Probe 3: Terminology Coverage...")
+            t0 = time.time()
+            term_result = eval_terminology_coverage(
+                model=model,
+                tokenizer=tokenizer,
+                vocab_cloze_path=cfg.data.vocab_cloze_path,
+                top_k=cfg.probes.term_cov_top_k,
+                max_new_tokens=cfg.probes.term_cov_max_new_tokens,
+                device=device,
+            )
+            term_elapsed = time.time() - t0
+        else:
+            logger.info("  Skipping Probe 3: Terminology Coverage (carrying forward last metric)...")
+            term_result = {
+                "coverage": state["term_cov_history"][-1] if state.get("term_cov_history") else 0.0,
+                "per_category": state["eval_history"][-1].get("per_category_term", {}) if state.get("eval_history") else {},
+            }
+            term_elapsed = 0.0
+    else:
+        logger.info("  Skipping Probe 3: Terminology Coverage (disabled)...")
         term_result = {
-            "coverage": state["term_cov_history"][-1] if state.get("term_cov_history") else 0.0,
-            "per_category": state["eval_history"][-1].get("per_category_term", {}) if state.get("eval_history") else {},
+            "coverage": 0.0,
+            "per_category": {},
         }
         term_elapsed = 0.0
 
     # ── Probe D: Retrieval Precision ──────────────────────────────────────────
-    if run_slow_probes:
-        logger.info("  Running Probe 4: Retrieval Precision...")
-        t0 = time.time()
-        ret_result = eval_retrieval_precision(
-            model=model,
-            tokenizer=tokenizer,
-            retrieval_prompts_path=cfg.data.retrieval_prompts_path,
-            retrieval_references_path=cfg.data.retrieval_references_path,
-            bertscore_model=cfg.probes.bertscore_model,
-            max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
-            device=device,
-            use_bertscore=use_bertscore,
-        )
-        ret_elapsed = time.time() - t0
+    if cfg.probes.run_retrieval:
+        if run_slow_probes:
+            logger.info("  Running Probe 4: Retrieval Precision...")
+            t0 = time.time()
+            ret_result = eval_retrieval_precision(
+                model=model,
+                tokenizer=tokenizer,
+                retrieval_prompts_path=cfg.data.retrieval_prompts_path,
+                retrieval_references_path=cfg.data.retrieval_references_path,
+                bertscore_model=cfg.probes.bertscore_model,
+                max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
+                device=device,
+                use_bertscore=use_bertscore,
+            )
+            ret_elapsed = time.time() - t0
+        else:
+            logger.info("  Skipping Probe 4: Retrieval Precision (carrying forward last metric)...")
+            ret_result = {
+                "precision": state["ret_prec_history"][-1] if state.get("ret_prec_history") else 0.0,
+            }
+            ret_elapsed = 0.0
     else:
-        logger.info("  Skipping Probe 4: Retrieval Precision (carrying forward last metric)...")
+        logger.info("  Skipping Probe 4: Retrieval Precision (disabled)...")
         ret_result = {
-            "precision": state["ret_prec_history"][-1] if state.get("ret_prec_history") else 0.0,
+            "precision": 0.0,
         }
         ret_elapsed = 0.0
 
@@ -150,10 +185,14 @@ def run_all_probes(
     }
 
     # ── Update rolling state histories ────────────────────────────────────────
-    state["perplexity_history"].append(ppl_result["perplexity"])
-    state["qa_acc_history"].append(qa_result["accuracy"])
-    state["term_cov_history"].append(term_result["coverage"])
-    state["ret_prec_history"].append(ret_result["precision"])
+    if cfg.probes.run_perplexity:
+        state["perplexity_history"].append(ppl_result["perplexity"])
+    if cfg.probes.run_qa:
+        state["qa_acc_history"].append(qa_result["accuracy"])
+    if cfg.probes.run_terminology:
+        state["term_cov_history"].append(term_result["coverage"])
+    if cfg.probes.run_retrieval:
+        state["ret_prec_history"].append(ret_result["precision"])
 
     # ── Write to JSONL ────────────────────────────────────────────────────────
     metrics_writer.write(metrics)
@@ -162,14 +201,20 @@ def run_all_probes(
     if cfg.wandb.enabled:
         try:
             import wandb
-            wandb.log({
-                "eval/perplexity": float(ppl_result["perplexity"]),
-                "eval/qa_accuracy": float(qa_result["accuracy"]),
-                "eval/terminology_coverage": float(term_result["coverage"]),
-                "eval/retrieval_precision": float(ret_result["precision"]),
+            log_data = {}
+            if cfg.probes.run_perplexity:
+                log_data["eval/perplexity"] = float(ppl_result["perplexity"])
+            if cfg.probes.run_qa:
+                log_data["eval/qa_accuracy"] = float(qa_result["accuracy"])
+            if cfg.probes.run_terminology:
+                log_data["eval/terminology_coverage"] = float(term_result["coverage"])
+            if cfg.probes.run_retrieval:
+                log_data["eval/retrieval_precision"] = float(ret_result["precision"])
+            log_data.update({
                 "eval/eval_count": int(state["eval_count"]),
                 "eval/tokens_processed": int(state["tokens_processed"]),
             })
+            wandb.log(log_data)
         except Exception as e:
             logger.warning(f"Failed to log evaluation metrics to wandb: {e}")
 

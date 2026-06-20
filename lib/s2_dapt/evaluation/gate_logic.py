@@ -34,6 +34,10 @@ def check_convergence_gates(
     ret_prec_threshold: float,
     hard_stop_tokens: int,
     total_corpus_tokens: int,
+    run_qa: bool = True,
+    run_perplexity: bool = True,
+    run_terminology: bool = True,
+    run_retrieval: bool = True,
 ) -> Tuple[DAPTDecision, Dict[str, Any]]:
     """
     Evaluate all convergence gates and return the decision plus a gate detail dict.
@@ -49,20 +53,33 @@ def check_convergence_gates(
     ret_prec    = state["ret_prec_history"][-1] if state["ret_prec_history"] else 0.0
 
     # ── Primary Gate A: QA Accuracy ──────────────────────────────────────────
-    qa_gate = qa_acc >= qa_acc_threshold
+    if run_qa:
+        qa_gate = qa_acc >= qa_acc_threshold
+    else:
+        qa_gate = True
 
     # ── Primary Gate B: PPL Plateau ──────────────────────────────────────────
-    ppl_plateau, ppl_improvements = check_ppl_plateau(
-        ppl_history=ppl_history,
-        improvement_threshold=ppl_improvement_threshold,
-        window=ppl_plateau_window,
-    )
-    ppl_gate = ppl_plateau
+    if run_perplexity:
+        ppl_plateau, ppl_improvements = check_ppl_plateau(
+            ppl_history=ppl_history,
+            improvement_threshold=ppl_improvement_threshold,
+            window=ppl_plateau_window,
+        )
+        ppl_gate = ppl_plateau
+    else:
+        ppl_gate = True
+        ppl_improvements = []
 
     # ── Secondary Gate (at least one) ────────────────────────────────────────
-    term_gate = term_cov >= term_cov_threshold
-    ret_gate  = ret_prec >= ret_prec_threshold
-    secondary_gate = term_gate or ret_gate
+    term_gate = (term_cov >= term_cov_threshold) if run_terminology else False
+    ret_gate  = (ret_prec >= ret_prec_threshold) if run_retrieval else False
+    
+    active_secondary_gates = []
+    if run_terminology:
+        active_secondary_gates.append(term_gate)
+    if run_retrieval:
+        active_secondary_gates.append(ret_gate)
+    secondary_gate = any(active_secondary_gates) if active_secondary_gates else True
 
     all_primary   = qa_gate and ppl_gate
     all_converged = all_primary and secondary_gate
@@ -106,6 +123,10 @@ def log_gate_status(
     term_threshold: float,
     ret_threshold: float,
     total_corpus_tokens: int,
+    run_qa: bool = True,
+    run_perplexity: bool = True,
+    run_terminology: bool = True,
+    run_retrieval: bool = True,
 ) -> None:
     msg = format_gate_status(
         eval_id               = state["eval_count"],
@@ -125,6 +146,13 @@ def log_gate_status(
         term_threshold        = term_threshold,
         ret_threshold         = ret_threshold,
         decision              = decision.value,
+        run_qa                = run_qa,
+        run_perplexity        = run_perplexity,
+        run_terminology       = run_terminology,
+        run_retrieval         = run_retrieval,
+        qa_history            = state.get("qa_acc_history"),
+        term_history          = state.get("term_cov_history"),
+        ret_history           = state.get("ret_prec_history"),
     )
     logger.info(msg)
 
@@ -142,6 +170,10 @@ def handle_hard_cap(
     term_cov_threshold: float,
     ret_prec_threshold: float,
     total_corpus_tokens: int,
+    run_qa: bool = True,
+    run_perplexity: bool = True,
+    run_terminology: bool = True,
+    run_retrieval: bool = True,
 ) -> Tuple[Path, Dict[str, Any]]:
     """
     Called when the hard cap fires and gates are not all met.
@@ -163,13 +195,13 @@ def handle_hard_cap(
     # ── Identify failed gates ─────────────────────────────────────────────────
     failed_gates: List[str] = []
 
-    if not gate_details["qa_gate"]:
+    if run_qa and not gate_details["qa_gate"]:
         gap = qa_acc_threshold - qa_acc
         failed_gates.append(
             f"QA accuracy {qa_acc:.4f} < threshold {qa_acc_threshold} (gap: {gap:.4f})"
         )
 
-    if not gate_details["ppl_gate"]:
+    if run_perplexity and not gate_details["ppl_gate"]:
         if gate_details["ppl_improvements"]:
             last_imp = gate_details["ppl_improvements"][-1]
             failed_gates.append(
@@ -179,14 +211,19 @@ def handle_hard_cap(
             failed_gates.append("PPL plateau not reached (insufficient eval history)")
 
     if not gate_details["secondary_gate"]:
-        failed_gates.append(
-            f"Neither secondary gate met: "
-            f"term_cov={term_cov:.4f} (need >={term_cov_threshold}), "
-            f"ret_prec={ret_prec:.4f} (need >={ret_prec_threshold})"
-        )
+        msg = "Neither secondary gate met: "
+        if run_terminology and run_retrieval:
+            msg += f"term_cov={term_cov:.4f} (need >={term_cov_threshold}), ret_prec={ret_prec:.4f} (need >={ret_prec_threshold})"
+        elif run_terminology:
+            msg += f"term_cov={term_cov:.4f} (need >={term_cov_threshold}) [retrieval probe disabled]"
+        elif run_retrieval:
+            msg += f"ret_prec={ret_prec:.4f} (need >={ret_prec_threshold}) [terminology probe disabled]"
+        else:
+            msg += "Both secondary probes disabled but secondary gate failed (unexpected)"
+        failed_gates.append(msg)
 
     # ── Remediation routing ───────────────────────────────────────────────────
-    if qa_acc < qa_low_threshold:
+    if run_qa and qa_acc < qa_low_threshold:
         priority   = 1
         action     = "CORPUS_QUALITY_AUDIT"
         rationale  = (
@@ -197,7 +234,7 @@ def handle_hard_cap(
             "(b) add more review articles and textbooks, "
             "(c) prefer PubMed Central full-text over abstracts-only."
         )
-    elif qa_low_threshold <= qa_acc < qa_acc_threshold:
+    elif run_qa and qa_low_threshold <= qa_acc < qa_acc_threshold:
         priority   = 2
         action     = "INCREASE_MODEL_SIZE"
         rationale  = (
@@ -209,8 +246,8 @@ def handle_hard_cap(
         priority   = 3
         action     = "PROCEED_WITH_RISK_FLAG"
         rationale  = (
-            "QA accuracy is near threshold but perplexity plateau or secondary "
-            "gates may not be fully cleared. Downstream phases may compensate. "
+            "QA accuracy is near threshold (or QA probe is disabled), but perplexity plateau "
+            "or secondary gates may not be fully cleared. Downstream phases may compensate. "
             "Action: proceed but document all metric gaps in the risk report "
             "and monitor Phase 1+ validation metrics closely."
         )

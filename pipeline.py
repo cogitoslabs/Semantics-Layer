@@ -8,16 +8,6 @@ from lib.s2_dapt import run_dapt_pipeline
 from lib.utils import PipelineConfig
 
 
-def calculate_time(func):
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        end = time.perf_counter()
-        print(f"Function '{func.__name__}' took {end - start:.6f} seconds to run.")
-        return result
-    return wrapper
-
-@calculate_time
 def s1(cfg: PipelineConfig) -> None:
     print("Initializing corpus building pipeline using Docling parser")
 
@@ -28,7 +18,6 @@ def s1(cfg: PipelineConfig) -> None:
         sys.exit(1)
 
 
-@calculate_time
 def s1_5(cfg: PipelineConfig) -> None:
     print("Initializing offline pre-tokenization step")
 
@@ -39,7 +28,6 @@ def s1_5(cfg: PipelineConfig) -> None:
         sys.exit(1)
 
 
-@calculate_time
 def s2(cfg: PipelineConfig) -> None:
     print(f"Initializing DAPT Continued Pretraining on model: {cfg.model.base_model_name}")
 

@@ -73,6 +73,12 @@ class GateConfig:
 
 @dataclass
 class ProbeConfig:
+    # Probe Activation Toggles
+    run_perplexity: bool           = field(default_factory=lambda: _get("RUN_PERPLEXITY_PROBE", True, bool))
+    run_qa: bool                  = field(default_factory=lambda: _get("RUN_QA_PROBE", True, bool))
+    run_terminology: bool         = field(default_factory=lambda: _get("RUN_TERMINOLOGY_PROBE", True, bool))
+    run_retrieval: bool           = field(default_factory=lambda: _get("RUN_RETRIEVAL_PROBE", True, bool))
+
     # Terminology cloze
     term_cov_top_k: int            = field(default_factory=lambda: _get("TERM_COV_TOP_K", 5, int))
     term_cov_max_new_tokens: int   = field(default_factory=lambda: _get("TERM_COV_MAX_NEW_TOKENS", 3, int))
@@ -225,11 +231,11 @@ class PipelineConfig:
             f"  Hard stop       : {self.corpus.hard_stop_tokens/1e3:.1f}K tokens\n"
             f"  Eval interval   : {self.corpus.eval_interval_tokens/1e3:.0f}K tokens\n"
             f"  Slow eval int   : {self.corpus.slow_eval_interval_tokens/1e3:.0f}K tokens\n"
-            f"  QA gate         : >= {self.gates.qa_acc_threshold:.0%}\n"
+            f"  QA gate         : >= {self.gates.qa_acc_threshold:.0%} (Enabled: {self.probes.run_qa})\n"
             f"  PPL gate        : < {self.gates.ppl_improvement_threshold}% for "
-            f"{self.gates.ppl_plateau_window} consecutive evals\n"
-            f"  Term cov gate   : >= {self.gates.term_cov_threshold:.0%}\n"
-            f"  Ret prec gate   : >= {self.gates.ret_prec_threshold:.0%}\n"
+            f"{self.gates.ppl_plateau_window} consecutive evals (Enabled: {self.probes.run_perplexity})\n"
+            f"  Term cov gate   : >= {self.gates.term_cov_threshold:.0%} (Enabled: {self.probes.run_terminology})\n"
+            f"  Ret prec gate   : >= {self.gates.ret_prec_threshold:.0%} (Enabled: {self.probes.run_retrieval})\n"
             f"  Checkpoint dir  : {self.storage.checkpoint_dir}\n"
             f"  Log dir         : {self.storage.log_dir}\n"
             f"{'='*60}\n"

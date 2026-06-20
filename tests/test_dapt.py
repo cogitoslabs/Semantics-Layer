@@ -501,4 +501,169 @@ def test_eval_retrieval_precision_empty_prompt(mock_model, mock_tokenizer):
         assert result["num_samples"] == 2
 
 
+def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mock_tokenizer):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        corpus_path = os.path.join(tmpdir, "corpus.jsonl")
+        probe_qa_path = os.path.join(tmpdir, "probe_qa.jsonl")
+        output_dir = os.path.join(tmpdir, "out_model")
+        
+        # Write only corpus and QA probe
+        with open(corpus_path, "w") as f:
+            f.write(json.dumps({"text": "document 1"}) + "\n")
+            
+        with open(probe_qa_path, "w") as f:
+            f.write(json.dumps({"question": "Q1", "choices": ["A", "B"], "answer_idx": 0}) + "\n")
+            
+        pretokenized_bin_path = os.path.join(tmpdir, "train_tokens.npy")
+        np.save(pretokenized_bin_path, np.arange(1000, dtype=np.int32))
+            
+        # Point environment variables to non-existent files inside tmpdir,
+        # but disable the probes associated with them.
+        with patch.dict(os.environ, {
+            "RUN_PERPLEXITY_PROBE": "False",
+            "RUN_TERMINOLOGY_PROBE": "False",
+            "RUN_RETRIEVAL_PROBE": "False",
+            "PPL_CORPUS_PATH": os.path.join(tmpdir, "missing_ppl.txt"),
+            "VOCAB_CLOZE_PATH": os.path.join(tmpdir, "missing_vocab.json"),
+            "RETRIEVAL_PROMPTS_PATH": os.path.join(tmpdir, "missing_prompts.json"),
+            "RETRIEVAL_REFERENCES_PATH": os.path.join(tmpdir, "missing_references.json"),
+            "PRETOKENIZED_BIN_PATH": pretokenized_bin_path,
+        }):
+            with patch("lib.s2_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
+                 patch("lib.s2_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
+                 patch("lib.s2_dapt.dapt.run_all_probes") as mock_run_probes:
+                mock_from_token.return_value = mock_tokenizer
+                mock_from_model.return_value = mock_model
+                mock_run_probes.return_value = {
+                    "eval_id": 1,
+                    "tokens_processed": 0,
+                    "corpus_pass": 0.0,
+                    "metrics": {
+                        "perplexity": 0.0,
+                        "avg_nll_nats": 0.0,
+                        "qa_accuracy": 50.0,
+                        "qa_correct": 1,
+                        "qa_total": 2,
+                        "term_coverage": 0.0,
+                        "retrieval_precision": 0.0,
+                    }
+                }
+                
+                cfg = PipelineConfig()
+                cfg.model.base_model_name = "dummy-model"
+                cfg.model.max_seq_len = 512
+                cfg.build.output_path = Path(corpus_path)
+                cfg.data.qa_probe_path = Path(probe_qa_path)
+                cfg.corpus.max_corpus_passes = 1
+                cfg.optimizer.learning_rate = 1e-5
+                cfg.optimizer.train_batch_size = 1
+                cfg.storage.checkpoint_dir = Path(output_dir)
+                
+                # Should not raise FileNotFoundError because disabled files are bypassed
+                run_dapt_pipeline(cfg)
+                assert mock_model.save_pretrained.called
+
+
+def test_check_convergence_gates_disabled_probes():
+    from lib.s2_dapt.evaluation.gate_logic import check_convergence_gates, DAPTDecision
+    
+    state = {
+        "tokens_processed": 100,
+        "perplexity_history": [],
+        "qa_acc_history": [0.0],
+        "term_cov_history": [0.0],
+        "ret_prec_history": [0.0],
+    }
+    
+    # QA and PPL are disabled, secondary are enabled but have 0.0 metrics.
+    # Since secondary requires at least one, and both are enabled but fail (0.0 < threshold),
+    # convergence is not met yet (returns CONTINUE).
+    decision, gate_details = check_convergence_gates(
+        state=state,
+        qa_acc_threshold=0.55,
+        ppl_improvement_threshold=2.0,
+        ppl_plateau_window=2,
+        term_cov_threshold=0.80,
+        ret_prec_threshold=0.60,
+        hard_stop_tokens=1000,
+        total_corpus_tokens=500,
+        run_qa=False,
+        run_perplexity=False,
+        run_terminology=True,
+        run_retrieval=True,
+    )
+    
+    assert decision == DAPTDecision.CONTINUE
+    assert gate_details["qa_gate"] is True
+    assert gate_details["ppl_gate"] is True
+    assert gate_details["secondary_gate"] is False
+
+    # Now if we disable terminology and retrieval as well, all gates are satisfied
+    decision, gate_details = check_convergence_gates(
+        state=state,
+        qa_acc_threshold=0.55,
+        ppl_improvement_threshold=2.0,
+        ppl_plateau_window=2,
+        term_cov_threshold=0.80,
+        ret_prec_threshold=0.60,
+        hard_stop_tokens=1000,
+        total_corpus_tokens=500,
+        run_qa=False,
+        run_perplexity=False,
+        run_terminology=False,
+        run_retrieval=False,
+    )
+    assert decision == DAPTDecision.CONVERGED
+    assert gate_details["all_converged"] is True
+
+
+def test_select_best_checkpoint_fallback_metrics():
+    from lib.utils.checkpoint import select_best_checkpoint
+    
+    eval_history = [
+        {
+            "eval_id": 1,
+            "metrics": {
+                "qa_accuracy": 0.0,
+                "term_coverage": 0.1,
+                "retrieval_precision": 0.0,
+                "perplexity": 10.0,
+            }
+        },
+        {
+            "eval_id": 2,
+            "metrics": {
+                "qa_accuracy": 0.0,
+                "term_coverage": 0.9,
+                "retrieval_precision": 0.0,
+                "perplexity": 8.0,
+            }
+        }
+    ]
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        checkpoint_dir = Path(tmpdir)
+        manifest_path = checkpoint_dir / "best_manifest.json"
+        
+        # Write mock checkpoint files to disk
+        (checkpoint_dir / "dapt_eval_0001.pt").write_text("dummy")
+        (checkpoint_dir / "dapt_eval_0002.pt").write_text("dummy")
+        
+        # QA is disabled, so we fall back to Terminology coverage (run_terminology=True)
+        best_ckpt = select_best_checkpoint(
+            eval_history=eval_history,
+            checkpoint_dir=checkpoint_dir,
+            ppl_improvement_threshold=2.0,
+            manifest_path=manifest_path,
+            run_qa=False,
+            run_perplexity=False,
+            run_terminology=True,
+            run_retrieval=False,
+        )
+        
+        # Should select eval 2 because term_coverage is 0.9 > 0.1
+        assert best_ckpt.name == "dapt_eval_0002.pt"
+
+
+
 
