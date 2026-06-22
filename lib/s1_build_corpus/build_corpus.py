@@ -11,7 +11,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from lib.utils import setup_logger, get_logger, get_adapter, StorageAdapter
+from lib.utils import setup_logger, get_logger, get_adapter, StorageAdapter, PipelineConfig
 from .worker import worker_init, worker_task, ExtractionResult
 
 logger = get_logger("s1.build")
@@ -156,17 +156,7 @@ def _try_delete(path: str) -> None:
         pass
 
 
-def run_corpus_builder(
-    output_path: str,
-    storage_target: str,
-    local_directory_path: Optional[str] = None,
-    aws_bucket_name: Optional[str] = None,
-    aws_prefix: Optional[str] = None,
-    gdrive_folder_id: Optional[str] = None,
-    available_gpus: str = "0",
-    workers_per_gpu: int = 1,
-    chunk_size: int = 10,
-) -> None:
+def run_corpus_builder(cfg: PipelineConfig) -> None:
     """
     Unified entry point for the corpus builder pipeline.
     Instantiates the storage adapter and corpus builder, then executes the pipeline.
@@ -174,19 +164,19 @@ def run_corpus_builder(
     setup_logger("s1.build", log_dir=Path("logs"), log_filename="corpus_building.log")
     
     storage = get_adapter(
-        target=storage_target,
-        local_directory_path=local_directory_path,
-        aws_bucket_name=aws_bucket_name,
-        aws_prefix=aws_prefix,
-        gdrive_folder_id=gdrive_folder_id,
+        target=cfg.build.storage_target,
+        local_directory_path=cfg.build.local_directory_path,
+        aws_bucket_name=cfg.build.aws_bucket_name,
+        aws_prefix=cfg.build.aws_prefix,
+        gdrive_folder_id=cfg.build.gdrive_folder_id,
     )
 
     builder = CorpusBuilder(
         storage=storage,
-        output_path=output_path,
-        available_gpus=available_gpus,
-        workers_per_gpu=workers_per_gpu,
-        chunk_size=chunk_size,
+        output_path=str(cfg.build.output_path),
+        available_gpus=cfg.build.available_gpus,
+        workers_per_gpu=cfg.build.workers_per_gpu,
+        chunk_size=cfg.build.chunk_size,
     )
     builder.build()
 

@@ -47,6 +47,7 @@ class CorpusConfig:
     total_corpus_tokens: int   = field(default_factory=lambda: _get("TOTAL_CORPUS_TOKENS", 30_000_000_000, int))
     max_corpus_passes: int     = field(default_factory=lambda: _get("MAX_CORPUS_PASSES", 3, int))
     eval_interval_tokens: int  = field(default_factory=lambda: _get("EVAL_INTERVAL_TOKENS", 500_000_000, int))
+    slow_eval_interval_tokens: int = field(default_factory=lambda: _get("SLOW_EVAL_INTERVAL_TOKENS", 250_000_000, int))
 
     @property
     def hard_stop_tokens(self) -> int:
@@ -72,13 +73,21 @@ class GateConfig:
 
 @dataclass
 class ProbeConfig:
+    # Probe Activation Toggles
+    run_perplexity: bool           = field(default_factory=lambda: _get("RUN_PERPLEXITY_PROBE", True, bool))
+    run_qa: bool                  = field(default_factory=lambda: _get("RUN_QA_PROBE", True, bool))
+    run_terminology: bool         = field(default_factory=lambda: _get("RUN_TERMINOLOGY_PROBE", True, bool))
+    run_retrieval: bool           = field(default_factory=lambda: _get("RUN_RETRIEVAL_PROBE", True, bool))
+
     # Terminology cloze
     term_cov_top_k: int            = field(default_factory=lambda: _get("TERM_COV_TOP_K", 5, int))
     term_cov_max_new_tokens: int   = field(default_factory=lambda: _get("TERM_COV_MAX_NEW_TOKENS", 3, int))
+    term_cov_gen_batch_size: int   = field(default_factory=lambda: _get("TERM_COV_GEN_BATCH_SIZE", 16, int))
 
     # Anatomical retrieval
     bertscore_model: str           = field(default_factory=lambda: _get("BERTSCORE_MODEL", "allenai/scibert_scivocab_uncased", str))
     ret_prec_max_new_tokens: int   = field(default_factory=lambda: _get("RET_PREC_MAX_NEW_TOKENS", 100, int))
+    ret_prec_gen_batch_size: int   = field(default_factory=lambda: _get("RET_PREC_GEN_BATCH_SIZE", 16, int))
 
     # PPL eval corpus size
     perplexity_eval_tokens: int    = field(default_factory=lambda: _get("PERPLEXITY_EVAL_TOKENS", 10_000_000, int))
@@ -95,11 +104,14 @@ class DataConfig:
     vocab_cloze_path: Path         = field(default_factory=lambda: Path(
         os.environ.get("VOCAB_CLOZE_PATH", "evals/dapt/vocab_cloze_set.json")
     ))
-    anatomical_prompts_path: Path  = field(default_factory=lambda: Path(
-        os.environ.get("ANATOMICAL_PROMPTS_PATH", "evals/dapt/anatomical_prompts.json")
+    retrieval_prompts_path: Path  = field(default_factory=lambda: Path(
+        os.environ.get("RETRIEVAL_PROMPTS_PATH", "evals/dapt/retrieval_prompts.json")
     ))
-    anatomical_references_path: Path = field(default_factory=lambda: Path(
-        os.environ.get("ANATOMICAL_REFERENCES_PATH", "evals/dapt/anatomical_references.json")
+    retrieval_references_path: Path = field(default_factory=lambda: Path(
+        os.environ.get("RETRIEVAL_REFERENCES_PATH", "evals/dapt/retrieval_references.json")
+    ))
+    pretokenized_bin_path: Path    = field(default_factory=lambda: Path(
+        os.environ.get("PRETOKENIZED_BIN_PATH", "data/dapt/train_tokens.npy")
     ))
 
 
@@ -116,8 +128,9 @@ class OptimizerConfig:
     weight_decay: float            = field(default_factory=lambda: _get("WEIGHT_DECAY", 0.01, float))
     warmup_steps: int              = field(default_factory=lambda: _get("WARMUP_STEPS", 1000, int))
     max_grad_norm: float           = field(default_factory=lambda: _get("MAX_GRAD_NORM", 1.0, float))
-    train_batch_size: int          = field(default_factory=lambda: _get("DAPT_BATCH_SIZE", 2, int))
+    train_batch_size: int          = field(default_factory=lambda: _get("TRAIN_BATCH_SIZE", 2, int))
     eval_batch_size: int           = field(default_factory=lambda: _get("EVAL_BATCH_SIZE", 4, int))
+    gradient_accumulation_steps: int = field(default_factory=lambda: _get("GRADIENT_ACCUMULATION_STEPS", 1, int))
 
 
 @dataclass
@@ -182,6 +195,10 @@ class PipelineConfig:
             errors.append(f"MAX_CORPUS_PASSES must be >= 1, got {self.corpus.max_corpus_passes}")
         if self.corpus.eval_interval_tokens <= 0:
             errors.append(f"EVAL_INTERVAL_TOKENS must be > 0, got {self.corpus.eval_interval_tokens}")
+        if self.corpus.slow_eval_interval_tokens <= 0:
+            errors.append(f"SLOW_EVAL_INTERVAL_TOKENS must be > 0, got {self.corpus.slow_eval_interval_tokens}")
+        if self.optimizer.gradient_accumulation_steps < 1:
+            errors.append(f"GRADIENT_ACCUMULATION_STEPS must be >= 1, got {self.optimizer.gradient_accumulation_steps}")
         if self.gates.qa_low_threshold > self.gates.qa_acc_threshold:
             errors.append(
                 f"QA_LOW_THRESHOLD ({self.gates.qa_low_threshold}) must be <= "
@@ -215,11 +232,12 @@ class PipelineConfig:
             f"  Max passes      : {self.corpus.max_corpus_passes}\n"
             f"  Hard stop       : {self.corpus.hard_stop_tokens/1e3:.1f}K tokens\n"
             f"  Eval interval   : {self.corpus.eval_interval_tokens/1e3:.0f}K tokens\n"
-            f"  QA gate         : >= {self.gates.qa_acc_threshold:.0%}\n"
+            f"  Slow eval int   : {self.corpus.slow_eval_interval_tokens/1e3:.0f}K tokens\n"
+            f"  QA gate         : >= {self.gates.qa_acc_threshold:.0%} (Enabled: {self.probes.run_qa})\n"
             f"  PPL gate        : < {self.gates.ppl_improvement_threshold}% for "
-            f"{self.gates.ppl_plateau_window} consecutive evals\n"
-            f"  Term cov gate   : >= {self.gates.term_cov_threshold:.0%}\n"
-            f"  Ret prec gate   : >= {self.gates.ret_prec_threshold:.0%}\n"
+            f"{self.gates.ppl_plateau_window} consecutive evals (Enabled: {self.probes.run_perplexity})\n"
+            f"  Term cov gate   : >= {self.gates.term_cov_threshold:.0%} (Enabled: {self.probes.run_terminology})\n"
+            f"  Ret prec gate   : >= {self.gates.ret_prec_threshold:.0%} (Enabled: {self.probes.run_retrieval})\n"
             f"  Checkpoint dir  : {self.storage.checkpoint_dir}\n"
             f"  Log dir         : {self.storage.log_dir}\n"
             f"{'='*60}\n"

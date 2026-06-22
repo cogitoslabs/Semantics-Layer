@@ -2,6 +2,7 @@
 probes/perplexity_probe.py — Probe B: Held-Out Perplexity
 """
 
+import contextlib
 import math
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Iterator
@@ -58,10 +59,23 @@ def load_ppl_corpus(
     """
     logger.info(f"Loading PPL corpus from: {ppl_corpus_path} (max {max_tokens/1e6:.1f}M tokens)")
 
-    with open(ppl_corpus_path, "r", encoding="utf-8") as f:
-        text = f.read()
+    token_ids = []
+    # Temporarily set model_max_length to prevent warnings on large lines/documents
+    orig_max_len = getattr(tokenizer, "model_max_length", None)
+    tokenizer.model_max_length = 100_000_000
 
-    token_ids = tokenizer.encode(text, add_special_tokens=False)
+    try:
+        with open(ppl_corpus_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                tokens = tokenizer.encode(line, add_special_tokens=False)
+                token_ids.extend(tokens)
+                if len(token_ids) >= max_tokens:
+                    break
+    finally:
+        if orig_max_len is not None:
+            tokenizer.model_max_length = orig_max_len
 
     if len(token_ids) > max_tokens:
         logger.info(
@@ -100,27 +114,37 @@ def eval_perplexity(
     total_tokens = 0
     batch_count = 0
 
+    # Detect model parameter dtype dynamically
+    is_cuda = "cuda" in str(device)
+    try:
+        model_dtype = next(iter(model.parameters())).dtype
+    except (StopIteration, TypeError, AttributeError):
+        model_dtype = torch.float32
+
+    autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=model_dtype) if is_cuda and hasattr(torch, "amp") else contextlib.nullcontext()
+
     with torch.no_grad():
-        for batch in token_batch_iter(token_ids, seq_len=seq_len, batch_size=batch_size):
-            input_ids = batch["input_ids"].to(device)
-            labels    = batch["labels"].to(device)
+        with autocast_ctx:
+            for batch in token_batch_iter(token_ids, seq_len=seq_len, batch_size=batch_size):
+                input_ids = batch["input_ids"].to(device)
+                labels    = batch["labels"].to(device)
 
-            outputs = model(input_ids=input_ids)
-            logits  = outputs.logits
+                outputs = model(input_ids=input_ids)
+                logits  = outputs.logits
 
-            B, T, V = logits.shape
-            loss = F.cross_entropy(
-                logits.view(B * T, V),
-                labels.view(B * T),
-                reduction="sum",
-            )
-            total_nll    += loss.item()
-            total_tokens += B * T
-            batch_count  += 1
+                B, T, V = logits.shape
+                loss = F.cross_entropy(
+                    logits.view(B * T, V),
+                    labels.view(B * T),
+                    reduction="sum",
+                )
+                total_nll    += loss.item()
+                total_tokens += B * T
+                batch_count  += 1
 
-            if batch_count % 50 == 0:
-                running_ppl = math.exp(total_nll / total_tokens)
-                logger.debug(f"  PPL probe: {total_tokens/1e6:.1f}M tokens processed, running PPL={running_ppl:.2f}")
+                if batch_count % 50 == 0:
+                    running_ppl = math.exp(total_nll / total_tokens)
+                    logger.debug(f"  PPL probe: {total_tokens/1e6:.1f}M tokens processed, running PPL={running_ppl:.2f}")
 
     avg_nll = total_nll / total_tokens if total_tokens > 0 else float("inf")
     ppl     = math.exp(avg_nll)

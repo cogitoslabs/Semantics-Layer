@@ -91,6 +91,10 @@ def select_best_checkpoint(
     checkpoint_dir: Path,
     ppl_improvement_threshold: float,
     manifest_path: Path,
+    run_qa: bool = True,
+    run_perplexity: bool = True,
+    run_terminology: bool = True,
+    run_retrieval: bool = True,
 ) -> Optional[Path]:
     """
     Select the best DAPT checkpoint to carry forward to Phase 0.5.
@@ -106,14 +110,30 @@ def select_best_checkpoint(
         logger.warning("No eval history — cannot select best checkpoint.")
         return None
 
-    plateau_evals = [
-        e for e in eval_history
-        if e.get("ppl_improvement_pct") is not None
-        and e["ppl_improvement_pct"] < ppl_improvement_threshold
-    ]
+    plateau_evals = []
+    if run_perplexity:
+        plateau_evals = [
+            e for e in eval_history
+            if e.get("ppl_improvement_pct") is not None
+            and e["ppl_improvement_pct"] < ppl_improvement_threshold
+        ]
 
     pool = plateau_evals if plateau_evals else eval_history
-    best = max(pool, key=lambda e: e["metrics"]["qa_accuracy"])
+
+    def sort_key(e):
+        metrics = e.get("metrics", {})
+        if run_qa:
+            return metrics.get("qa_accuracy", 0.0)
+        elif run_terminology:
+            return metrics.get("term_coverage", 0.0)
+        elif run_retrieval:
+            return metrics.get("retrieval_precision", 0.0)
+        elif run_perplexity:
+            ppl = metrics.get("perplexity", 0.0)
+            return -ppl if ppl > 0 else -1e9
+        return 0.0
+
+    best = max(pool, key=sort_key)
 
     best_eval_id = best["eval_id"]
     best_ckpt = checkpoint_dir / f"dapt_eval_{best_eval_id:04d}.pt"
@@ -125,8 +145,21 @@ def select_best_checkpoint(
         "metrics": best["metrics"],
     }
     save_json(manifest, manifest_path)
+
+    # Format the log message with the primary selection metric
+    if run_qa:
+        metric_str = f"QA acc={best['metrics']['qa_accuracy']:.4f}"
+    elif run_terminology:
+        metric_str = f"Term cov={best['metrics']['term_coverage']:.4f}"
+    elif run_retrieval:
+        metric_str = f"Ret prec={best['metrics']['retrieval_precision']:.4f}"
+    elif run_perplexity:
+        metric_str = f"PPL={best['metrics']['perplexity']:.3f}"
+    else:
+        metric_str = "no active metrics"
+
     logger.info(
         f"Best checkpoint selected: eval #{best_eval_id} "
-        f"(QA acc={best['metrics']['qa_accuracy']:.4f}) → {best_ckpt}"
+        f"({metric_str}) → {best_ckpt}"
     )
     return best_ckpt

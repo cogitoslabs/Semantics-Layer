@@ -22,8 +22,10 @@
 - Mocked the heavy evaluation runner `run_all_probes` in [test_dapt.py](file:///e:/Projects/CND/Semantics/tests/test_dapt.py) to prevent downloading/running SciBERT models during unit test execution, reducing test run times from 23 seconds to under 8 seconds. Added assertions to verify the baseline evaluation is called during both pipeline tests.
 - Fixed terminology coverage probe ([terminology_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/terminology_probe.py)) by splitting the cloze prompt at the `"___"` placeholder and only passing the prefix to the causal model, enabling next-token prediction to fill the blank correctly instead of generating text at the end of the full sentence.
 - Fixed retrieval precision probe ([retrieval_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/retrieval_probe.py)) by truncating generated hypotheses and reference texts to a safe maximum length of 1024 characters before calculating BERTScore, preventing PyTorch shape mismatch errors caused by extremely long bibliography citations in standard BERT/SciBERT 512-token limit models.
-
-
-
-
+- Fixed a runtime error in terminology and retrieval evaluation probes where empty inputs resulting from blank cloze splits (e.g. prompts beginning with "___") caused batch sequence length to become 0, leading to a tensor view/reshape crash in the model's self-attention layers. Added fallback safety checks to input token shapes and empty prompt strings, and added unit tests in [test_dapt.py](file:///e:/Projects/CND/Semantics/tests/test_dapt.py).
+- Fixed duplicate log output in the console by setting `logger.propagate = False` on the configured parent loggers in [logger.py](file:///e:/Projects/CND/Semantics/lib/utils/logger.py), preventing log records from propagating up to the root logger's default handlers.
+- Renamed configuration variable `DAPT_BATCH_SIZE` to `TRAIN_BATCH_SIZE` across `.env`, `.env.example`, [config.py](file:///e:/Projects/CND/Semantics/lib/utils/config.py), and [s1_s2.ipynb](file:///e:/Projects/CND/Semantics/notebooks/s1_s2.ipynb) to make it more meaningful.
+- Refactored `eval_qa_accuracy` in [qa_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/qa_probe.py) to read files exclusively as JSONL line-by-line, adding early-termination optimization for `max_samples` and removing the double-reading JSON array fallback.
+- Implemented batching generation for terminology probe and retrieval probe evaluations, adding configurable batch sizes (`TERM_COV_GEN_BATCH_SIZE` and `RET_PREC_GEN_BATCH_SIZE`).
+- Fixed shape/dimension mismatch and empty-input handling in generation probes to avoid runtime errors when tokenizing empty inputs or when padding inputs.
 
