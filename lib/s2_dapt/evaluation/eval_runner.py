@@ -103,6 +103,7 @@ def run_all_probes(
                 top_k=cfg.probes.term_cov_top_k,
                 max_new_tokens=cfg.probes.term_cov_max_new_tokens,
                 device=device,
+                generation_batch_size=cfg.probes.term_cov_gen_batch_size,
             )
             term_elapsed = time.time() - t0
         else:
@@ -134,6 +135,7 @@ def run_all_probes(
                 max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
                 device=device,
                 use_bertscore=use_bertscore,
+                generation_batch_size=cfg.probes.ret_prec_gen_batch_size,
             )
             ret_elapsed = time.time() - t0
         else:

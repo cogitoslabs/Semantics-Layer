@@ -82,10 +82,12 @@ class ProbeConfig:
     # Terminology cloze
     term_cov_top_k: int            = field(default_factory=lambda: _get("TERM_COV_TOP_K", 5, int))
     term_cov_max_new_tokens: int   = field(default_factory=lambda: _get("TERM_COV_MAX_NEW_TOKENS", 3, int))
+    term_cov_gen_batch_size: int   = field(default_factory=lambda: _get("TERM_COV_GEN_BATCH_SIZE", 16, int))
 
     # Anatomical retrieval
     bertscore_model: str           = field(default_factory=lambda: _get("BERTSCORE_MODEL", "allenai/scibert_scivocab_uncased", str))
     ret_prec_max_new_tokens: int   = field(default_factory=lambda: _get("RET_PREC_MAX_NEW_TOKENS", 100, int))
+    ret_prec_gen_batch_size: int   = field(default_factory=lambda: _get("RET_PREC_GEN_BATCH_SIZE", 16, int))
 
     # PPL eval corpus size
     perplexity_eval_tokens: int    = field(default_factory=lambda: _get("PERPLEXITY_EVAL_TOKENS", 10_000_000, int))

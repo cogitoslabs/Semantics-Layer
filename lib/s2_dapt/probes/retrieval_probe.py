@@ -65,6 +65,112 @@ def generate_response(
     return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
 
+def generate_responses_batch(
+    model,
+    tokenizer,
+    prompts: List[str],
+    max_new_tokens: int,
+    device: str = "cuda",
+    batch_size: int = 16,
+) -> List[str]:
+    if not prompts:
+        return []
+
+    responses = []
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else (tokenizer.eos_token_id or 0)
+
+    orig_padding_side = getattr(tokenizer, "padding_side", "right")
+    tokenizer.padding_side = "left"
+
+    try:
+        for start_idx in range(0, len(prompts), batch_size):
+            batch_prompts = prompts[start_idx : start_idx + batch_size]
+
+            # Tokenize each prompt individually to respect mock/custom tokenizers that only support string inputs
+            batch_inputs = []
+            for prompt in batch_prompts:
+                inputs = tokenizer(
+                    prompt,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=256,
+                )
+                if inputs["input_ids"].shape[1] == 0:
+                    fallback_id = tokenizer.bos_token_id or tokenizer.eos_token_id or 0
+                    inputs["input_ids"] = torch.tensor([[fallback_id]], dtype=torch.long)
+                    if "attention_mask" in inputs:
+                        inputs["attention_mask"] = torch.tensor([[1]], dtype=torch.long)
+                batch_inputs.append(inputs)
+
+            max_len = max(inputs["input_ids"].shape[1] for inputs in batch_inputs)
+
+            padded_input_ids = []
+            padded_attention_masks = []
+
+            input_device = torch.device(device)
+
+            for inputs in batch_inputs:
+                input_ids = inputs["input_ids"]
+                seq_len = input_ids.shape[1]
+                pad_len = max_len - seq_len
+
+                if pad_len > 0:
+                    pad_tensor = torch.full((1, pad_len), pad_id, dtype=input_ids.dtype, device=input_ids.device)
+                    new_input_ids = torch.cat([pad_tensor, input_ids], dim=1)
+
+                    if "attention_mask" in inputs:
+                        mask = inputs["attention_mask"]
+                        mask_pad = torch.zeros((1, pad_len), dtype=mask.dtype, device=mask.device)
+                        new_mask = torch.cat([mask_pad, mask], dim=1)
+                    else:
+                        mask_pad = torch.zeros((1, pad_len), dtype=torch.long, device=input_ids.device)
+                        mask_one = torch.ones((1, seq_len), dtype=torch.long, device=input_ids.device)
+                        new_mask = torch.cat([mask_pad, mask_one], dim=1)
+                else:
+                    new_input_ids = input_ids
+                    if "attention_mask" in inputs:
+                        new_mask = inputs["attention_mask"]
+                    else:
+                        new_mask = torch.ones_like(input_ids)
+
+                padded_input_ids.append(new_input_ids)
+                padded_attention_masks.append(new_mask)
+
+            stacked_input_ids = torch.cat(padded_input_ids, dim=0).to(input_device)
+            stacked_attention_masks = torch.cat(padded_attention_masks, dim=0).to(input_device)
+
+            with torch.no_grad():
+                output_ids = model.generate(
+                    input_ids=stacked_input_ids,
+                    attention_mask=stacked_attention_masks,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    temperature=1.0,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+
+            for i in range(len(batch_prompts)):
+                if isinstance(output_ids, torch.Tensor):
+                    batch_idx = i if i < output_ids.shape[0] else 0
+                    generated_ids = output_ids[batch_idx, max_len:]
+                else:
+                    try:
+                        generated_ids = output_ids[i, max_len:]
+                    except Exception:
+                        generated_ids = output_ids
+                response = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+                responses.append(response)
+
+            # Log progress
+            progress_count = start_idx + len(batch_prompts)
+            if progress_count % 20 == 0 or progress_count == len(prompts):
+                logger.debug(f"  Retrieval probe: {progress_count}/{len(prompts)} responses generated")
+    finally:
+        tokenizer.padding_side = orig_padding_side
+
+    return responses
+
+
 def compute_bertscore_batch(
     hypotheses: List[str],
     references: List[str],
@@ -126,6 +232,7 @@ def eval_retrieval_precision(
     max_samples: Optional[int] = None,
     bertscore_batch_size: int = 32,
     use_bertscore: bool = True,
+    generation_batch_size: int = 16,
 ) -> Dict[str, Any]:
     """
     Run Probe D and return average precision over retrieval prompts.
@@ -147,13 +254,15 @@ def eval_retrieval_precision(
 
     model.eval()
 
-    logger.info(f"Generating {len(prompts)} retrieval responses (greedy)...")
-    hypotheses = []
-    for i, prompt in enumerate(prompts):
-        response = generate_response(model, tokenizer, prompt, max_new_tokens, device=device)
-        hypotheses.append(response)
-        if (i + 1) % 20 == 0:
-            logger.debug(f"  Retrieval probe: {i+1}/{len(prompts)} responses generated")
+    logger.info(f"Generating {len(prompts)} retrieval responses (greedy, batch_size={generation_batch_size})...")
+    hypotheses = generate_responses_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=prompts,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        batch_size=generation_batch_size,
+    )
 
     # Safe token-based truncation to prevent splitting multi-byte tokens
     truncated_hypotheses = [token_safe_truncate(h, tokenizer, max_tokens=256) for h in hypotheses]

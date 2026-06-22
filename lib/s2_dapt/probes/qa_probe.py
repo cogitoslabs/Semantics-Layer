@@ -2,6 +2,7 @@
 probes/qa_probe.py — Probe A: Neuroscience QA Accuracy
 """
 
+import contextlib
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -34,6 +35,28 @@ def score_choices_by_logprob(
 ) -> int:
     scores = []
 
+    prompt_ids_inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=512,
+    )
+    if hasattr(prompt_ids_inputs, "to"):
+        prompt_ids_inputs = prompt_ids_inputs.to(device)
+    else:
+        prompt_ids_inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in prompt_ids_inputs.items()}
+
+    prompt_len = prompt_ids_inputs["input_ids"].shape[1]
+
+    # Detect model parameter dtype dynamically
+    is_cuda = "cuda" in str(device)
+    try:
+        model_dtype = next(iter(model.parameters())).dtype
+    except (StopIteration, TypeError, AttributeError):
+        model_dtype = torch.float32
+
+    autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=model_dtype) if is_cuda and hasattr(torch, "amp") else contextlib.nullcontext()
+
     for choice in choices:
         full_text = prompt + " " + choice
         inputs = tokenizer(
@@ -47,24 +70,10 @@ def score_choices_by_logprob(
         else:
             inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
 
-        prompt_ids_inputs = tokenizer(
-            prompt,
-            return_tensors="pt",
-            truncation=True,
-            max_length=512,
-        )
-        if hasattr(prompt_ids_inputs, "to"):
-            prompt_ids_inputs = prompt_ids_inputs.to(device)
-        else:
-            prompt_ids_inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in prompt_ids_inputs.items()}
-
-        prompt_ids = prompt_ids_inputs["input_ids"]
-
-        prompt_len = prompt_ids.shape[1]
-
         with torch.no_grad():
-            outputs = model(**inputs)
-            logits = outputs.logits
+            with autocast_ctx:
+                outputs = model(**inputs)
+                logits = outputs.logits
 
         labels = inputs["input_ids"][0, prompt_len:].cpu()
         choice_logits = logits[0, prompt_len - 1 : -1, :].cpu()
