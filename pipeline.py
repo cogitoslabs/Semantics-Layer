@@ -60,5 +60,13 @@ if __name__ == "__main__":
         s1_5(cfg)
     if args.step == "s2" or args.step == "all":
         s2(cfg)
+        print("Running final inference on saved model and logging failed evaluations...")
+        try:
+            from lib.s2_dapt.evaluation.eval_runner import run_inference_and_log_failures
+            run_inference_and_log_failures(cfg)
+        except Exception as e:
+            print(f"Error logging failed evaluations: {e}", file=sys.stderr)
+            sys.exit(1)
+
 
 

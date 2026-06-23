@@ -79,6 +79,7 @@ def run_all_probes(
             tokenizer=tokenizer,
             qa_probe_path=cfg.data.qa_probe_path,
             device=device,
+            batch_size=cfg.optimizer.eval_batch_size,
         )
         qa_elapsed = time.time() - t0
     else:
@@ -229,4 +230,163 @@ def run_all_probes(
         f"(elapsed: {total_elapsed:.0f}s)\n"
     )
 
+    # ── Compile and save failed evaluations if using high-fidelity SciBERT (final evaluation) ──
+    if use_bertscore:
+        failed_runs = {}
+        if cfg.probes.run_qa and "failures" in qa_result:
+            failed_runs["qa"] = qa_result["failures"]
+        if cfg.probes.run_terminology and "failures" in term_result:
+            failed_runs["terminology"] = term_result["failures"]
+        if cfg.probes.run_retrieval and "failures" in ret_result:
+            failed_runs["retrieval"] = ret_result["failures"]
+
+        failures_json_path = cfg.storage.log_dir / "failed_evals.json"
+        try:
+            import os
+            import json
+            os.makedirs(cfg.storage.log_dir, exist_ok=True)
+            with open(failures_json_path, "w", encoding="utf-8") as f:
+                json.dump(failed_runs, f, indent=2)
+            logger.info(f"Failed evaluations automatically saved to {failures_json_path}")
+        except Exception as e:
+            logger.error(f"Failed to write failed evaluations JSON file: {e}")
+
     return metrics
+
+
+def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
+    """
+    Load the final model and tokenizer from cfg.storage.checkpoint_dir,
+    run inference on active evaluation probes, log all failed samples,
+    and save them to a structured JSON file.
+    """
+    failures_json_path = cfg.storage.log_dir / "failed_evals.json"
+    if failures_json_path.exists():
+        logger.info(f"Failed evaluations already exist at {failures_json_path}. Skipping redundant final inference.")
+        return
+    import os
+    import json
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from lib.s2_dapt.probes.qa_probe import get_failed_qa_samples
+    from lib.s2_dapt.probes.terminology_probe import get_failed_terminology_samples
+    from lib.s2_dapt.probes.retrieval_probe import get_failed_retrieval_samples
+
+    model_dir = cfg.storage.checkpoint_dir
+    if not model_dir.exists():
+        logger.error(f"Saved model directory not found at {model_dir}. Cannot run final inference.")
+        return
+
+    logger.info(f"Loading final model from {model_dir} for final inference and failure logging...")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        attn_implementation = "sdpa"
+    else:
+        torch_dtype = torch.float32
+        attn_implementation = "eager"
+
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            str(model_dir),
+            torch_dtype=torch_dtype,
+            attn_implementation=attn_implementation
+        )
+        model.to(device)
+        tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    except Exception as e:
+        logger.error(f"Failed to load final model or tokenizer from {model_dir}: {e}")
+        return
+
+    failed_runs = {}
+
+    # 1. QA Probe Failures
+    if cfg.probes.run_qa:
+        logger.info("Running QA probe to collect failed samples...")
+        try:
+            qa_failures = get_failed_qa_samples(
+                model=model,
+                tokenizer=tokenizer,
+                qa_probe_path=cfg.data.qa_probe_path,
+                device=str(device),
+                batch_size=cfg.optimizer.eval_batch_size,
+            )
+            failed_runs["qa"] = qa_failures
+            logger.info(f"QA Probe: {len(qa_failures)} failures found.")
+            for idx, failure in enumerate(qa_failures):
+                logger.warning(
+                    f"QA Failure #{idx+1} [Cluster: {failure['cluster']}]:\n"
+                    f"  Question: {failure['question']}\n"
+                    f"  Expected: {failure['expected_text']} (index {failure['expected_idx']})\n"
+                    f"  Predicted: {failure['predicted_text']} (index {failure['predicted_idx']})"
+                )
+        except Exception as e:
+            logger.error(f"Error during QA probe failure logging: {e}")
+
+    # 2. Terminology Probe Failures
+    if cfg.probes.run_terminology:
+        logger.info("Running Terminology probe to collect failed samples...")
+        try:
+            term_failures = get_failed_terminology_samples(
+                model=model,
+                tokenizer=tokenizer,
+                vocab_cloze_path=cfg.data.vocab_cloze_path,
+                top_k=cfg.probes.term_cov_top_k,
+                max_new_tokens=cfg.probes.term_cov_max_new_tokens,
+                device=str(device),
+                generation_batch_size=cfg.probes.term_cov_gen_batch_size
+            )
+            failed_runs["terminology"] = term_failures
+            logger.info(f"Terminology Probe: {len(term_failures)} failures found.")
+            for idx, failure in enumerate(term_failures):
+                logger.warning(
+                    f"Terminology Failure #{idx+1} [Category: {failure['category']}]:\n"
+                    f"  Prompt: {failure['prompt']}\n"
+                    f"  Target Term: {failure['target_term']}\n"
+                    f"  Completions: {failure['generated_completions']}"
+                )
+        except Exception as e:
+            logger.error(f"Error during Terminology probe failure logging: {e}")
+
+    # 3. Retrieval Probe Failures
+    if cfg.probes.run_retrieval:
+        logger.info("Running Retrieval probe to collect failed samples...")
+        try:
+            # We pass use_bertscore=True because it's the final high-fidelity evaluation
+            ret_failures = get_failed_retrieval_samples(
+                model=model,
+                tokenizer=tokenizer,
+                retrieval_prompts_path=cfg.data.retrieval_prompts_path,
+                retrieval_references_path=cfg.data.retrieval_references_path,
+                bertscore_model=cfg.probes.bertscore_model,
+                max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
+                device=str(device),
+                use_bertscore=True,
+                generation_batch_size=cfg.probes.ret_prec_gen_batch_size,
+                failure_threshold=cfg.gates.ret_prec_threshold
+            )
+            failed_runs["retrieval"] = ret_failures
+            logger.info(f"Retrieval Probe: {len(ret_failures)} failures found.")
+            for idx, failure in enumerate(ret_failures):
+                logger.warning(
+                    f"Retrieval Failure #{idx+1} [F1 Score: {failure['score']:.4f}]:\n"
+                    f"  Prompt: {failure['prompt']}\n"
+                    f"  Reference: {failure['reference']}\n"
+                    f"  Generated: {failure['generated']}"
+                )
+        except Exception as e:
+            logger.error(f"Error during Retrieval probe failure logging: {e}")
+
+    # Save to file
+    failures_json_path = cfg.storage.log_dir / "failed_evals.json"
+    try:
+        os.makedirs(cfg.storage.log_dir, exist_ok=True)
+        with open(failures_json_path, "w", encoding="utf-8") as f:
+            json.dump(failed_runs, f, indent=2)
+        logger.info(f"Detailed failed evaluations saved to {failures_json_path}")
+    except Exception as e:
+        logger.error(f"Failed to write failed evaluations JSON file: {e}")
+

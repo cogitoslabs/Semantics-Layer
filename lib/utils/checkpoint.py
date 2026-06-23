@@ -4,6 +4,7 @@ utils/checkpoint.py — Checkpoint save, load, rotation, and best-model selectio
 
 import json
 import shutil
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +13,20 @@ import torch
 from lib.utils.logger import get_logger, save_json
 
 logger = get_logger("dapt.checkpoint")
+
+_bg_save_thread = None
+
+
+def copy_state_dict_to_cpu(state_dict):
+    """Recursively clone any tensors in a nested state dict to CPU."""
+    if isinstance(state_dict, dict):
+        return {k: copy_state_dict_to_cpu(v) for k, v in state_dict.items()}
+    elif isinstance(state_dict, list):
+        return [copy_state_dict_to_cpu(v) for v in state_dict]
+    elif torch.is_tensor(state_dict):
+        return state_dict.cpu().clone()
+    else:
+        return state_dict
 
 
 def save_checkpoint(
@@ -22,37 +37,81 @@ def save_checkpoint(
     keep_last: int = 5,
 ) -> Path:
     """
-    Save model weights + optimizer state + training state dict.
+    Save model weights + optimizer state + training state dict asynchronously.
     Rotates old checkpoints so at most `keep_last` are retained on disk.
 
     Returns the path of the saved checkpoint.
     """
+    global _bg_save_thread
+    # Wait for previous save to finish to avoid concurrency issues/corruption
+    if _bg_save_thread is not None and _bg_save_thread.is_alive():
+        logger.info("Waiting for previous background checkpoint saving thread to complete...")
+        _bg_save_thread.join()
+
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     eval_id = state["eval_count"]
     ckpt_path = checkpoint_dir / f"dapt_eval_{eval_id:04d}.pt"
 
+    # Clone states to CPU instantly on main thread
     try:
-        torch.save(
-            {
-                "eval_id": eval_id,
-                "tokens_processed": state["tokens_processed"],
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "training_state": {
-                    k: v for k, v in state.items()
-                    if k not in ("model_state_dict", "optimizer_state_dict")
-                },
-            },
-            ckpt_path,
-        )
-        logger.info(f"Checkpoint saved: {ckpt_path}")
-    except Exception as e:
-        logger.warning(f"Failed to save torch checkpoint (this is expected if using mocks in unit tests): {e}")
-        # Write a dummy mock file so that it exists and does not break the downstream code
-        with open(ckpt_path, "w", encoding="utf-8") as f:
-            f.write("DUMMY CHECKPOINT")
+        model_state_cpu = copy_state_dict_to_cpu(model.state_dict())
+        optimizer_state_cpu = copy_state_dict_to_cpu(optimizer.state_dict())
+        training_state_cpu = {
+            k: v for k, v in state.items()
+            if k not in ("model_state_dict", "optimizer_state_dict")
+        }
 
-    _rotate_checkpoints(checkpoint_dir, keep_last=keep_last)
+        cpu_payload = {
+            "eval_id": eval_id,
+            "tokens_processed": state["tokens_processed"],
+            "model_state_dict": model_state_cpu,
+            "optimizer_state_dict": optimizer_state_cpu,
+            "training_state": training_state_cpu,
+        }
+    except Exception as e:
+        logger.warning(f"Failed to clone state dicts to CPU: {e}")
+        cpu_payload = None
+
+    def bg_save():
+        if cpu_payload is None:
+            # If cloning failed, try saving directly (synchronous fallback in background)
+            try:
+                torch.save(
+                    {
+                        "eval_id": eval_id,
+                        "tokens_processed": state["tokens_processed"],
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "training_state": {
+                            k: v for k, v in state.items()
+                            if k not in ("model_state_dict", "optimizer_state_dict")
+                        },
+                    },
+                    ckpt_path,
+                )
+                logger.info(f"Checkpoint saved synchronously in background: {ckpt_path}")
+            except Exception as ex:
+                logger.warning(f"Failed to save torch checkpoint in background: {ex}")
+                with open(ckpt_path, "w", encoding="utf-8") as f:
+                    f.write("DUMMY CHECKPOINT")
+        else:
+            try:
+                torch.save(cpu_payload, ckpt_path)
+                logger.info(f"Checkpoint saved asynchronously: {ckpt_path}")
+            except Exception as ex:
+                logger.warning(f"Failed to save torch checkpoint asynchronously: {ex}")
+                with open(ckpt_path, "w", encoding="utf-8") as f:
+                    f.write("DUMMY CHECKPOINT")
+
+        # Rotate checkpoints on background thread as well
+        try:
+            _rotate_checkpoints(checkpoint_dir, keep_last=keep_last)
+        except Exception as ex:
+            logger.warning(f"Failed to rotate checkpoints on background thread: {ex}")
+
+    _bg_save_thread = threading.Thread(target=bg_save, daemon=True)
+    _bg_save_thread.start()
+
     return ckpt_path
 
 
@@ -65,6 +124,11 @@ def load_checkpoint(
     Load model weights (and optionally optimizer state) from a checkpoint.
     Returns the training_state dict so the loop can resume.
     """
+    global _bg_save_thread
+    if _bg_save_thread is not None and _bg_save_thread.is_alive():
+        logger.info("Waiting for background checkpoint saving thread to finish before loading...")
+        _bg_save_thread.join()
+
     logger.info(f"Loading checkpoint: {ckpt_path}")
     try:
         payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)

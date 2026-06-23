@@ -6,6 +6,7 @@ from .logger import setup_logger, get_logger, MetricsWriter, save_json, load_jso
 from .checkpoint import save_checkpoint, load_checkpoint, select_best_checkpoint
 from .config import PipelineConfig, DAPTConfig
 from .storage import StorageAdapter, get_adapter
+from .profiller import FunctionProfiler
 
 __all__ = [
     "setup_logger",
@@ -20,4 +21,5 @@ __all__ = [
     "DAPTConfig",
     "StorageAdapter",
     "get_adapter",
+    "FunctionProfiler",
 ]

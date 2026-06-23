@@ -48,6 +48,7 @@ def generate_topk_completions(
             top_p=0.95 if k > 1 else None,
             num_return_sequences=k,
             pad_token_id=tokenizer.eos_token_id,
+            use_cache=True,
         )
 
     prompt_len = inputs["input_ids"].shape[1]
@@ -72,15 +73,20 @@ def generate_topk_completions_batch(
     if not prompts:
         return []
 
-    all_completions = []
+    # Sort prompts by length to minimize padding matrix overhead and save GPU VRAM (bucket by padding)
+    indexed_prompts = sorted(enumerate(prompts), key=lambda x: len(x[1]))
+    sorted_prompts = [p for _, p in indexed_prompts]
+    orig_indices = [idx for idx, _ in indexed_prompts]
+
+    sorted_completions = []
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else (tokenizer.eos_token_id or 0)
 
     orig_padding_side = getattr(tokenizer, "padding_side", "right")
     tokenizer.padding_side = "left"
 
     try:
-        for start_idx in range(0, len(prompts), batch_size):
-            batch_prompts = prompts[start_idx : start_idx + batch_size]
+        for start_idx in range(0, len(sorted_prompts), batch_size):
+            batch_prompts = sorted_prompts[start_idx : start_idx + batch_size]
 
             # Tokenize each prompt individually to handle mock tokenizers in tests
             batch_inputs = []
@@ -144,10 +150,9 @@ def generate_topk_completions_batch(
                     top_p=0.95 if k > 1 else None,
                     num_return_sequences=k,
                     pad_token_id=tokenizer.eos_token_id,
+                    use_cache=True,
                 )
 
-            # If the model didn't return enough output sequences (e.g. mock models in tests),
-            # safely handle it.
             is_tensor = isinstance(outputs, torch.Tensor)
 
             for i in range(len(batch_prompts)):
@@ -159,16 +164,20 @@ def generate_topk_completions_batch(
                         seq = outputs[batch_idx]
                         generated_ids = seq[max_len:]
                     else:
-                        # MagicMock or dummy output
                         try:
                             generated_ids = outputs[flat_idx, max_len:]
                         except Exception:
                             generated_ids = outputs
                     text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
                     prompt_completions.append(text)
-                all_completions.append(prompt_completions)
+                sorted_completions.append(prompt_completions)
     finally:
         tokenizer.padding_side = orig_padding_side
+
+    # Restore original order
+    all_completions = [None] * len(prompts)
+    for orig_idx, completions in zip(orig_indices, sorted_completions):
+        all_completions[orig_idx] = completions
 
     return all_completions
 
@@ -224,6 +233,7 @@ def eval_terminology_coverage(
         batch_size=generation_batch_size,
     )
 
+    failures = []
     for i, item in enumerate(cloze_items):
         target_term = item["target_term"]
         category    = item.get("category", "unknown")
@@ -234,6 +244,12 @@ def eval_terminology_coverage(
 
         if not hit:
             missed_terms.append(target_term)
+            failures.append({
+                "prompt": item["prompt"],
+                "target_term": target_term,
+                "generated_completions": completions,
+                "category": category
+            })
 
         if category not in category_stats:
             category_stats[category] = {"covered": 0, "total": 0}
@@ -268,4 +284,55 @@ def eval_terminology_coverage(
         "total"        : total,
         "per_category" : per_category,
         "missed_terms" : missed_terms,
+        "failures"     : failures,
     }
+
+
+def get_failed_terminology_samples(
+    model,
+    tokenizer,
+    vocab_cloze_path: Path,
+    top_k: int,
+    max_new_tokens: int,
+    device: str = "cuda",
+    generation_batch_size: int = 16,
+) -> List[Dict[str, Any]]:
+    """
+    Run Probe C and return detailed list of failed samples where target term was not covered.
+    """
+    with open(vocab_cloze_path, "r", encoding="utf-8") as f:
+        cloze_items: List[Dict[str, Any]] = json.load(f)
+
+    model.eval()
+    eval_prompts = []
+    for item in cloze_items:
+        prompt = item["prompt"]
+        eval_prompt = prompt.split("___")[0] if "___" in prompt else prompt
+        if not eval_prompt.strip():
+            eval_prompt = tokenizer.bos_token or tokenizer.eos_token or " "
+        eval_prompts.append(eval_prompt)
+
+    batch_completions = generate_topk_completions_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=eval_prompts,
+        k=top_k,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        batch_size=generation_batch_size,
+    )
+
+    failures = []
+    for i, item in enumerate(cloze_items):
+        target_term = item["target_term"]
+        completions = batch_completions[i]
+        hit = term_found_in_completions(target_term, completions)
+        if not hit:
+            failures.append({
+                "prompt": item["prompt"],
+                "target_term": target_term,
+                "generated_completions": completions,
+                "category": item.get("category", "unknown")
+            })
+    return failures
+

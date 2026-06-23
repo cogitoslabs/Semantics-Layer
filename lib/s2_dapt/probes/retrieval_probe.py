@@ -58,6 +58,7 @@ def generate_response(
             do_sample=False,
             temperature=1.0,
             pad_token_id=tokenizer.eos_token_id,
+            use_cache=True,
         )
 
     prompt_len = inputs["input_ids"].shape[1]
@@ -76,15 +77,20 @@ def generate_responses_batch(
     if not prompts:
         return []
 
-    responses = []
+    # Sort prompts by length to minimize padding and save GPU VRAM (bucket by padding)
+    indexed_prompts = sorted(enumerate(prompts), key=lambda x: len(x[1]))
+    sorted_prompts = [p for _, p in indexed_prompts]
+    orig_indices = [idx for idx, _ in indexed_prompts]
+
+    sorted_responses = []
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else (tokenizer.eos_token_id or 0)
 
     orig_padding_side = getattr(tokenizer, "padding_side", "right")
     tokenizer.padding_side = "left"
 
     try:
-        for start_idx in range(0, len(prompts), batch_size):
-            batch_prompts = prompts[start_idx : start_idx + batch_size]
+        for start_idx in range(0, len(sorted_prompts), batch_size):
+            batch_prompts = sorted_prompts[start_idx : start_idx + batch_size]
 
             # Tokenize each prompt individually to respect mock/custom tokenizers that only support string inputs
             batch_inputs = []
@@ -147,6 +153,7 @@ def generate_responses_batch(
                     do_sample=False,
                     temperature=1.0,
                     pad_token_id=tokenizer.eos_token_id,
+                    use_cache=True,
                 )
 
             for i in range(len(batch_prompts)):
@@ -159,14 +166,19 @@ def generate_responses_batch(
                     except Exception:
                         generated_ids = output_ids
                 response = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-                responses.append(response)
+                sorted_responses.append(response)
 
             # Log progress
             progress_count = start_idx + len(batch_prompts)
-            if progress_count % 20 == 0 or progress_count == len(prompts):
-                logger.debug(f"  Retrieval probe: {progress_count}/{len(prompts)} responses generated")
+            if progress_count % 20 == 0 or progress_count == len(sorted_prompts):
+                logger.debug(f"  Retrieval probe: {progress_count}/{len(sorted_prompts)} responses generated")
     finally:
         tokenizer.padding_side = orig_padding_side
+
+    # Restore original order
+    responses = [None] * len(prompts)
+    for orig_idx, resp in zip(orig_indices, sorted_responses):
+        responses[orig_idx] = resp
 
     return responses
 
@@ -301,6 +313,17 @@ def eval_retrieval_precision(
         f"low-scoring={len(low_scoring)})"
     )
 
+    failures = []
+    for i in range(len(prompts)):
+        score = f1_scores[i]
+        if score < 0.50:
+            failures.append({
+                "prompt": prompts[i],
+                "reference": references[i],
+                "generated": hypotheses[i],
+                "score": score
+            })
+
     return {
         "precision"         : mean_f1,
         "mean_bertscore_f1" : mean_f1,
@@ -308,4 +331,73 @@ def eval_retrieval_precision(
         "max_bertscore_f1"  : max_f1,
         "num_samples"       : len(prompts),
         "low_scoring_prompts": low_scoring,
+        "failures"          : failures,
     }
+
+
+def get_failed_retrieval_samples(
+    model,
+    tokenizer,
+    retrieval_prompts_path: Path,
+    retrieval_references_path: Path,
+    bertscore_model: str,
+    max_new_tokens: int,
+    device: str = "cuda",
+    bertscore_batch_size: int = 32,
+    use_bertscore: bool = True,
+    generation_batch_size: int = 16,
+    failure_threshold: float = 0.50,
+) -> List[Dict[str, Any]]:
+    """
+    Run Probe D and return detailed list of failed samples where score is below the failure_threshold.
+    """
+    with open(retrieval_prompts_path, "r", encoding="utf-8") as f:
+        prompts: List[str] = json.load(f)
+    with open(retrieval_references_path, "r", encoding="utf-8") as f:
+        references: List[str] = json.load(f)
+
+    if len(prompts) != len(references):
+        raise ValueError(
+            f"Prompts ({len(prompts)}) and references ({len(references)}) must be the same length."
+        )
+
+    model.eval()
+    hypotheses = generate_responses_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=prompts,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        batch_size=generation_batch_size,
+    )
+
+    truncated_hypotheses = [token_safe_truncate(h, tokenizer, max_tokens=256) for h in hypotheses]
+    truncated_references = [token_safe_truncate(r, tokenizer, max_tokens=256) for r in references]
+
+    if use_bertscore:
+        try:
+            f1_scores = compute_bertscore_batch(
+                hypotheses=truncated_hypotheses,
+                references=truncated_references,
+                model_type=bertscore_model,
+                device=device,
+                batch_size=bertscore_batch_size,
+            )
+        except Exception as e:
+            logger.warning(f"BERTScore computation failed: {e}. Falling back to dummy F1 scores.")
+            f1_scores = [0.5] * len(prompts)
+    else:
+        f1_scores = compute_lexical_f1_batch(truncated_hypotheses, truncated_references)
+
+    failures = []
+    for i in range(len(prompts)):
+        score = f1_scores[i]
+        if score < failure_threshold:
+            failures.append({
+                "prompt": prompts[i],
+                "reference": references[i],
+                "generated": hypotheses[i],
+                "score": score
+            })
+    return failures
+

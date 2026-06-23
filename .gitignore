@@ -14,3 +14,7 @@ wheels/
 # Large model weights and outputs
 outputs/dapt_model/
 models/
+
+logs/
+wandb
+

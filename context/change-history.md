@@ -28,4 +28,6 @@
 - Refactored `eval_qa_accuracy` in [qa_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/qa_probe.py) to read files exclusively as JSONL line-by-line, adding early-termination optimization for `max_samples` and removing the double-reading JSON array fallback.
 - Implemented batching generation for terminology probe and retrieval probe evaluations, adding configurable batch sizes (`TERM_COV_GEN_BATCH_SIZE` and `RET_PREC_GEN_BATCH_SIZE`).
 - Fixed shape/dimension mismatch and empty-input handling in generation probes to avoid runtime errors when tokenizing empty inputs or when padding inputs.
+- Implemented final saved model reloading and detailed failure logging at the end of the DAPT training step, logging individual failed samples (for QA, Terminology, and Retrieval probes) and saving a structured summary to `logs/failed_evals.json`. Added corresponding unit test coverage in [test_dapt.py](file:///e:/Projects/CND/Semantics/tests/test_dapt.py).
+
 

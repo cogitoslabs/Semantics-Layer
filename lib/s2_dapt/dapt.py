@@ -90,13 +90,15 @@ def _run_dapt_pipeline_impl(
     dataset = MemmapDataset(mmapped_tokens, block_size=cfg.model.max_seq_len)
     logger.info(f"Loaded {len(dataset):,} training blocks of size {cfg.model.max_seq_len}.")
 
+    num_workers = 4 if device.type == "cuda" else 0
+
     train_dataloader = DataLoader(
         dataset,
         batch_size=cfg.optimizer.train_batch_size,
         shuffle=True,
         pin_memory=(device.type == "cuda"),
-        num_workers=0,
-        drop_last=True, 
+        num_workers=num_workers,
+        drop_last=True,
     )
 
     # Build Optimizer & Scheduler

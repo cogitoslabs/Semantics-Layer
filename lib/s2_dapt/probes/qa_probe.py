@@ -29,26 +29,81 @@ def format_mcq_prompt(question: str, choices: List[str]) -> str:
 def score_choices_by_logprob(
     model,
     tokenizer,
-    prompt: str,
-    choices: List[str],
+    prompt: Any,
+    choices: Any,
     device: str = "cuda",
-) -> int:
-    scores = []
+) -> Any:
+    is_batched = not isinstance(prompt, str)
 
-    prompt_ids_inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=512,
-    )
-    if hasattr(prompt_ids_inputs, "to"):
-        prompt_ids_inputs = prompt_ids_inputs.to(device)
+    if not is_batched:
+        prompts = [prompt]
+        choices_list = [choices]
     else:
-        prompt_ids_inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in prompt_ids_inputs.items()}
+        prompts = prompt
+        choices_list = choices
 
-    prompt_len = prompt_ids_inputs["input_ids"].shape[1]
+    if not prompts:
+        return [] if is_batched else -1
 
-    # Detect model parameter dtype dynamically
+    dev = torch.device(device)
+
+    # Ensure pad token is set
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # 1. Tokenize all prompts to get their token lengths
+    prompt_lens = []
+    for p in prompts:
+        p_inputs = tokenizer(
+            p,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+        prompt_lens.append(p_inputs["input_ids"].shape[1])
+
+    # 2. Build and tokenize all full texts (prompt + choice)
+    flat_texts = []
+    flat_prompt_lens = []
+    for j, (p, chs) in enumerate(zip(prompts, choices_list)):
+        p_len = prompt_lens[j]
+        for choice in chs:
+            flat_texts.append(p + " " + choice)
+            flat_prompt_lens.append(p_len)
+
+    # Tokenize flat texts individually
+    tokenized_inputs = []
+    for text in flat_texts:
+        t_input = tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+        tokenized_inputs.append(t_input)
+
+    # Pad inputs manually to handle custom/mock tokenizers and keep processing uniform
+    max_len = max(t["input_ids"].shape[1] for t in tokenized_inputs)
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else (tokenizer.eos_token_id or 0)
+
+    input_ids_list = []
+    attention_mask_list = []
+    for t in tokenized_inputs:
+        ids = t["input_ids"][0]
+        mask = t["attention_mask"][0]
+        curr_len = len(ids)
+        pad_len = max_len - curr_len
+
+        padded_ids = torch.cat([ids, torch.tensor([pad_id] * pad_len, dtype=ids.dtype, device=ids.device)])
+        padded_mask = torch.cat([mask, torch.tensor([0] * pad_len, dtype=mask.dtype, device=mask.device)])
+
+        input_ids_list.append(padded_ids)
+        attention_mask_list.append(padded_mask)
+
+    input_ids = torch.stack(input_ids_list).to(dev)
+    attention_mask = torch.stack(attention_mask_list).to(dev)
+
+    # 3. Model forward pass
     is_cuda = "cuda" in str(device)
     try:
         model_dtype = next(iter(model.parameters())).dtype
@@ -57,38 +112,42 @@ def score_choices_by_logprob(
 
     autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=model_dtype) if is_cuda and hasattr(torch, "amp") else contextlib.nullcontext()
 
-    for choice in choices:
-        full_text = prompt + " " + choice
-        inputs = tokenizer(
-            full_text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=512,
-        )
-        if hasattr(inputs, "to"):
-            inputs = inputs.to(device)
-        else:
-            inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+    with torch.no_grad():
+        with autocast_ctx:
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = outputs.logits
 
-        with torch.no_grad():
-            with autocast_ctx:
-                outputs = model(**inputs)
-                logits = outputs.logits
+    # 4. Compute log probabilities in a vectorized manner
+    flat_scores = []
+    for idx in range(len(flat_texts)):
+        p_len = flat_prompt_lens[idx]
+        seq_len_idx = attention_mask[idx].sum().item()
 
-        labels = inputs["input_ids"][0, prompt_len:].cpu()
-        choice_logits = logits[0, prompt_len - 1 : -1, :].cpu()
-
-        if len(labels) == 0:
-            scores.append(-float("inf"))
+        if seq_len_idx <= p_len:
+            flat_scores.append(-float("inf"))
             continue
 
-        log_probs = F.log_softmax(choice_logits, dim=-1)
-        choice_log_prob = sum(
-            log_probs[t, labels[t]].item() for t in range(len(labels))
-        )
-        scores.append(choice_log_prob / max(len(labels), 1))
+        # Extract labels and logits for the choice part of the sequence
+        labels = input_ids[idx, p_len:seq_len_idx]
+        choice_logits = logits[idx, p_len - 1 : seq_len_idx - 1, :]
 
-    return int(torch.tensor(scores).argmax().item())
+        log_probs = F.log_softmax(choice_logits, dim=-1)
+        choice_len = len(labels)
+        token_log_probs = log_probs[torch.arange(choice_len, device=dev), labels]
+        choice_log_prob = token_log_probs.sum().item()
+        flat_scores.append(choice_log_prob / max(choice_len, 1))
+
+    # 5. Group scores back to identify predicted choice index for each prompt
+    predicted_indices = []
+    curr_flat_idx = 0
+    for chs in choices_list:
+        num_choices = len(chs)
+        choice_scores = flat_scores[curr_flat_idx : curr_flat_idx + num_choices]
+        predicted_idx = int(torch.tensor(choice_scores).argmax().item())
+        predicted_indices.append(predicted_idx)
+        curr_flat_idx += num_choices
+
+    return predicted_indices if is_batched else predicted_indices[0]
 
 
 def eval_qa_accuracy(
@@ -97,6 +156,7 @@ def eval_qa_accuracy(
     qa_probe_path: Path,
     device: str = "cuda",
     max_samples: Optional[int] = None,
+    batch_size: int = 32,
 ) -> Dict[str, Any]:
     """
     Run Probe A and return accuracy plus per-cluster diagnostics.
@@ -120,41 +180,70 @@ def eval_qa_accuracy(
 
     if not qa_items:
         logger.warning(f"No QA probe questions found at {qa_probe_path}")
-        return {"accuracy": 0.0, "correct": 0, "total": 0, "per_cluster_accuracy": {}}
+        return {"accuracy": 0.0, "correct": 0, "total": 0, "per_cluster_accuracy": {}, "failures": []}
 
     model.eval()
     correct = 0
     cluster_stats: Dict[str, Dict[str, int]] = {}
 
-    for i, item in enumerate(qa_items):
+    # Filter out malformed items first to make batching clean
+    valid_items = []
+    for item in qa_items:
         question = item.get("question")
-        cluster = item.get("cluster", "unknown")
-
-        # Determine MCQ format: limit to New format (choices list + answer index)
         if "choices" in item and "answer_idx" in item and question is not None:
-            choices = item["choices"]
-            answer_idx = item["answer_idx"]
-            prompt = format_mcq_prompt(question, choices)
-            predicted = score_choices_by_logprob(model, tokenizer, prompt, choices, device=device)
-            is_correct = int(predicted == answer_idx)
+            valid_items.append(item)
         else:
             logger.warning(
                 f"Skipping malformed or unsupported QA item (must be New format with 'choices' and 'answer_idx'): {item}"
             )
-            continue
 
-        correct += is_correct
+    # Process in batches
+    failures = []
+    for b_idx in range(0, len(valid_items), batch_size):
+        batch_items = valid_items[b_idx : b_idx + batch_size]
+        prompts = []
+        choices_list = []
+        for item in batch_items:
+            prompts.append(format_mcq_prompt(item["question"], item["choices"]))
+            choices_list.append(item["choices"])
 
-        if cluster not in cluster_stats:
-            cluster_stats[cluster] = {"correct": 0, "total": 0}
-        cluster_stats[cluster]["correct"] += is_correct
-        cluster_stats[cluster]["total"] += 1
+        predicted_indices = score_choices_by_logprob(
+            model,
+            tokenizer,
+            prompts,
+            choices_list,
+            device=device,
+        )
 
-        if (i + 1) % 100 == 0:
-            running_acc = correct / (i + 1)
-            logger.debug(f"  QA probe: {i+1}/{len(qa_items)} evaluated, running acc={running_acc:.3f}")
+        for item, predicted in zip(batch_items, predicted_indices):
+            answer_idx = item["answer_idx"]
+            cluster = item.get("cluster", "unknown")
+            is_correct = int(predicted == answer_idx)
+            correct += is_correct
 
-    total = len(qa_items)
+            if not is_correct:
+                choices = item["choices"]
+                failures.append({
+                    "question": item["question"],
+                    "choices": choices,
+                    "expected_idx": answer_idx,
+                    "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
+                    "predicted_idx": predicted,
+                    "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
+                    "cluster": cluster
+                })
+
+            if cluster not in cluster_stats:
+                cluster_stats[cluster] = {"correct": 0, "total": 0}
+            cluster_stats[cluster]["correct"] += is_correct
+            cluster_stats[cluster]["total"] += 1
+
+        processed_count = b_idx + len(batch_items)
+        if (b_idx // 100) < (processed_count // 100) or processed_count == len(valid_items):
+            running_acc = correct / processed_count
+            logger.debug(f"  QA probe: {processed_count}/{len(valid_items)} evaluated, running acc={running_acc:.3f}")
+
+    total = len(valid_items)
     accuracy = correct / total if total > 0 else 0.0
 
     per_cluster = {
@@ -170,5 +259,74 @@ def eval_qa_accuracy(
         "correct": correct,
         "total": total,
         "per_cluster_accuracy": per_cluster,
+        "failures": failures,
     }
+
+
+def get_failed_qa_samples(
+    model,
+    tokenizer,
+    qa_probe_path: Path,
+    device: str = "cuda",
+    batch_size: int = 32,
+) -> List[Dict[str, Any]]:
+    """
+    Run Probe A and return a list of failed samples.
+    """
+    qa_items: List[Dict[str, Any]] = []
+    try:
+        with open(qa_probe_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    qa_items.append(json.loads(line_str))
+                except json.JSONDecodeError:
+                    pass
+    except FileNotFoundError:
+        logger.error(f"QA probe file not found at {qa_probe_path}")
+        return []
+
+    model.eval()
+    failures = []
+
+    valid_items = []
+    for item in qa_items:
+        question = item.get("question")
+        if "choices" in item and "answer_idx" in item and question is not None:
+            valid_items.append(item)
+
+    # Process in batches
+    for b_idx in range(0, len(valid_items), batch_size):
+        batch_items = valid_items[b_idx : b_idx + batch_size]
+        prompts = []
+        choices_list = []
+        for item in batch_items:
+            prompts.append(format_mcq_prompt(item["question"], item["choices"]))
+            choices_list.append(item["choices"])
+
+        predicted_indices = score_choices_by_logprob(
+            model,
+            tokenizer,
+            prompts,
+            choices_list,
+            device=device,
+        )
+
+        for item, predicted in zip(batch_items, predicted_indices):
+            answer_idx = item["answer_idx"]
+            if predicted != answer_idx:
+                choices = item["choices"]
+                failures.append({
+                    "question": item["question"],
+                    "choices": choices,
+                    "expected_idx": answer_idx,
+                    "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
+                    "predicted_idx": predicted,
+                    "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
+                    "cluster": item.get("cluster", "unknown")
+                })
+    return failures
+
 

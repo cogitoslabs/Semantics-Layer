@@ -359,16 +359,34 @@ def test_eval_qa_accuracy_new_format(mock_model, mock_tokenizer):
     call_count = 0
     
     def mock_model_forward(*args, **kwargs):
-        nonlocal call_count
-        logits = torch.zeros((1, 5, 10))
-        if call_count == 1:
-            logits[0, 2, 4] = 10.0
-            logits[0, 3, 5] = 10.0
+        batch_size = 1
+        if "input_ids" in kwargs:
+            batch_size = kwargs["input_ids"].shape[0]
+        elif len(args) > 0 and torch.is_tensor(args[0]):
+            batch_size = args[0].shape[0]
+        elif hasattr(mock_model, "call_args") and mock_model.call_args is not None:
+            call_kwargs = mock_model.call_args[1]
+            call_args = mock_model.call_args[0]
+            if "input_ids" in call_kwargs:
+                batch_size = call_kwargs["input_ids"].shape[0]
+            elif len(call_args) > 0 and torch.is_tensor(call_args[0]):
+                batch_size = call_args[0].shape[0]
+
+        logits = torch.zeros((batch_size, 5, 10))
+        logits[:, 2, 4] = 1.0
+        logits[:, 3, 5] = 1.0
+
+        if batch_size > 1:
+            # Choice at index 1 is Dopamine, make it highly probable
+            logits[1, 2, 4] = 10.0
+            logits[1, 3, 5] = 10.0
         else:
-            logits[0, 2, 4] = 1.0
-            logits[0, 3, 5] = 1.0
-        
-        call_count += 1
+            nonlocal call_count
+            if call_count == 1:
+                logits[0, 2, 4] = 10.0
+                logits[0, 3, 5] = 10.0
+            call_count += 1
+
         mock_output = MagicMock()
         mock_output.logits = logits
         return mock_output
@@ -663,6 +681,85 @@ def test_select_best_checkpoint_fallback_metrics():
         
         # Should select eval 2 because term_coverage is 0.9 > 0.1
         assert best_ckpt.name == "dapt_eval_0002.pt"
+
+
+def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
+    from lib.s2_dapt.evaluation.eval_runner import run_inference_and_log_failures
+    import tempfile
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create mock checkpoint files/folders
+        model_dir = Path(tmpdir) / "checkpoint"
+        model_dir.mkdir()
+        # Save a dummy file so exists() returns true for directory
+        (model_dir / "config.json").write_text("{}")
+        
+        # Write dummy evaluation files
+        qa_path = Path(tmpdir) / "probe_qa.jsonl"
+        with open(qa_path, "w") as f:
+            f.write(json.dumps({"question": "Q1", "choices": ["A", "B"], "answer_idx": 0, "cluster": "cat1"}) + "\n")
+            f.write(json.dumps({"question": "Q2", "choices": ["A", "B"], "answer_idx": 1, "cluster": "cat2"}) + "\n")
+            
+        vocab_path = Path(tmpdir) / "vocab_cloze_set.json"
+        with open(vocab_path, "w") as f:
+            json.dump([{"prompt": "___ is cool.", "target_term": "Term1", "category": "cat1"}], f)
+            
+        retrieval_prompts_path = Path(tmpdir) / "retrieval_prompts.json"
+        with open(retrieval_prompts_path, "w") as f:
+            json.dump(["Prompt1"], f)
+            
+        retrieval_references_path = Path(tmpdir) / "retrieval_references.json"
+        with open(retrieval_references_path, "w") as f:
+            json.dump(["Ref1"], f)
+            
+        # Create pipeline config
+        cfg = PipelineConfig()
+        cfg.storage.checkpoint_dir = model_dir
+        cfg.storage.log_dir = Path(tmpdir) / "logs"
+        cfg.data.qa_probe_path = qa_path
+        cfg.data.vocab_cloze_path = vocab_path
+        cfg.data.retrieval_prompts_path = retrieval_prompts_path
+        cfg.data.retrieval_references_path = retrieval_references_path
+        cfg.probes.run_qa = True
+        cfg.probes.run_terminology = True
+        cfg.probes.run_retrieval = True
+        
+        # Mock AutoModelForCausalLM.from_pretrained and AutoTokenizer.from_pretrained
+        with patch("transformers.AutoModelForCausalLM.from_pretrained") as mock_model_load, \
+             patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer_load, \
+             patch("lib.s2_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa, \
+             patch("lib.s2_dapt.probes.terminology_probe.get_failed_terminology_samples") as mock_get_failed_term, \
+             patch("lib.s2_dapt.probes.retrieval_probe.get_failed_retrieval_samples") as mock_get_failed_ret:
+             
+            mock_model_load.return_value = mock_model
+            mock_tokenizer_load.return_value = mock_tokenizer
+            
+            # Setup dummy failures
+            mock_get_failed_qa.return_value = [{"question": "Q2", "expected_idx": 1, "expected_text": "B", "predicted_idx": 0, "predicted_text": "A", "cluster": "cat2"}]
+            mock_get_failed_term.return_value = [{"prompt": "___ is cool.", "target_term": "Term1", "generated_completions": ["completions"], "category": "cat1"}]
+            mock_get_failed_ret.return_value = [{"prompt": "Prompt1", "reference": "Ref1", "generated": "Gen1", "score": 0.35}]
+            
+            run_inference_and_log_failures(cfg)
+            
+            # Verify failures file was written
+            failed_evals_file = cfg.storage.log_dir / "failed_evals.json"
+            assert failed_evals_file.exists()
+            
+            with open(failed_evals_file, "r") as f:
+                data = json.load(f)
+                
+            assert "qa" in data
+            assert len(data["qa"]) == 1
+            assert data["qa"][0]["question"] == "Q2"
+            
+            assert "terminology" in data
+            assert len(data["terminology"]) == 1
+            assert data["terminology"][0]["target_term"] == "Term1"
+            
+            assert "retrieval" in data
+            assert len(data["retrieval"]) == 1
+            assert data["retrieval"][0]["score"] == 0.35
+
 
 
 

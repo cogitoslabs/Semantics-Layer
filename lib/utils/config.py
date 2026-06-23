@@ -152,6 +152,7 @@ class MiscConfig:
 @dataclass
 class WandbConfig:
     enabled: bool                  = field(default_factory=lambda: _get("WANDB_ENABLED", False, bool))
+    mode: str                      = field(default_factory=lambda: _get("WANDB_MODE", "online", str))
     api_key: Optional[str]         = field(default_factory=lambda: _get("WANDB_API_KEY", None, str))
     project: str                   = field(default_factory=lambda: _get("WANDB_PROJECT", "semantics-dapt", str))
     entity: Optional[str]          = field(default_factory=lambda: _get("WANDB_ENTITY", None, str))
@@ -162,6 +163,8 @@ class WandbConfig:
         if not self.run_name:
             timestamp = datetime.now().strftime("%y%m%d%H%M%S")
             self.run_name = f"{self.project}_{timestamp}"
+        if self.mode:
+            os.environ["WANDB_MODE"] = self.mode
 
 
 
