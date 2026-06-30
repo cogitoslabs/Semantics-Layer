@@ -1,0 +1,424 @@
+import json
+import os
+import tempfile
+import time
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+import pytest
+import numpy as np
+import faiss
+
+from lib.utils import PipelineConfig
+from lib.s3_rad_prep.chunker import Chunk, chunk_document, run_chunking
+from lib.s3_rad_prep.indexer import run_indexing
+from lib.s3_rad_prep.retriever import Retriever, RetrievalResult
+from lib.s3_rad_prep.no_retrieval_router import NoRetrievalRouter
+from lib.s3_rad_prep.trace_generator import format_prompt, TraceGenerator
+
+
+class SimpleMockTokenizer:
+    def __init__(self):
+        self.pad_token = "<pad>"
+        self.eos_token = "</s>"
+        self.eos_token_id = 2
+        self.pad_token_id = 1
+
+    def encode(self, text, add_special_tokens=False):
+        # Treat each word as a token
+        return [ord(w[0]) for w in text.split() if w]
+
+    def decode(self, tokens, skip_special_tokens=True):
+        return " ".join(chr(t) for t in tokens)
+
+    def tokenize(self, text):
+        return text.split()
+
+
+
+@pytest.fixture
+def mock_tokenizer():
+    return SimpleMockTokenizer()
+
+
+@pytest.fixture
+def test_cfg():
+    cfg = PipelineConfig()
+    # Use small validation settings
+    cfg.rad.long_form_chunk_tokens = 10
+    cfg.rad.long_form_overlap_tokens = 2
+    cfg.rad.abstract_chunk_tokens = 5
+    cfg.rad.abstract_overlap_tokens = 1
+    cfg.rad.top_k = 3
+    cfg.rad.relevance_threshold = 0.65
+    cfg.rad.embed_batch_size = 2
+    cfg.rad.teacher_backend = "hf_local"
+    cfg.rad.teacher_batch_size = 2
+    cfg.rad.trace_min_tokens = 10
+    cfg.rad.trace_max_tokens = 50
+    cfg.rad.min_traces = 2
+    return cfg
+
+
+def test_chunker_long_form(mock_tokenizer):
+    text = "worda wordb wordc wordd worde wordf wordg wordh wordi wordj wordk wordl wordm wordn wordo"
+    # Total 15 words (tokens)
+    # chunk_size = 10, overlap = 2 -> step = 8
+    # Chunk 0: index 0 to 10
+    # Chunk 1: index 8 to 15 (end of list)
+    chunks = chunk_document("doc1", text, "long_form", mock_tokenizer, chunk_size=10, overlap_size=2)
+    assert len(chunks) == 2
+    assert chunks[0].chunk_id == "doc1_0"
+    assert chunks[0].doc_type == "long_form"
+    assert chunks[0].token_count == 10
+    assert chunks[1].chunk_id == "doc1_1"
+    assert chunks[1].token_count == 7
+
+
+def test_chunker_abstract(mock_tokenizer):
+    text = "worda wordb wordc wordd worde wordf wordg wordh wordi wordj"
+    # Total 10 words (tokens)
+    # chunk_size = 5, overlap = 1 -> step = 4
+    # Chunk 0: index 0 to 5
+    # Chunk 1: index 4 to 9
+    # Chunk 2: index 8 to 10
+    chunks = chunk_document("doc2", text, "abstract", mock_tokenizer, chunk_size=5, overlap_size=1)
+    assert len(chunks) == 3
+    assert chunks[0].doc_type == "abstract"
+    assert chunks[0].token_count == 5
+    assert chunks[1].token_count == 5
+    assert chunks[2].token_count == 2
+
+
+def test_chunker_short_doc(mock_tokenizer):
+    text = "worda wordb wordc"
+    chunks = chunk_document("doc3", text, "long_form", mock_tokenizer, chunk_size=10, overlap_size=2)
+    assert len(chunks) == 1
+    assert chunks[0].token_count == 3
+
+
+def test_indexer_build_and_load(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.index_dir = tmp_path / "index"
+        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+
+        chunks = [
+            Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="biomedical data science", token_count=3),
+            Chunk(chunk_id="c2", doc_id="d1", doc_type="long_form", text="neural systems neuroscience", token_count=3),
+        ]
+
+        mock_embeddings = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0]
+        ], dtype="float32")
+
+        with patch("lib.s3_rad_prep.indexer.DenseEmbedder") as mock_embedder_class:
+            mock_embedder = MagicMock()
+            mock_embedder.embed_batch.return_value = mock_embeddings
+            mock_embedder_class.return_value = mock_embedder
+
+            run_indexing(test_cfg, chunks)
+
+        assert (test_cfg.rad.index_dir / "index.faiss").exists()
+        assert (test_cfg.rad.index_dir / "chunks_metadata.jsonl").exists()
+        assert (test_cfg.rad.index_dir / "index_manifest.json").exists()
+
+        with open(test_cfg.rad.index_dir / "index_manifest.json", "r") as f:
+            manifest = json.load(f)
+            assert manifest["chunk_count"] == 2
+            assert manifest["total_tokens"] == 6
+
+
+def test_dense_retrieval(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.index_dir = tmp_path / "index"
+        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+
+        chunks = [
+            Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="cognitive neuroscience", token_count=2),
+            Chunk(chunk_id="c2", doc_id="d2", doc_type="long_form", text="visual cortex brain", token_count=3),
+        ]
+
+        with open(test_cfg.rad.chunks_path, "w") as f:
+            for c in chunks:
+                f.write(json.dumps(c.__dict__) + "\n")
+
+        # Create mock faiss index
+        index = faiss.IndexFlatIP(4)
+        index.add(np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype="float32"))
+        test_cfg.rad.index_dir.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(index, str(test_cfg.rad.index_dir / "index.faiss"))
+
+        mock_query_emb = np.array([[0.9, 0.1, 0, 0]], dtype="float32")
+
+        with patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+             patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
+            mock_embedder = MagicMock()
+            mock_embedder.embed_batch.return_value = mock_query_emb
+            mock_embedder_class.return_value = mock_embedder
+            mock_tok_class.return_value = SimpleMockTokenizer()
+
+            test_cfg.rad.retrieval_mode = "dense"
+            test_cfg.rad.relevance_threshold = 0.5
+            retriever = Retriever(test_cfg)
+            result = retriever.retrieve("cognitive neuroscience")
+
+            assert len(result.chunks) >= 1
+            assert result.chunks[0].chunk_id == "c1"
+            assert result.scores[0] == pytest.approx(0.9, rel=1e-2)
+
+
+def test_relevance_threshold_gate(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.index_dir = tmp_path / "index"
+        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+
+        chunks = [
+            Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="brain visual system", token_count=3),
+            Chunk(chunk_id="c2", doc_id="d2", doc_type="long_form", text="cardiac cycle blood", token_count=3),
+        ]
+        with open(test_cfg.rad.chunks_path, "w") as f:
+            for c in chunks:
+                f.write(json.dumps(c.__dict__) + "\n")
+
+        index = faiss.IndexFlatIP(4)
+        index.add(np.array([[0.9, 0.1, 0, 0], [0.1, 0.9, 0, 0]], dtype="float32"))
+        test_cfg.rad.index_dir.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(index, str(test_cfg.rad.index_dir / "index.faiss"))
+
+        mock_query_emb = np.array([[0.95, 0.05, 0, 0]], dtype="float32")
+
+        with patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+             patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
+            mock_embedder = MagicMock()
+            mock_embedder.embed_batch.return_value = mock_query_emb
+            mock_embedder_class.return_value = mock_embedder
+            mock_tok_class.return_value = SimpleMockTokenizer()
+
+            test_cfg.rad.retrieval_mode = "dense"
+            test_cfg.rad.relevance_threshold = 0.8
+            retriever = Retriever(test_cfg)
+            result = retriever.retrieve("brain visual system")
+
+            # c1 should pass (similarity ~0.85+), c2 should be gated (similarity ~0.14)
+            assert len(result.chunks) == 1
+            assert result.chunks[0].chunk_id == "c1"
+            assert result.passed_threshold == 1
+
+
+def test_no_retrieval_router(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        log_file = Path(tmpdir) / "no_retrieval_rates.jsonl"
+        router = NoRetrievalRouter(log_file)
+
+        decision1 = router.route_sample("s1", "cognitive", passed_chunks=1)
+        assert decision1.no_retrieval is True
+        assert decision1.reason.startswith("Insufficient")
+
+        decision2 = router.route_sample("s2", "cognitive", passed_chunks=3)
+        assert decision2.no_retrieval is False
+
+        router.flush_batch()
+
+        stats = router.get_aggregate_stats()
+        assert stats["total_samples"] == 2
+        assert stats["no_retrieval_count"] == 1
+        assert stats["overall_rate"] == 0.5
+        assert stats["by_cluster"]["cognitive"]["no_retrieval"] == 1
+
+
+def test_hybrid_fusion(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.index_dir = tmp_path / "index"
+        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+
+        chunks = [
+            Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="hippocampal theta oscillations", token_count=3),
+            Chunk(chunk_id="c2", doc_id="d2", doc_type="long_form", text="cerebellar Purkinje cells motor control", token_count=5),
+        ]
+        with open(test_cfg.rad.chunks_path, "w") as f:
+            for c in chunks:
+                f.write(json.dumps(c.__dict__) + "\n")
+
+        index = faiss.IndexFlatIP(4)
+        index.add(np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype="float32"))
+        test_cfg.rad.index_dir.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(index, str(test_cfg.rad.index_dir / "index.faiss"))
+
+        with patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+             patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
+            mock_embedder = MagicMock()
+            mock_embedder.embed_batch.return_value = np.array([[0.9, 0.1, 0, 0]], dtype="float32")
+            mock_embedder_class.return_value = mock_embedder
+            mock_tok_class.return_value = SimpleMockTokenizer()
+
+            test_cfg.rad.retrieval_mode = "hybrid"
+            test_cfg.rad.relevance_threshold = 0.1
+            retriever = Retriever(test_cfg)
+            result = retriever.retrieve("hippocampal motor control")
+
+            assert len(result.chunks) > 0
+            assert result.retrieval_mode == "hybrid"
+
+
+def test_trace_generator_grounded(test_cfg):
+    chunks = [Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="hippocampus functions in memory", token_count=4)]
+    prompt = format_prompt("What is hippocampus?", "Memory function", chunks, no_retrieval=False)
+    assert "[CONTEXT]" in prompt
+    assert "hippocampus functions in memory" in prompt
+    assert "\\boxed{}" in prompt
+
+
+def test_trace_generator_no_retrieval(test_cfg):
+    prompt = format_prompt("What is hippocampus?", "Memory function", [], no_retrieval=True)
+    assert "[NO CONTEXT AVAILABLE]" in prompt
+    assert "[CONTEXT]" not in prompt
+    assert "\\boxed{}" in prompt
+
+
+def test_trace_token_filter(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.traces_dir = tmp_path / "traces"
+        test_cfg.storage.log_dir = tmp_path / "logs"
+
+        samples = [
+            {"question": "Q1", "answer": "A1", "sample_id": "s1", "cluster": "c1"},
+            {"question": "Q2", "answer": "A2", "sample_id": "s2", "cluster": "c1"},
+            {"question": "Q3", "answer": "A3", "sample_id": "s3", "cluster": "c2"}
+        ]
+
+        ret_results = [
+            RetrievalResult(chunks=[], scores=[], passed_threshold=2, retrieval_mode="dense"),
+            RetrievalResult(chunks=[], scores=[], passed_threshold=2, retrieval_mode="dense"),
+            RetrievalResult(chunks=[], scores=[], passed_threshold=2, retrieval_mode="dense")
+        ]
+
+        router = NoRetrievalRouter(tmp_path / "logs" / "rad_prep" / "no_retrieval_rates.jsonl")
+
+        # Mock Teacher backend outputs:
+        # trace 1: 5 words (short -> discarded if min is 10)
+        # trace 2: 25 words (valid)
+        # trace 3: 100 words (long -> discarded if max is 50)
+        traces = [
+            "short trace",
+            "This is a valid trace with exactly fifteen words in it to satisfy the requirements",
+            " ".join(["long"] * 80)
+        ]
+
+        with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
+             patch("lib.s3_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
+            mock_tokenizer = SimpleMockTokenizer()
+            mock_tok_class.return_value = mock_tokenizer
+
+            mock_backend = MagicMock()
+            mock_backend.generate_batch.return_value = traces
+            mock_backend_class.return_value = mock_backend
+
+            generator = TraceGenerator(test_cfg)
+            generator.generate_traces(samples, ret_results, router)
+
+            # Check files
+            grounded_file = test_cfg.rad.traces_dir / "grounded_traces.jsonl"
+            discarded_file = test_cfg.storage.log_dir / "rad_prep" / "discarded_traces.jsonl"
+
+            assert grounded_file.exists()
+            assert discarded_file.exists()
+
+            with open(grounded_file, "r") as f:
+                grounded_lines = [json.loads(line) for line in f]
+            with open(discarded_file, "r") as f:
+                discarded_lines = [json.loads(line) for line in f]
+
+            assert len(grounded_lines) == 1
+            assert grounded_lines[0]["sample_id"] == "s2"
+
+            assert len(discarded_lines) == 2
+            assert discarded_lines[0]["sample_id"] == "s1"
+            assert discarded_lines[1]["sample_id"] == "s3"
+
+
+def test_pipeline_end_to_end(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.retrieval_corpus_path = tmp_path / "retrieval_corpus.jsonl"
+        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+        test_cfg.rad.index_dir = tmp_path / "index"
+        test_cfg.rad.traces_dir = tmp_path / "traces"
+        test_cfg.rad.qa_samples_path = tmp_path / "probe_qa.jsonl"
+        test_cfg.storage.log_dir = tmp_path / "logs"
+
+        # Write mock corpus
+        with open(test_cfg.rad.retrieval_corpus_path, "w") as f:
+            f.write(json.dumps({"text": "the human brain consists of cortex and cerebellum", "doc_type": "long_form", "doc_id": "d1"}) + "\n")
+            f.write(json.dumps({"text": "neural networks learn patterns from data representations", "doc_type": "abstract", "doc_id": "d2"}) + "\n")
+
+        # Write mock QA samples
+        with open(test_cfg.rad.qa_samples_path, "w") as f:
+            f.write(json.dumps({"question": "cortex cerebellum location?", "answer": "brain", "cluster": "neuro"}) + "\n")
+            f.write(json.dumps({"choices": ["neural", "blood"], "answer_idx": 0, "question": "network representation?", "cluster": "cs"}) + "\n")
+
+        # Mock tokenizers and embeddings
+        with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
+             patch("lib.s3_rad_prep.indexer.DenseEmbedder") as mock_embedder_class, \
+             patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_ret_embedder_class, \
+             patch("lib.s3_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
+
+            mock_tok = SimpleMockTokenizer()
+            mock_tok_class.return_value = mock_tok
+
+            mock_emb = MagicMock()
+            mock_emb.embed_batch.side_effect = lambda texts: np.tile(
+                np.array([1.0, 0.0, 0.0, 0.0], dtype="float32"), (len(texts), 1)
+            )
+            mock_embedder_class.return_value = mock_emb
+            mock_ret_embedder_class.return_value = mock_emb
+
+            mock_backend = MagicMock()
+            mock_backend.generate_batch.return_value = [
+                "This is a valid trace for question one that has enough length to pass the token filter.",
+                "This is another valid trace for question two that has enough length to pass the token filter."
+            ]
+            mock_backend_class.return_value = mock_backend
+
+            from lib.s3_rad_prep import run_rad_prep_pipeline
+            run_rad_prep_pipeline(test_cfg, rad_mode="full")
+
+            # Check all artifacts
+            assert test_cfg.rad.chunks_path.exists()
+            assert (test_cfg.rad.index_dir / "index.faiss").exists()
+            assert (test_cfg.rad.traces_dir / "grounded_traces.jsonl").exists()
+            assert (test_cfg.storage.log_dir / "rad_prep" / "phase_manifest.json").exists()
+
+            with open(test_cfg.storage.log_dir / "rad_prep" / "phase_manifest.json", "r") as f:
+                manifest = json.load(f)
+                assert manifest["status"] == "complete"
+                assert manifest["metrics"]["grounded_trace_count"] == 2
+
+
+def test_trace_generator_bedrock(test_cfg):
+    test_cfg.rad.teacher_backend = "bedrock"
+    test_cfg.rad.teacher_model_name = "meta.llama3"
+
+    mock_response = {
+        "output": {
+            "message": {
+                "content": [{"text": "This is a response from Llama on Bedrock."}]
+            }
+        }
+    }
+
+    with patch("boto3.client") as mock_boto_client:
+        mock_client_instance = MagicMock()
+        mock_client_instance.converse.return_value = mock_response
+        mock_boto_client.return_value = mock_client_instance
+
+        generator = TraceGenerator(test_cfg)
+        traces = generator.backend.generate_batch(["Test prompt"])
+
+        assert len(traces) == 1
+        assert traces[0] == "This is a response from Llama on Bedrock."
+        mock_client_instance.converse.assert_called_once()

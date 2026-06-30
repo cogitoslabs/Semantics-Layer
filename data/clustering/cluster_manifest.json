@@ -1,0 +1,22 @@
+{
+  "status": "complete",
+  "embedding_model": "all-mpnet-base-v2",
+  "total_docs": 171,
+  "noise_docs": 124,
+  "noise_fraction": 0.7251,
+  "total_clusters": 3,
+  "cluster_sizes": {
+    "min": 15,
+    "max": 122,
+    "mean": 57.0,
+    "median": 34.0,
+    "std": 46.6
+  },
+  "capped_min_count": 0,
+  "capped_max_count": 2,
+  "warnings": [
+    "Fewer micro-clusters than expected: 3 < 50 threshold.",
+    "High noise fraction: 72.51% > 30% threshold. Consider lowering min_cluster_size.",
+    "Severe imbalance before reweighting: Largest cluster fraction is 71.35% > 40% threshold."
+  ]
+}

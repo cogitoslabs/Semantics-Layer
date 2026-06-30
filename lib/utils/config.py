@@ -169,6 +169,79 @@ class WandbConfig:
 
 
 @dataclass
+class RADPrepConfig:
+    # Corpus paths
+    retrieval_corpus_path: Path    = field(default_factory=lambda: Path(_get("RAD_CORPUS_PATH", "data/rad_prep/retrieval_corpus.jsonl")))
+    chunks_path: Path              = field(default_factory=lambda: Path(_get("RAD_CHUNKS_PATH", "data/rad_prep/chunks.jsonl")))
+    index_dir: Path                = field(default_factory=lambda: Path(_get("RAD_INDEX_DIR", "data/rad_prep/index")))
+    traces_dir: Path               = field(default_factory=lambda: Path(_get("RAD_TRACES_DIR", "data/rad_prep/traces")))
+    qa_samples_path: Path          = field(default_factory=lambda: Path(_get("RAD_QA_SAMPLES_PATH", "evals/dapt/probe_qa.jsonl")))
+
+    # Retrieval settings
+    embedding_model: str           = field(default_factory=lambda: _get("RAD_EMBEDDING_MODEL", "biolinkbert"))
+    retrieval_mode: str            = field(default_factory=lambda: _get("RAD_RETRIEVAL_MODE", "hybrid"))  # dense|sparse|hybrid
+    top_k: int                     = field(default_factory=lambda: _get("RAD_TOP_K", 7, int))
+    relevance_threshold: float     = field(default_factory=lambda: _get("RAD_RELEVANCE_THRESHOLD", 0.65, float))
+    embed_batch_size: int          = field(default_factory=lambda: _get("RAD_EMBED_BATCH_SIZE", 64, int))
+
+    # Chunking
+    long_form_chunk_tokens: int    = field(default_factory=lambda: _get("RAD_LONG_FORM_CHUNK_TOKENS", 512, int))
+    long_form_overlap_tokens: int  = field(default_factory=lambda: _get("RAD_LONG_FORM_OVERLAP_TOKENS", 64, int))
+    abstract_chunk_tokens: int     = field(default_factory=lambda: _get("RAD_ABSTRACT_CHUNK_TOKENS", 256, int))
+    abstract_overlap_tokens: int   = field(default_factory=lambda: _get("RAD_ABSTRACT_OVERLAP_TOKENS", 32, int))
+
+    # Teacher
+    teacher_backend: str           = field(default_factory=lambda: _get("RAD_TEACHER_BACKEND", "hf_local"))
+    teacher_model_name: str        = field(default_factory=lambda: _get("RAD_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B"))
+    teacher_api_url: Optional[str] = field(default_factory=lambda: _get("RAD_TEACHER_API_URL", None))
+    teacher_api_key: Optional[str] = field(default_factory=lambda: _get("RAD_TEACHER_API_KEY", None))
+    teacher_max_new_tokens: int    = field(default_factory=lambda: _get("RAD_TEACHER_MAX_NEW_TOKENS", 1024, int))
+    teacher_batch_size: int        = field(default_factory=lambda: _get("RAD_TEACHER_BATCH_SIZE", 4, int))
+
+    # Trace filtering
+    trace_min_tokens: int          = field(default_factory=lambda: _get("RAD_TRACE_MIN_TOKENS", 200, int))
+    trace_max_tokens: int          = field(default_factory=lambda: _get("RAD_TRACE_MAX_TOKENS", 2500, int))
+    min_traces: int                = field(default_factory=lambda: _get("RAD_MIN_TRACES", 1000, int))
+
+
+@dataclass
+class ClusteringConfig:
+    # Input
+    corpus_path: Path              = field(default_factory=lambda: Path(_get("CLUSTERING_CORPUS_PATH", "data/dapt/domain_dapt_corpus.jsonl")))
+
+    # Embedding
+    embedding_model: str           = field(default_factory=lambda: _get("CLUSTERING_EMBEDDING_MODEL", "all-mpnet-base-v2"))
+    embed_batch_size: int          = field(default_factory=lambda: _get("CLUSTERING_EMBED_BATCH_SIZE", 64, int))
+    embeddings_cache_path: Path    = field(default_factory=lambda: Path(_get("CLUSTERING_EMBEDDINGS_CACHE", "data/clustering/embeddings.npy")))
+    doc_ids_cache_path: Path       = field(default_factory=lambda: Path(_get("CLUSTERING_DOC_IDS_CACHE", "data/clustering/doc_ids.json")))
+
+    # HDBSCAN
+    hdbscan_min_cluster_size: int  = field(default_factory=lambda: _get("HDBSCAN_MIN_CLUSTER_SIZE", 10, int))
+    hdbscan_min_samples: int       = field(default_factory=lambda: _get("HDBSCAN_MIN_SAMPLES", 5, int))
+    hdbscan_metric: str            = field(default_factory=lambda: _get("HDBSCAN_METRIC", "cosine"))
+    min_clusters: int              = field(default_factory=lambda: _get("CLUSTERING_MIN_CLUSTERS", 10, int))
+
+    # Noise handling
+    noise_assignment: str          = field(default_factory=lambda: _get("CLUSTERING_NOISE_ASSIGNMENT", "nearest"))
+
+    # Imbalance reweighting
+    cluster_min_fraction: float    = field(default_factory=lambda: _get("CLUSTER_MIN_FRACTION", 0.02, float))
+    cluster_max_fraction: float    = field(default_factory=lambda: _get("CLUSTER_MAX_FRACTION", 0.15, float))
+
+    # Split ratios
+    split_dev_ratio: float         = field(default_factory=lambda: _get("SPLIT_DEV_RATIO", 0.70, float))
+    split_val_ratio: float         = field(default_factory=lambda: _get("SPLIT_VAL_RATIO", 0.20, float))
+    split_sealed_ratio: float      = field(default_factory=lambda: _get("SPLIT_SEALED_RATIO", 0.10, float))
+
+    # Output paths
+    output_dir: Path               = field(default_factory=lambda: Path(_get("CLUSTERING_OUTPUT_DIR", "data/clustering")))
+    assignments_path: Path         = field(default_factory=lambda: Path(_get("CLUSTERING_ASSIGNMENTS_PATH", "data/clustering/cluster_assignments.jsonl")))
+    splits_path: Path              = field(default_factory=lambda: Path(_get("CLUSTERING_SPLITS_PATH", "data/clustering/splits.json")))
+    cluster_manifest_path: Path    = field(default_factory=lambda: Path(_get("CLUSTERING_MANIFEST_PATH", "data/clustering/cluster_manifest.json")))
+    cluster_report_path: Path      = field(default_factory=lambda: Path(_get("CLUSTERING_REPORT_PATH", "logs/clustering/cluster_report.json")))
+
+
+@dataclass
 class PipelineConfig:
     """Top-level config for the Semantics Layer pipeline."""
     build: CorpusBuildConfig  = field(default_factory=CorpusBuildConfig)
@@ -181,6 +254,8 @@ class PipelineConfig:
     storage: StorageConfig    = field(default_factory=StorageConfig)
     misc: MiscConfig          = field(default_factory=MiscConfig)
     wandb: WandbConfig        = field(default_factory=WandbConfig)
+    rad: RADPrepConfig        = field(default_factory=RADPrepConfig)
+    clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
 
     def validate(self):
         """Sanity-check values that must satisfy domain constraints."""
@@ -214,6 +289,47 @@ class PipelineConfig:
         if self.wandb.log_interval_steps < 1:
             errors.append(f"WANDB_LOG_INTERVAL_STEPS must be >= 1, got {self.wandb.log_interval_steps}")
 
+        # RAD Prep Validation
+        if self.rad.teacher_backend not in ("hf_local", "api", "bedrock"):
+            errors.append(f"RAD_TEACHER_BACKEND must be 'hf_local', 'api', or 'bedrock', got '{self.rad.teacher_backend}'")
+        if not (0.0 <= self.rad.relevance_threshold <= 1.0):
+            errors.append(f"RAD_RELEVANCE_THRESHOLD must be in [0,1], got {self.rad.relevance_threshold}")
+        if self.rad.top_k < 1:
+            errors.append(f"RAD_TOP_K must be >= 1, got {self.rad.top_k}")
+        if self.rad.embed_batch_size < 1:
+            errors.append(f"RAD_EMBED_BATCH_SIZE must be >= 1, got {self.rad.embed_batch_size}")
+        if self.rad.long_form_chunk_tokens <= self.rad.long_form_overlap_tokens:
+            errors.append(f"RAD_LONG_FORM_CHUNK_TOKENS ({self.rad.long_form_chunk_tokens}) must be > overlap ({self.rad.long_form_overlap_tokens})")
+        if self.rad.abstract_chunk_tokens <= self.rad.abstract_overlap_tokens:
+            errors.append(f"RAD_ABSTRACT_CHUNK_TOKENS ({self.rad.abstract_chunk_tokens}) must be > overlap ({self.rad.abstract_overlap_tokens})")
+
+        # Clustering Validation
+        if self.clustering.noise_assignment not in ("nearest", "drop"):
+            errors.append(f"CLUSTERING_NOISE_ASSIGNMENT must be 'nearest' or 'drop', got '{self.clustering.noise_assignment}'")
+        if self.clustering.hdbscan_min_cluster_size < 2:
+            errors.append(f"HDBSCAN_MIN_CLUSTER_SIZE must be >= 2, got {self.clustering.hdbscan_min_cluster_size}")
+        if self.clustering.hdbscan_min_samples < 1:
+            errors.append(f"HDBSCAN_MIN_SAMPLES must be >= 1, got {self.clustering.hdbscan_min_samples}")
+        if self.clustering.min_clusters < 1:
+            errors.append(f"CLUSTERING_MIN_CLUSTERS must be >= 1, got {self.clustering.min_clusters}")
+        if not (0.0 <= self.clustering.cluster_min_fraction <= 1.0):
+            errors.append(f"CLUSTER_MIN_FRACTION must be in [0,1], got {self.clustering.cluster_min_fraction}")
+        if not (0.0 <= self.clustering.cluster_max_fraction <= 1.0):
+            errors.append(f"CLUSTER_MAX_FRACTION must be in [0,1], got {self.clustering.cluster_max_fraction}")
+        if self.clustering.cluster_min_fraction > self.clustering.cluster_max_fraction:
+            errors.append(f"CLUSTER_MIN_FRACTION ({self.clustering.cluster_min_fraction}) must be <= CLUSTER_MAX_FRACTION ({self.clustering.cluster_max_fraction})")
+        
+        # Split ratios validation
+        ratios_sum = self.clustering.split_dev_ratio + self.clustering.split_val_ratio + self.clustering.split_sealed_ratio
+        if not (0.99 <= ratios_sum <= 1.01):
+            errors.append(f"Split ratios must sum to 1.0, got {ratios_sum}")
+        if not (0.0 <= self.clustering.split_dev_ratio <= 1.0):
+            errors.append(f"SPLIT_DEV_RATIO must be in [0,1], got {self.clustering.split_dev_ratio}")
+        if not (0.0 <= self.clustering.split_val_ratio <= 1.0):
+            errors.append(f"SPLIT_VAL_RATIO must be in [0,1], got {self.clustering.split_val_ratio}")
+        if not (0.0 <= self.clustering.split_sealed_ratio <= 1.0):
+            errors.append(f"SPLIT_SEALED_RATIO must be in [0,1], got {self.clustering.split_sealed_ratio}")
+
         if errors:
             raise ValueError("Config validation failed:\n" + "\n".join(f"  • {e}" for e in errors))
 
@@ -222,6 +338,10 @@ class PipelineConfig:
         for d in [
             self.storage.checkpoint_dir,
             self.storage.log_dir,
+            self.rad.index_dir,
+            self.rad.traces_dir,
+            self.clustering.output_dir,
+            self.clustering.cluster_report_path.parent,
         ]:
             d.mkdir(parents=True, exist_ok=True)
 
@@ -241,6 +361,10 @@ class PipelineConfig:
             f"{self.gates.ppl_plateau_window} consecutive evals (Enabled: {self.probes.run_perplexity})\n"
             f"  Term cov gate   : >= {self.gates.term_cov_threshold:.0%} (Enabled: {self.probes.run_terminology})\n"
             f"  Ret prec gate   : >= {self.gates.ret_prec_threshold:.0%} (Enabled: {self.probes.run_retrieval})\n"
+            f"  RAD Embedding   : {self.rad.embedding_model}\n"
+            f"  RAD Mode        : {self.rad.retrieval_mode}\n"
+            f"  RAD Top-K       : {self.rad.top_k}\n"
+            f"  RAD Threshold   : {self.rad.relevance_threshold}\n"
             f"  Checkpoint dir  : {self.storage.checkpoint_dir}\n"
             f"  Log dir         : {self.storage.log_dir}\n"
             f"{'='*60}\n"

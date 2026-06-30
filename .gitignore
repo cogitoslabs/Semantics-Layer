@@ -18,3 +18,7 @@ models/
 logs/
 wandb
 
+# Generated clustering embeddings
+data/clustering/embeddings.npy
+
+

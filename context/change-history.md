@@ -1,5 +1,7 @@
 # Change History
 
+## Status: Build in Progress (Phase 1 — Corpus Engineering & Micro-Clustering)
+
 - Modified [main.py](file:///e:/Projects/CND/Semantics/main.py) and added root-level [pipeline.py](file:///e:/Projects/CND/Semantics/pipeline.py) to load env and run the Step 1 corpus building pipeline using the configured parser.
 - Fixed non-ASCII characters in [lib/s1_build_corpus/build_corpus.py](file:///e:/Projects/CND/Semantics/lib/s1_build_corpus/build_corpus.py) final print statement to prevent UnicodeEncodeError on Windows.
 - Removed MinerU (magic-pdf) code and registry from [lib/s1_build_corpus/parsers.py](file:///e:/Projects/CND/Semantics/lib/s1_build_corpus/parsers.py).
