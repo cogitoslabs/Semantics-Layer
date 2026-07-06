@@ -1,4 +1,5 @@
 import os
+import gc
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -158,6 +159,11 @@ def _run_dapt_pipeline_impl(
     )
     state["eval_history"].append(metrics)
 
+    # Free up memory used by baseline evaluation (SciBERT / BERTScore, generation cache)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     # 5. Training loop
     model.train()
     logger.info("Starting pretraining loop...")
@@ -288,6 +294,9 @@ def _run_dapt_pipeline_impl(
                         pass
                 return
 
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             model.train()
 
         # End of epoch
