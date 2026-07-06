@@ -90,24 +90,16 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
         output_jsonl = os.path.join(tmpdir, "output.jsonl")
         storage = DummyStorageAdapter([pdf_path])
 
-        # Patch ProcessPoolExecutor to run synchronously or mock worker pool
-        # To test the builder cleanly, we mock ProcessPoolExecutor to return our dummy worker_task results
-        with patch("lib.s1_build_corpus.build_corpus.ProcessPoolExecutor") as mock_executor_cls:
-            mock_executor = MagicMock()
-            mock_executor_cls.return_value.__enter__.return_value = mock_executor
+        # Patch multiprocessing.Pool to mock worker pool
+        with patch("lib.s1_build_corpus.build_corpus.multiprocessing.Pool") as mock_pool_cls:
+            mock_pool = MagicMock()
+            mock_pool_cls.return_value = mock_pool
             
-            # Create a mock future
-            mock_future = MagicMock()
-            mock_executor.submit.return_value = mock_future
-            
-            # Mock as_completed to yield our future
-            with patch("lib.s1_build_corpus.build_corpus.as_completed") as mock_as_completed:
-                mock_as_completed.return_value = [mock_future]
-                
-                # Mock future.result() to return a successful ExtractionResult
-                from lib.s1_build_corpus.worker import ChunkResult
-                dummy_text = "This is a neuroscience reasoning and retrieval test document. " * 10
-                mock_future.result.return_value = ExtractionResult(
+            # Mock starmap to return our successful ExtractionResult
+            from lib.s1_build_corpus.worker import ChunkResult
+            dummy_text = "This is a neuroscience reasoning and retrieval test document. " * 10
+            mock_pool.starmap.return_value = [
+                ExtractionResult(
                     filename="paper.pdf",
                     chunks=[
                         ChunkResult(
@@ -119,15 +111,16 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
                     ],
                     status="SUCCESS"
                 )
+            ]
 
-                builder = CorpusBuilder(
-                    storage=storage,
-                    output_path=output_jsonl,
-                    available_gpus="0",
-                    workers_per_gpu=1,
-                    chunk_size=3
-                )
-                builder.build()
+            builder = CorpusBuilder(
+                storage=storage,
+                output_path=output_jsonl,
+                available_gpus="0",
+                workers_per_gpu=1,
+                chunk_size=3
+            )
+            builder.build()
 
         # Verify output
         assert os.path.exists(output_jsonl)

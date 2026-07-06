@@ -7,6 +7,7 @@ from .checkpoint import save_checkpoint, load_checkpoint, select_best_checkpoint
 from .config import PipelineConfig, DAPTConfig
 from .storage import StorageAdapter, get_adapter
 from .profiller import FunctionProfiler
+from .clean_text import clean_corpus_text
 
 __all__ = [
     "setup_logger",
@@ -22,4 +23,5 @@ __all__ = [
     "StorageAdapter",
     "get_adapter",
     "FunctionProfiler",
+    "clean_corpus_text",
 ]

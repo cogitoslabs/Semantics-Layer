@@ -21,4 +21,12 @@ wandb
 # Generated clustering embeddings
 data/clustering/embeddings.npy
 
+# Large backups
+runpod/project_backup.zip
+
+# Large PDFs
+data/raw/Principles of Neural Science.pdf
+
+
+
 

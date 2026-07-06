@@ -1,214 +1,925 @@
 {
-  "total_docs": 171,
-  "total_clusters": 3,
+  "total_docs": 594,
+  "total_clusters": 27,
   "seed": 42,
   "clusters": {
     "cluster_000": {
       "cluster_id": 0,
-      "total_docs": 15,
+      "total_docs": 11,
       "dev_doc_ids": [
-        "domain_doc_000058",
-        "domain_doc_000070",
-        "domain_doc_000053",
-        "domain_doc_000052",
-        "domain_doc_000071",
-        "domain_doc_000068",
-        "domain_doc_000051",
-        "domain_doc_000030",
-        "domain_doc_000059",
-        "domain_doc_000031"
+        "domain_doc_000371",
+        "domain_doc_000245",
+        "domain_doc_000244",
+        "domain_doc_000372",
+        "domain_doc_000247",
+        "domain_doc_000248",
+        "domain_doc_000531",
+        "domain_doc_000246"
       ],
       "val_doc_ids": [
-        "domain_doc_000032",
-        "domain_doc_000061",
-        "domain_doc_000018"
+        "domain_doc_000022",
+        "domain_doc_000228"
       ],
       "sealed_doc_ids": [
-        "domain_doc_000025",
-        "domain_doc_000060"
+        "domain_doc_000533"
       ],
-      "raw_fraction": 0.087719,
-      "reweight_cap": null
+      "raw_fraction": 0.018519,
+      "reweight_cap": 12
     },
     "cluster_001": {
       "cluster_id": 1,
-      "total_docs": 122,
+      "total_docs": 16,
       "dev_doc_ids": [
-        "domain_doc_000009",
-        "domain_doc_000134",
-        "domain_doc_000084",
-        "domain_doc_000148",
-        "domain_doc_000107",
-        "domain_doc_000036",
-        "domain_doc_000076",
-        "domain_doc_000101",
-        "domain_doc_000121",
-        "domain_doc_000122",
-        "domain_doc_000089",
-        "domain_doc_000155",
-        "domain_doc_000112",
-        "domain_doc_000040",
-        "domain_doc_000016",
-        "domain_doc_000047",
-        "domain_doc_000077",
-        "domain_doc_000095",
-        "domain_doc_000073",
-        "domain_doc_000082",
-        "domain_doc_000008",
-        "domain_doc_000110",
-        "domain_doc_000087",
-        "domain_doc_000118",
-        "domain_doc_000007",
-        "domain_doc_000001",
-        "domain_doc_000102",
-        "domain_doc_000094",
-        "domain_doc_000028",
-        "domain_doc_000104",
-        "domain_doc_000022",
-        "domain_doc_000117",
-        "domain_doc_000055",
-        "domain_doc_000072",
-        "domain_doc_000115",
-        "domain_doc_000050",
-        "domain_doc_000114",
-        "domain_doc_000045",
-        "domain_doc_000123",
-        "domain_doc_000049",
-        "domain_doc_000083",
-        "domain_doc_000069",
-        "domain_doc_000081",
-        "domain_doc_000100",
-        "domain_doc_000023",
-        "domain_doc_000065",
-        "domain_doc_000088",
-        "domain_doc_000024",
-        "domain_doc_000054",
-        "domain_doc_000124",
-        "domain_doc_000139",
-        "domain_doc_000085",
-        "domain_doc_000006",
-        "domain_doc_000092",
-        "domain_doc_000106",
-        "domain_doc_000120",
-        "domain_doc_000019",
-        "domain_doc_000067",
-        "domain_doc_000153",
-        "domain_doc_000056",
-        "domain_doc_000002",
-        "domain_doc_000128",
-        "domain_doc_000096",
-        "domain_doc_000026",
-        "domain_doc_000064",
-        "domain_doc_000048",
-        "domain_doc_000010",
-        "domain_doc_000098",
-        "domain_doc_000015",
-        "domain_doc_000090",
-        "domain_doc_000079",
-        "domain_doc_000005",
-        "domain_doc_000041",
-        "domain_doc_000062",
-        "domain_doc_000063",
-        "domain_doc_000012",
-        "domain_doc_000066",
-        "domain_doc_000126",
-        "domain_doc_000135",
-        "domain_doc_000133",
-        "domain_doc_000125",
-        "domain_doc_000020",
+        "domain_doc_000386",
+        "domain_doc_000417",
+        "domain_doc_000239",
+        "domain_doc_000302",
+        "domain_doc_000586",
+        "domain_doc_000512",
+        "domain_doc_000582",
+        "domain_doc_000414",
+        "domain_doc_000108",
         "domain_doc_000109",
-        "domain_doc_000057",
-        "domain_doc_000129",
-        "domain_doc_000021"
+        "domain_doc_000585"
       ],
       "val_doc_ids": [
-        "domain_doc_000000",
-        "domain_doc_000149",
-        "domain_doc_000130",
-        "domain_doc_000078",
-        "domain_doc_000147",
-        "domain_doc_000074",
-        "domain_doc_000132",
-        "domain_doc_000111",
-        "domain_doc_000105",
-        "domain_doc_000113",
-        "domain_doc_000027",
-        "domain_doc_000093",
-        "domain_doc_000127",
-        "domain_doc_000099",
-        "domain_doc_000086",
-        "domain_doc_000035",
-        "domain_doc_000029",
-        "domain_doc_000131",
-        "domain_doc_000152",
-        "domain_doc_000004",
-        "domain_doc_000075",
-        "domain_doc_000097",
-        "domain_doc_000011",
-        "domain_doc_000091"
+        "domain_doc_000587",
+        "domain_doc_000231",
+        "domain_doc_000581"
       ],
       "sealed_doc_ids": [
-        "domain_doc_000138",
-        "domain_doc_000108",
-        "domain_doc_000013",
-        "domain_doc_000150",
-        "domain_doc_000017",
-        "domain_doc_000033",
-        "domain_doc_000038",
-        "domain_doc_000046",
-        "domain_doc_000116",
-        "domain_doc_000003",
-        "domain_doc_000014",
-        "domain_doc_000103"
+        "domain_doc_000053",
+        "domain_doc_000208"
       ],
-      "raw_fraction": 0.71345,
-      "reweight_cap": 25
+      "raw_fraction": 0.026936,
+      "reweight_cap": null
     },
     "cluster_002": {
       "cluster_id": 2,
-      "total_docs": 34,
+      "total_docs": 20,
       "dev_doc_ids": [
-        "domain_doc_000044",
-        "domain_doc_000156",
-        "domain_doc_000157",
-        "domain_doc_000142",
-        "domain_doc_000161",
-        "domain_doc_000165",
-        "domain_doc_000145",
-        "domain_doc_000140",
-        "domain_doc_000146",
-        "domain_doc_000141",
-        "domain_doc_000163",
-        "domain_doc_000144",
-        "domain_doc_000162",
-        "domain_doc_000137",
-        "domain_doc_000136",
-        "domain_doc_000166",
-        "domain_doc_000080",
-        "domain_doc_000159",
-        "domain_doc_000034",
-        "domain_doc_000169",
-        "domain_doc_000143",
-        "domain_doc_000154",
-        "domain_doc_000039",
-        "domain_doc_000168"
+        "domain_doc_000424",
+        "domain_doc_000114",
+        "domain_doc_000260",
+        "domain_doc_000111",
+        "domain_doc_000209",
+        "domain_doc_000259",
+        "domain_doc_000370",
+        "domain_doc_000411",
+        "domain_doc_000187",
+        "domain_doc_000257",
+        "domain_doc_000390",
+        "domain_doc_000230",
+        "domain_doc_000024",
+        "domain_doc_000249"
       ],
       "val_doc_ids": [
-        "domain_doc_000164",
-        "domain_doc_000158",
-        "domain_doc_000042",
-        "domain_doc_000160",
-        "domain_doc_000043",
-        "domain_doc_000167",
-        "domain_doc_000170"
+        "domain_doc_000076",
+        "domain_doc_000377",
+        "domain_doc_000201",
+        "domain_doc_000206"
       ],
       "sealed_doc_ids": [
-        "domain_doc_000151",
-        "domain_doc_000037",
-        "domain_doc_000119"
+        "domain_doc_000016",
+        "domain_doc_000104"
       ],
-      "raw_fraction": 0.19883,
-      "reweight_cap": 25
+      "raw_fraction": 0.03367,
+      "reweight_cap": null
+    },
+    "cluster_003": {
+      "cluster_id": 3,
+      "total_docs": 17,
+      "dev_doc_ids": [
+        "domain_doc_000218",
+        "domain_doc_000233",
+        "domain_doc_000189",
+        "domain_doc_000194",
+        "domain_doc_000425",
+        "domain_doc_000380",
+        "domain_doc_000378",
+        "domain_doc_000229",
+        "domain_doc_000219",
+        "domain_doc_000072",
+        "domain_doc_000077",
+        "domain_doc_000292"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000575",
+        "domain_doc_000188",
+        "domain_doc_000235"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000068",
+        "domain_doc_000145"
+      ],
+      "raw_fraction": 0.02862,
+      "reweight_cap": null
+    },
+    "cluster_004": {
+      "cluster_id": 4,
+      "total_docs": 10,
+      "dev_doc_ids": [
+        "domain_doc_000519",
+        "domain_doc_000279",
+        "domain_doc_000128",
+        "domain_doc_000566",
+        "domain_doc_000517",
+        "domain_doc_000518",
+        "domain_doc_000573"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000369",
+        "domain_doc_000060"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000081"
+      ],
+      "raw_fraction": 0.016835,
+      "reweight_cap": 12
+    },
+    "cluster_005": {
+      "cluster_id": 5,
+      "total_docs": 27,
+      "dev_doc_ids": [
+        "domain_doc_000492",
+        "domain_doc_000419",
+        "domain_doc_000352",
+        "domain_doc_000514",
+        "domain_doc_000503",
+        "domain_doc_000140",
+        "domain_doc_000106",
+        "domain_doc_000354",
+        "domain_doc_000491",
+        "domain_doc_000506",
+        "domain_doc_000407",
+        "domain_doc_000502",
+        "domain_doc_000079",
+        "domain_doc_000490",
+        "domain_doc_000510",
+        "domain_doc_000461",
+        "domain_doc_000080",
+        "domain_doc_000501",
+        "domain_doc_000511"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000083",
+        "domain_doc_000505",
+        "domain_doc_000234",
+        "domain_doc_000326",
+        "domain_doc_000509"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000021",
+        "domain_doc_000082",
+        "domain_doc_000504"
+      ],
+      "raw_fraction": 0.045455,
+      "reweight_cap": null
+    },
+    "cluster_006": {
+      "cluster_id": 6,
+      "total_docs": 12,
+      "dev_doc_ids": [
+        "domain_doc_000193",
+        "domain_doc_000185",
+        "domain_doc_000178",
+        "domain_doc_000236",
+        "domain_doc_000381",
+        "domain_doc_000186",
+        "domain_doc_000578",
+        "domain_doc_000183",
+        "domain_doc_000184"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000105",
+        "domain_doc_000156"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000556"
+      ],
+      "raw_fraction": 0.020202,
+      "reweight_cap": null
+    },
+    "cluster_007": {
+      "cluster_id": 7,
+      "total_docs": 28,
+      "dev_doc_ids": [
+        "domain_doc_000252",
+        "domain_doc_000250",
+        "domain_doc_000122",
+        "domain_doc_000297",
+        "domain_doc_000553",
+        "domain_doc_000110",
+        "domain_doc_000055",
+        "domain_doc_000123",
+        "domain_doc_000200",
+        "domain_doc_000121",
+        "domain_doc_000403",
+        "domain_doc_000127",
+        "domain_doc_000280",
+        "domain_doc_000232",
+        "domain_doc_000412",
+        "domain_doc_000039",
+        "domain_doc_000181",
+        "domain_doc_000042",
+        "domain_doc_000251"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000413",
+        "domain_doc_000050",
+        "domain_doc_000299",
+        "domain_doc_000117",
+        "domain_doc_000118",
+        "domain_doc_000374"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000002",
+        "domain_doc_000043",
+        "domain_doc_000283"
+      ],
+      "raw_fraction": 0.047138,
+      "reweight_cap": null
+    },
+    "cluster_008": {
+      "cluster_id": 8,
+      "total_docs": 28,
+      "dev_doc_ids": [
+        "domain_doc_000225",
+        "domain_doc_000204",
+        "domain_doc_000151",
+        "domain_doc_000253",
+        "domain_doc_000577",
+        "domain_doc_000103",
+        "domain_doc_000102",
+        "domain_doc_000152",
+        "domain_doc_000158",
+        "domain_doc_000150",
+        "domain_doc_000392",
+        "domain_doc_000153",
+        "domain_doc_000226",
+        "domain_doc_000169",
+        "domain_doc_000555",
+        "domain_doc_000084",
+        "domain_doc_000154",
+        "domain_doc_000085",
+        "domain_doc_000224"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000576",
+        "domain_doc_000087",
+        "domain_doc_000258",
+        "domain_doc_000116",
+        "domain_doc_000146",
+        "domain_doc_000389"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000054",
+        "domain_doc_000086",
+        "domain_doc_000227"
+      ],
+      "raw_fraction": 0.047138,
+      "reweight_cap": null
+    },
+    "cluster_009": {
+      "cluster_id": 9,
+      "total_docs": 20,
+      "dev_doc_ids": [
+        "domain_doc_000529",
+        "domain_doc_000100",
+        "domain_doc_000281",
+        "domain_doc_000093",
+        "domain_doc_000199",
+        "domain_doc_000242",
+        "domain_doc_000366",
+        "domain_doc_000528",
+        "domain_doc_000107",
+        "domain_doc_000241",
+        "domain_doc_000465",
+        "domain_doc_000238",
+        "domain_doc_000040",
+        "domain_doc_000240"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000048",
+        "domain_doc_000367",
+        "domain_doc_000119",
+        "domain_doc_000120"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000030",
+        "domain_doc_000092"
+      ],
+      "raw_fraction": 0.03367,
+      "reweight_cap": null
+    },
+    "cluster_010": {
+      "cluster_id": 10,
+      "total_docs": 9,
+      "dev_doc_ids": [
+        "domain_doc_000296",
+        "domain_doc_000365",
+        "domain_doc_000527",
+        "domain_doc_000363",
+        "domain_doc_000551",
+        "domain_doc_000091"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000364",
+        "domain_doc_000089"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000090"
+      ],
+      "raw_fraction": 0.015152,
+      "reweight_cap": 12
+    },
+    "cluster_011": {
+      "cluster_id": 11,
+      "total_docs": 19,
+      "dev_doc_ids": [
+        "domain_doc_000497",
+        "domain_doc_000496",
+        "domain_doc_000348",
+        "domain_doc_000457",
+        "domain_doc_000349",
+        "domain_doc_000507",
+        "domain_doc_000569",
+        "domain_doc_000351",
+        "domain_doc_000495",
+        "domain_doc_000543",
+        "domain_doc_000493",
+        "domain_doc_000303",
+        "domain_doc_000494"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000343",
+        "domain_doc_000571",
+        "domain_doc_000418",
+        "domain_doc_000423"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000017",
+        "domain_doc_000346"
+      ],
+      "raw_fraction": 0.031987,
+      "reweight_cap": null
+    },
+    "cluster_012": {
+      "cluster_id": 12,
+      "total_docs": 33,
+      "dev_doc_ids": [
+        "domain_doc_000221",
+        "domain_doc_000099",
+        "domain_doc_000159",
+        "domain_doc_000168",
+        "domain_doc_000198",
+        "domain_doc_000160",
+        "domain_doc_000175",
+        "domain_doc_000167",
+        "domain_doc_000149",
+        "domain_doc_000162",
+        "domain_doc_000173",
+        "domain_doc_000190",
+        "domain_doc_000148",
+        "domain_doc_000223",
+        "domain_doc_000192",
+        "domain_doc_000125",
+        "domain_doc_000197",
+        "domain_doc_000041",
+        "domain_doc_000376",
+        "domain_doc_000161",
+        "domain_doc_000172",
+        "domain_doc_000094",
+        "domain_doc_000170"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000182",
+        "domain_doc_000095",
+        "domain_doc_000375",
+        "domain_doc_000097",
+        "domain_doc_000222",
+        "domain_doc_000564",
+        "domain_doc_000147"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000191",
+        "domain_doc_000058",
+        "domain_doc_000126"
+      ],
+      "raw_fraction": 0.055556,
+      "reweight_cap": null
+    },
+    "cluster_013": {
+      "cluster_id": 13,
+      "total_docs": 43,
+      "dev_doc_ids": [
+        "domain_doc_000174",
+        "domain_doc_000157",
+        "domain_doc_000176",
+        "domain_doc_000275",
+        "domain_doc_000291",
+        "domain_doc_000265",
+        "domain_doc_000568",
+        "domain_doc_000272",
+        "domain_doc_000163",
+        "domain_doc_000286",
+        "domain_doc_000269",
+        "domain_doc_000177",
+        "domain_doc_000278",
+        "domain_doc_000268",
+        "domain_doc_000179",
+        "domain_doc_000271",
+        "domain_doc_000289",
+        "domain_doc_000290",
+        "domain_doc_000285",
+        "domain_doc_000180",
+        "domain_doc_000270",
+        "domain_doc_000267",
+        "domain_doc_000277",
+        "domain_doc_000373",
+        "domain_doc_000282",
+        "domain_doc_000266",
+        "domain_doc_000263",
+        "domain_doc_000554",
+        "domain_doc_000288",
+        "domain_doc_000284"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000115",
+        "domain_doc_000155",
+        "domain_doc_000276",
+        "domain_doc_000164",
+        "domain_doc_000287",
+        "domain_doc_000165",
+        "domain_doc_000171",
+        "domain_doc_000261",
+        "domain_doc_000262"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000264",
+        "domain_doc_000129",
+        "domain_doc_000166",
+        "domain_doc_000453"
+      ],
+      "raw_fraction": 0.072391,
+      "reweight_cap": null
+    },
+    "cluster_014": {
+      "cluster_id": 14,
+      "total_docs": 23,
+      "dev_doc_ids": [
+        "domain_doc_000479",
+        "domain_doc_000478",
+        "domain_doc_000061",
+        "domain_doc_000408",
+        "domain_doc_000216",
+        "domain_doc_000347",
+        "domain_doc_000480",
+        "domain_doc_000342",
+        "domain_doc_000588",
+        "domain_doc_000217",
+        "domain_doc_000339",
+        "domain_doc_000056",
+        "domain_doc_000484",
+        "domain_doc_000341",
+        "domain_doc_000340",
+        "domain_doc_000486"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000210",
+        "domain_doc_000481",
+        "domain_doc_000220",
+        "domain_doc_000338",
+        "domain_doc_000028"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000062",
+        "domain_doc_000485"
+      ],
+      "raw_fraction": 0.038721,
+      "reweight_cap": null
+    },
+    "cluster_015": {
+      "cluster_id": 15,
+      "total_docs": 22,
+      "dev_doc_ids": [
+        "domain_doc_000565",
+        "domain_doc_000070",
+        "domain_doc_000066",
+        "domain_doc_000254",
+        "domain_doc_000134",
+        "domain_doc_000138",
+        "domain_doc_000337",
+        "domain_doc_000467",
+        "domain_doc_000071",
+        "domain_doc_000143",
+        "domain_doc_000463",
+        "domain_doc_000215",
+        "domain_doc_000136",
+        "domain_doc_000065",
+        "domain_doc_000137",
+        "domain_doc_000069"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000379",
+        "domain_doc_000096",
+        "domain_doc_000131",
+        "domain_doc_000057"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000067",
+        "domain_doc_000474"
+      ],
+      "raw_fraction": 0.037037,
+      "reweight_cap": null
+    },
+    "cluster_016": {
+      "cluster_id": 16,
+      "total_docs": 24,
+      "dev_doc_ids": [
+        "domain_doc_000214",
+        "domain_doc_000132",
+        "domain_doc_000274",
+        "domain_doc_000567",
+        "domain_doc_000212",
+        "domain_doc_000142",
+        "domain_doc_000273",
+        "domain_doc_000144",
+        "domain_doc_000213",
+        "domain_doc_000237",
+        "domain_doc_000073",
+        "domain_doc_000211",
+        "domain_doc_000466",
+        "domain_doc_000133",
+        "domain_doc_000141",
+        "domain_doc_000075",
+        "domain_doc_000475"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000113",
+        "domain_doc_000332",
+        "domain_doc_000135",
+        "domain_doc_000139",
+        "domain_doc_000064"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000112",
+        "domain_doc_000454"
+      ],
+      "raw_fraction": 0.040404,
+      "reweight_cap": null
+    },
+    "cluster_017": {
+      "cluster_id": 17,
+      "total_docs": 12,
+      "dev_doc_ids": [
+        "domain_doc_000520",
+        "domain_doc_000421",
+        "domain_doc_000047",
+        "domain_doc_000522",
+        "domain_doc_000523",
+        "domain_doc_000516",
+        "domain_doc_000525",
+        "domain_doc_000355",
+        "domain_doc_000362"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000027",
+        "domain_doc_000037"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000524"
+      ],
+      "raw_fraction": 0.020202,
+      "reweight_cap": null
+    },
+    "cluster_018": {
+      "cluster_id": 18,
+      "total_docs": 29,
+      "dev_doc_ids": [
+        "domain_doc_000469",
+        "domain_doc_000456",
+        "domain_doc_000334",
+        "domain_doc_000473",
+        "domain_doc_000472",
+        "domain_doc_000329",
+        "domain_doc_000130",
+        "domain_doc_000336",
+        "domain_doc_000335",
+        "domain_doc_000460",
+        "domain_doc_000333",
+        "domain_doc_000477",
+        "domain_doc_000470",
+        "domain_doc_000547",
+        "domain_doc_000462",
+        "domain_doc_000541",
+        "domain_doc_000052",
+        "domain_doc_000387",
+        "domain_doc_000059",
+        "domain_doc_000468"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000546",
+        "domain_doc_000074",
+        "domain_doc_000508",
+        "domain_doc_000330",
+        "domain_doc_000331",
+        "domain_doc_000476"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000029",
+        "domain_doc_000063",
+        "domain_doc_000471"
+      ],
+      "raw_fraction": 0.048822,
+      "reweight_cap": null
+    },
+    "cluster_019": {
+      "cluster_id": 19,
+      "total_docs": 20,
+      "dev_doc_ids": [
+        "domain_doc_000548",
+        "domain_doc_000013",
+        "domain_doc_000384",
+        "domain_doc_000008",
+        "domain_doc_000203",
+        "domain_doc_000300",
+        "domain_doc_000406",
+        "domain_doc_000534",
+        "domain_doc_000015",
+        "domain_doc_000298",
+        "domain_doc_000410",
+        "domain_doc_000293",
+        "domain_doc_000001",
+        "domain_doc_000294"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000003",
+        "domain_doc_000409",
+        "domain_doc_000032",
+        "domain_doc_000034"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000000",
+        "domain_doc_000004"
+      ],
+      "raw_fraction": 0.03367,
+      "reweight_cap": null
+    },
+    "cluster_020": {
+      "cluster_id": 20,
+      "total_docs": 23,
+      "dev_doc_ids": [
+        "domain_doc_000416",
+        "domain_doc_000404",
+        "domain_doc_000101",
+        "domain_doc_000402",
+        "domain_doc_000359",
+        "domain_doc_000401",
+        "domain_doc_000526",
+        "domain_doc_000400",
+        "domain_doc_000580",
+        "domain_doc_000360",
+        "domain_doc_000382",
+        "domain_doc_000031",
+        "domain_doc_000532",
+        "domain_doc_000397",
+        "domain_doc_000383",
+        "domain_doc_000579"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000358",
+        "domain_doc_000530",
+        "domain_doc_000361",
+        "domain_doc_000368",
+        "domain_doc_000023"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000243",
+        "domain_doc_000550"
+      ],
+      "raw_fraction": 0.038721,
+      "reweight_cap": null
+    },
+    "cluster_021": {
+      "cluster_id": 21,
+      "total_docs": 21,
+      "dev_doc_ids": [
+        "domain_doc_000521",
+        "domain_doc_000078",
+        "domain_doc_000498",
+        "domain_doc_000020",
+        "domain_doc_000353",
+        "domain_doc_000483",
+        "domain_doc_000499",
+        "domain_doc_000515",
+        "domain_doc_000318",
+        "domain_doc_000482",
+        "domain_doc_000513",
+        "domain_doc_000356",
+        "domain_doc_000007",
+        "domain_doc_000420",
+        "domain_doc_000018"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000500",
+        "domain_doc_000344",
+        "domain_doc_000350",
+        "domain_doc_000006"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000019",
+        "domain_doc_000552"
+      ],
+      "raw_fraction": 0.035354,
+      "reweight_cap": null
+    },
+    "cluster_022": {
+      "cluster_id": 22,
+      "total_docs": 15,
+      "dev_doc_ids": [
+        "domain_doc_000557",
+        "domain_doc_000562",
+        "domain_doc_000422",
+        "domain_doc_000396",
+        "domain_doc_000563",
+        "domain_doc_000561",
+        "domain_doc_000394",
+        "domain_doc_000388",
+        "domain_doc_000558",
+        "domain_doc_000391"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000393",
+        "domain_doc_000560",
+        "domain_doc_000051"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000088",
+        "domain_doc_000559"
+      ],
+      "raw_fraction": 0.025253,
+      "reweight_cap": null
+    },
+    "cluster_023": {
+      "cluster_id": 23,
+      "total_docs": 30,
+      "dev_doc_ids": [
+        "domain_doc_000320",
+        "domain_doc_000205",
+        "domain_doc_000046",
+        "domain_doc_000385",
+        "domain_doc_000323",
+        "domain_doc_000026",
+        "domain_doc_000025",
+        "domain_doc_000124",
+        "domain_doc_000098",
+        "domain_doc_000255",
+        "domain_doc_000036",
+        "domain_doc_000345",
+        "domain_doc_000538",
+        "domain_doc_000322",
+        "domain_doc_000256",
+        "domain_doc_000535",
+        "domain_doc_000010",
+        "domain_doc_000202",
+        "domain_doc_000319",
+        "domain_doc_000011",
+        "domain_doc_000317"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000536",
+        "domain_doc_000014",
+        "domain_doc_000325",
+        "domain_doc_000033",
+        "domain_doc_000035",
+        "domain_doc_000324"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000009",
+        "domain_doc_000012",
+        "domain_doc_000321"
+      ],
+      "raw_fraction": 0.050505,
+      "reweight_cap": null
+    },
+    "cluster_024": {
+      "cluster_id": 24,
+      "total_docs": 18,
+      "dev_doc_ids": [
+        "domain_doc_000570",
+        "domain_doc_000549",
+        "domain_doc_000427",
+        "domain_doc_000540",
+        "domain_doc_000428",
+        "domain_doc_000537",
+        "domain_doc_000584",
+        "domain_doc_000429",
+        "domain_doc_000542",
+        "domain_doc_000583",
+        "domain_doc_000195",
+        "domain_doc_000545"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000415",
+        "domain_doc_000572",
+        "domain_doc_000590",
+        "domain_doc_000539"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000044",
+        "domain_doc_000426"
+      ],
+      "raw_fraction": 0.030303,
+      "reweight_cap": null
+    },
+    "cluster_025": {
+      "cluster_id": 25,
+      "total_docs": 26,
+      "dev_doc_ids": [
+        "domain_doc_000452",
+        "domain_doc_000431",
+        "domain_doc_000395",
+        "domain_doc_000592",
+        "domain_doc_000488",
+        "domain_doc_000316",
+        "domain_doc_000315",
+        "domain_doc_000398",
+        "domain_doc_000451",
+        "domain_doc_000574",
+        "domain_doc_000405",
+        "domain_doc_000487",
+        "domain_doc_000196",
+        "domain_doc_000445",
+        "domain_doc_000589",
+        "domain_doc_000442",
+        "domain_doc_000312",
+        "domain_doc_000464"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000591",
+        "domain_doc_000314",
+        "domain_doc_000544",
+        "domain_doc_000327",
+        "domain_doc_000357"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000038",
+        "domain_doc_000313",
+        "domain_doc_000489"
+      ],
+      "raw_fraction": 0.043771,
+      "reweight_cap": null
+    },
+    "cluster_026": {
+      "cluster_id": 26,
+      "total_docs": 38,
+      "dev_doc_ids": [
+        "domain_doc_000309",
+        "domain_doc_000450",
+        "domain_doc_000308",
+        "domain_doc_000449",
+        "domain_doc_000455",
+        "domain_doc_000446",
+        "domain_doc_000310",
+        "domain_doc_000301",
+        "domain_doc_000440",
+        "domain_doc_000447",
+        "domain_doc_000443",
+        "domain_doc_000295",
+        "domain_doc_000307",
+        "domain_doc_000434",
+        "domain_doc_000207",
+        "domain_doc_000439",
+        "domain_doc_000435",
+        "domain_doc_000437",
+        "domain_doc_000430",
+        "domain_doc_000593",
+        "domain_doc_000448",
+        "domain_doc_000441",
+        "domain_doc_000005",
+        "domain_doc_000459",
+        "domain_doc_000311",
+        "domain_doc_000433"
+      ],
+      "val_doc_ids": [
+        "domain_doc_000049",
+        "domain_doc_000458",
+        "domain_doc_000444",
+        "domain_doc_000438",
+        "domain_doc_000436",
+        "domain_doc_000304",
+        "domain_doc_000306",
+        "domain_doc_000328"
+      ],
+      "sealed_doc_ids": [
+        "domain_doc_000399",
+        "domain_doc_000432",
+        "domain_doc_000045",
+        "domain_doc_000305"
+      ],
+      "raw_fraction": 0.063973,
+      "reweight_cap": null
     }
   }
 }

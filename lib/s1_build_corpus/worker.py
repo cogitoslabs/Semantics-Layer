@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 
 import tiktoken
 from lib.utils.logger import get_logger
+from lib.utils import clean_corpus_text
 
 logger = get_logger("s1.worker")
 
@@ -44,7 +45,7 @@ class ExtractionResult:
 
 
 def worker_init(
-    gpu_queue: Any,  # multiprocessing.managers.AutoProxy[Queue]
+    gpu_queue: Any,  # multiprocessing.Queue
 ) -> None:
     """
     Called once per worker process.
@@ -53,8 +54,13 @@ def worker_init(
     """
     global _docling_converter
 
+    from lib.utils import setup_logger
+    from pathlib import Path
+    setup_logger("s1.worker", log_dir=Path("logs"), log_filename="corpus_building.log")
+
     gpu_id = gpu_queue.get()
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    gpu_queue.put(gpu_id)  # Self-replenish queue for future/recycled worker processes
 
     import torch
     from docling.datamodel.base_models import InputFormat
@@ -95,12 +101,14 @@ def worker_init(
 def worker_task(
     filename: str,
     pdf_path: str,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
+    chunk_index: Optional[int] = None,
     chunk_size: int = 10,
     chunk_queue: Optional[Any] = None
 ) -> ExtractionResult:
     """
-    Extracts markdown from a single PDF in page chunks and counts tokens.
-    Returns an ExtractionResult regardless of success or failure.
+    Extracts markdown from a PDF page range or loops through the PDF in chunks.
     """
     try:
         if _docling_converter is None:
@@ -116,22 +124,49 @@ def worker_task(
         if page_count == 0:
             return ExtractionResult(filename, [], "ERROR: PDF has 0 pages or could not be read")
 
-        chunk_size = max(2, chunk_size)  # Ensure chunk_size is at least 2 to allow overlap
-        stride = chunk_size - 1
-        chunks = []
-        chunk_index = 0
         tokenizer = tiktoken.get_encoding("cl100k_base")
 
+        # Single page-range chunk mode (used by refactored builder)
+        if start_page is not None and end_page is not None:
+            c_idx = chunk_index if chunk_index is not None else 0
+            conv_result = _docling_converter.convert(pdf_path, page_range=(start_page, end_page))
+            try:
+                chunk_text = conv_result.document.export_to_markdown()
+                chunk_text = clean_corpus_text(chunk_text)
+                if chunk_text and len(chunk_text.strip()) >= MIN_CONTENT_LENGTH:
+                    token_count = len(tokenizer.encode(chunk_text))
+                    chunk = ChunkResult(
+                        chunk_index=c_idx,
+                        text=chunk_text,
+                        token_count=token_count,
+                        page_range=(start_page, end_page)
+                    )
+                    return ExtractionResult(filename, [chunk], "SUCCESS")
+                else:
+                    return ExtractionResult(filename, [], "SKIPPED")
+            finally:
+                try:
+                    if hasattr(conv_result, "input") and conv_result.input and hasattr(conv_result.input, "_backend") and conv_result.input._backend:
+                        conv_result.input._backend.unload()
+                except Exception:
+                    pass
+
+        # Full PDF loop mode (fallback / backward compatibility)
+        chunk_size = max(2, chunk_size)
+        stride = chunk_size - 1
+        chunks = []
+        c_idx = 0
         start = 1
         while start <= page_count:
             end = min(start + chunk_size - 1, page_count)
             conv_result = _docling_converter.convert(pdf_path, page_range=(start, end))
             try:
                 chunk_text = conv_result.document.export_to_markdown()
+                chunk_text = clean_corpus_text(chunk_text)
                 if chunk_text and len(chunk_text.strip()) >= MIN_CONTENT_LENGTH:
                     token_count = len(tokenizer.encode(chunk_text))
                     chunk = ChunkResult(
-                        chunk_index=chunk_index,
+                        chunk_index=c_idx,
                         text=chunk_text,
                         token_count=token_count,
                         page_range=(start, end)
@@ -139,7 +174,7 @@ def worker_task(
                     chunks.append(chunk)
                     if chunk_queue is not None:
                         chunk_queue.put((filename, chunk))
-                    chunk_index += 1
+                    c_idx += 1
             finally:
                 try:
                     if hasattr(conv_result, "input") and conv_result.input and hasattr(conv_result.input, "_backend") and conv_result.input._backend:
@@ -158,3 +193,4 @@ def worker_task(
 
     except Exception as exc:
         return ExtractionResult(filename, [], f"ERROR: {exc}")
+

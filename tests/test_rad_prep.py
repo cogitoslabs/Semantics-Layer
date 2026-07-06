@@ -9,11 +9,11 @@ import numpy as np
 import faiss
 
 from lib.utils import PipelineConfig
-from lib.s3_rad_prep.chunker import Chunk, chunk_document, run_chunking
-from lib.s3_rad_prep.indexer import run_indexing
-from lib.s3_rad_prep.retriever import Retriever, RetrievalResult
-from lib.s3_rad_prep.no_retrieval_router import NoRetrievalRouter
-from lib.s3_rad_prep.trace_generator import format_prompt, TraceGenerator
+from lib.s4_rad_prep.chunker import Chunk, chunk_document, run_chunking
+from lib.s4_rad_prep.indexer import run_indexing
+from lib.s4_rad_prep.retriever import Retriever, RetrievalResult
+from lib.s4_rad_prep.no_retrieval_router import NoRetrievalRouter
+from lib.s4_rad_prep.trace_generator import format_prompt, TraceGenerator
 
 
 class SimpleMockTokenizer:
@@ -112,7 +112,7 @@ def test_indexer_build_and_load(test_cfg):
             [0.0, 1.0, 0.0]
         ], dtype="float32")
 
-        with patch("lib.s3_rad_prep.indexer.DenseEmbedder") as mock_embedder_class:
+        with patch("lib.s4_rad_prep.indexer.DenseEmbedder") as mock_embedder_class:
             mock_embedder = MagicMock()
             mock_embedder.embed_batch.return_value = mock_embeddings
             mock_embedder_class.return_value = mock_embedder
@@ -152,7 +152,7 @@ def test_dense_retrieval(test_cfg):
 
         mock_query_emb = np.array([[0.9, 0.1, 0, 0]], dtype="float32")
 
-        with patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+        with patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
              patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
             mock_embedder = MagicMock()
             mock_embedder.embed_batch.return_value = mock_query_emb
@@ -190,7 +190,7 @@ def test_relevance_threshold_gate(test_cfg):
 
         mock_query_emb = np.array([[0.95, 0.05, 0, 0]], dtype="float32")
 
-        with patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+        with patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
              patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
             mock_embedder = MagicMock()
             mock_embedder.embed_batch.return_value = mock_query_emb
@@ -248,7 +248,7 @@ def test_hybrid_fusion(test_cfg):
         test_cfg.rad.index_dir.mkdir(parents=True, exist_ok=True)
         faiss.write_index(index, str(test_cfg.rad.index_dir / "index.faiss"))
 
-        with patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+        with patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
              patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
             mock_embedder = MagicMock()
             mock_embedder.embed_batch.return_value = np.array([[0.9, 0.1, 0, 0]], dtype="float32")
@@ -310,7 +310,7 @@ def test_trace_token_filter(test_cfg):
         ]
 
         with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
-             patch("lib.s3_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
+             patch("lib.s4_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
             mock_tokenizer = SimpleMockTokenizer()
             mock_tok_class.return_value = mock_tokenizer
 
@@ -363,9 +363,9 @@ def test_pipeline_end_to_end(test_cfg):
 
         # Mock tokenizers and embeddings
         with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
-             patch("lib.s3_rad_prep.indexer.DenseEmbedder") as mock_embedder_class, \
-             patch("lib.s3_rad_prep.retriever.DenseEmbedder") as mock_ret_embedder_class, \
-             patch("lib.s3_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
+             patch("lib.s4_rad_prep.indexer.DenseEmbedder") as mock_embedder_class, \
+             patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_ret_embedder_class, \
+             patch("lib.s4_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
 
             mock_tok = SimpleMockTokenizer()
             mock_tok_class.return_value = mock_tok
@@ -384,7 +384,7 @@ def test_pipeline_end_to_end(test_cfg):
             ]
             mock_backend_class.return_value = mock_backend
 
-            from lib.s3_rad_prep import run_rad_prep_pipeline
+            from lib.s4_rad_prep import run_rad_prep_pipeline
             run_rad_prep_pipeline(test_cfg, rad_mode="full")
 
             # Check all artifacts

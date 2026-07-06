@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, List, Dict
 from datetime import datetime
 
 
@@ -220,6 +220,8 @@ class ClusteringConfig:
     hdbscan_min_samples: int       = field(default_factory=lambda: _get("HDBSCAN_MIN_SAMPLES", 5, int))
     hdbscan_metric: str            = field(default_factory=lambda: _get("HDBSCAN_METRIC", "cosine"))
     min_clusters: int              = field(default_factory=lambda: _get("CLUSTERING_MIN_CLUSTERS", 10, int))
+    use_pca: bool                  = field(default_factory=lambda: _get("CLUSTERING_USE_PCA", True, bool))
+    pca_components: int            = field(default_factory=lambda: _get("CLUSTERING_PCA_COMPONENTS", 10, int))
 
     # Noise handling
     noise_assignment: str          = field(default_factory=lambda: _get("CLUSTERING_NOISE_ASSIGNMENT", "nearest"))
@@ -242,6 +244,36 @@ class ClusteringConfig:
 
 
 @dataclass
+class TeacherBenchmarkingConfig:
+    candidate_teachers: List[str]       = field(default_factory=lambda: [t.strip() for t in _get("BENCHMARK_TEACHERS", "Qwen/Qwen3-1.7B").split(",") if t.strip()])
+    judge_backend: str                  = field(default_factory=lambda: _get("BENCHMARK_JUDGE_BACKEND", "api"))
+    judge_model_name: str               = field(default_factory=lambda: _get("BENCHMARK_JUDGE_MODEL", ""))
+    judge_api_url: Optional[str]        = field(default_factory=lambda: _get("BENCHMARK_JUDGE_API_URL", None))
+    judge_api_key: Optional[str]        = field(default_factory=lambda: _get("BENCHMARK_JUDGE_API_KEY", None))
+    judge_max_new_tokens: int           = field(default_factory=lambda: _get("BENCHMARK_JUDGE_MAX_NEW_TOKENS", 256, int))
+    
+    teacher_backend: str                = field(default_factory=lambda: _get("BENCHMARK_TEACHER_BACKEND", ""))
+    teacher_batch_size: int             = field(default_factory=lambda: _get("BENCHMARK_TEACHER_BATCH_SIZE", 4, int))
+    
+    eval_sample_size: int               = field(default_factory=lambda: _get("BENCHMARK_EVAL_SAMPLE_SIZE", 200, int))
+    min_eval_samples: int               = field(default_factory=lambda: _get("BENCHMARK_MIN_EVAL_SAMPLES", 10, int))
+    
+    enable_calibration: bool            = field(default_factory=lambda: _get("BENCHMARK_ENABLE_CALIBRATION", False, bool))
+    human_calibration_size: int         = field(default_factory=lambda: _get("BENCHMARK_CALIBRATION_SIZE", 200, int))
+    human_labels_path: Optional[Path]   = field(default_factory=lambda: Path(_get("BENCHMARK_HUMAN_LABELS_PATH", "")) if _get("BENCHMARK_HUMAN_LABELS_PATH", "") else None)
+    
+    hallucination_nli_threshold: float  = field(default_factory=lambda: _get("BENCHMARK_HALLUCINATION_NLI_THRESHOLD", 0.5, float))
+    citation_min_overlap: float         = field(default_factory=lambda: _get("BENCHMARK_CITATION_MIN_OVERLAP", 0.30, float))
+    nli_model: str                      = field(default_factory=lambda: _get("BENCHMARK_NLI_MODEL", "cross-encoder/nli-deberta-v3-small"))
+    
+    output_dir: Path                    = field(default_factory=lambda: Path(_get("BENCHMARKING_OUTPUT_DIR", "data/benchmarking")))
+    scores_path: Path                   = field(default_factory=lambda: Path(_get("BENCHMARKING_SCORES_PATH", "data/benchmarking/scores.jsonl")))
+    manifest_path: Path                 = field(default_factory=lambda: Path(_get("BENCHMARKING_MANIFEST_PATH", "data/benchmarking/benchmark_manifest.json")))
+    calibration_log_path: Path          = field(default_factory=lambda: Path(_get("BENCHMARKING_CALIBRATION_LOG", "logs/benchmarking/judge_calibration.jsonl")))
+    inter_rater_log_path: Path          = field(default_factory=lambda: Path(_get("BENCHMARKING_INTER_RATER_LOG", "logs/benchmarking/inter_rater_agreement.json")))
+
+
+@dataclass
 class PipelineConfig:
     """Top-level config for the Semantics Layer pipeline."""
     build: CorpusBuildConfig  = field(default_factory=CorpusBuildConfig)
@@ -256,6 +288,7 @@ class PipelineConfig:
     wandb: WandbConfig        = field(default_factory=WandbConfig)
     rad: RADPrepConfig        = field(default_factory=RADPrepConfig)
     clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
+    benchmarking: TeacherBenchmarkingConfig = field(default_factory=TeacherBenchmarkingConfig)
 
     def validate(self):
         """Sanity-check values that must satisfy domain constraints."""
@@ -312,6 +345,8 @@ class PipelineConfig:
             errors.append(f"HDBSCAN_MIN_SAMPLES must be >= 1, got {self.clustering.hdbscan_min_samples}")
         if self.clustering.min_clusters < 1:
             errors.append(f"CLUSTERING_MIN_CLUSTERS must be >= 1, got {self.clustering.min_clusters}")
+        if self.clustering.use_pca and self.clustering.pca_components < 2:
+            errors.append(f"CLUSTERING_PCA_COMPONENTS must be >= 2, got {self.clustering.pca_components}")
         if not (0.0 <= self.clustering.cluster_min_fraction <= 1.0):
             errors.append(f"CLUSTER_MIN_FRACTION must be in [0,1], got {self.clustering.cluster_min_fraction}")
         if not (0.0 <= self.clustering.cluster_max_fraction <= 1.0):
@@ -330,6 +365,22 @@ class PipelineConfig:
         if not (0.0 <= self.clustering.split_sealed_ratio <= 1.0):
             errors.append(f"SPLIT_SEALED_RATIO must be in [0,1], got {self.clustering.split_sealed_ratio}")
 
+        # Benchmarking Validation
+        if self.benchmarking.judge_backend not in ("hf_local", "api", "bedrock"):
+            errors.append(f"BENCHMARK_JUDGE_BACKEND must be 'hf_local', 'api', or 'bedrock', got '{self.benchmarking.judge_backend}'")
+        if self.benchmarking.teacher_backend and self.benchmarking.teacher_backend not in ("hf_local", "api", "bedrock"):
+            errors.append(f"BENCHMARK_TEACHER_BACKEND must be 'hf_local', 'api', or 'bedrock', got '{self.benchmarking.teacher_backend}'")
+        if self.benchmarking.teacher_batch_size < 1:
+            errors.append(f"BENCHMARK_TEACHER_BATCH_SIZE must be >= 1, got {self.benchmarking.teacher_batch_size}")
+        if self.benchmarking.eval_sample_size < 1:
+            errors.append(f"BENCHMARK_EVAL_SAMPLE_SIZE must be >= 1, got {self.benchmarking.eval_sample_size}")
+        if self.benchmarking.min_eval_samples < 1:
+            errors.append(f"BENCHMARK_MIN_EVAL_SAMPLES must be >= 1, got {self.benchmarking.min_eval_samples}")
+        if not (0.0 <= self.benchmarking.citation_min_overlap <= 1.0):
+            errors.append(f"BENCHMARK_CITATION_MIN_OVERLAP must be in [0,1], got {self.benchmarking.citation_min_overlap}")
+        if not (0.0 <= self.benchmarking.hallucination_nli_threshold <= 1.0):
+            errors.append(f"BENCHMARK_HALLUCINATION_NLI_THRESHOLD must be in [0,1], got {self.benchmarking.hallucination_nli_threshold}")
+
         if errors:
             raise ValueError("Config validation failed:\n" + "\n".join(f"  • {e}" for e in errors))
 
@@ -342,6 +393,11 @@ class PipelineConfig:
             self.rad.traces_dir,
             self.clustering.output_dir,
             self.clustering.cluster_report_path.parent,
+            self.benchmarking.output_dir,
+            self.benchmarking.manifest_path.parent,
+            self.benchmarking.scores_path.parent,
+            self.benchmarking.calibration_log_path.parent,
+            self.benchmarking.inter_rater_log_path.parent,
         ]:
             d.mkdir(parents=True, exist_ok=True)
 

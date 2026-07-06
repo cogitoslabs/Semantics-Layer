@@ -8,8 +8,8 @@ import torch
 import numpy as np
 
 from lib.utils import PipelineConfig
-from lib.s2_dapt.dapt import evaluate_perplexity, evaluate_qa_accuracy, run_dapt_pipeline
-from lib.s1_5_pretokenize import run_pretokenization
+from lib.s3_dapt.dapt import evaluate_perplexity, evaluate_qa_accuracy, run_dapt_pipeline
+from lib.s2_pretokenize import run_pretokenization
 
 
 @pytest.fixture
@@ -38,18 +38,26 @@ def mock_model():
     model = MagicMock()
     model.device = torch.device("cpu")
     
-    # Mock forward pass output
-    mock_output = MagicMock()
-    # Loss for perplexity calculation
-    mock_output.loss = torch.tensor(1.0, requires_grad=True)
-    
-    # Logits for option prediction: shape [batch_size, seq_len, vocab_size]
-    # We set logits of token 5 (our option letter) to be high or low
-    mock_logits = torch.zeros((1, 5, 10))
-    mock_logits[0, -1, 5] = 10.0  # Make token ID 5 highly probable
-    mock_output.logits = mock_logits
-    
-    model.return_value = mock_output
+    def mock_forward(*args, **kwargs):
+        input_ids = kwargs.get("input_ids")
+        if input_ids is None and len(args) > 0:
+            input_ids = args[0]
+        
+        batch_size = 1
+        seq_len = 5
+        if input_ids is not None:
+            batch_size = input_ids.shape[0]
+            seq_len = input_ids.shape[1]
+            
+        logits = torch.zeros((batch_size, seq_len, 10))
+        logits[:, -1, 5] = 10.0
+        
+        out = MagicMock()
+        out.loss = torch.tensor(1.0, requires_grad=True)
+        out.logits = logits
+        return out
+        
+    model.side_effect = mock_forward
     model.parameters.return_value = [torch.nn.Parameter(torch.zeros(2, 2))]
     return model
 
@@ -113,9 +121,9 @@ def test_run_dapt_pipeline(mock_model, mock_tokenizer):
         np.save(pretokenized_bin_path, np.arange(1000, dtype=np.int32))
             
         # Patch transformers from_pretrained calls and run_all_probes
-        with patch("lib.s2_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
-             patch("lib.s2_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
-             patch("lib.s2_dapt.dapt.run_all_probes") as mock_run_probes, \
+        with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
+             patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
+             patch("lib.s3_dapt.dapt.run_all_probes") as mock_run_probes, \
              patch.dict(os.environ, {
                  "PPL_CORPUS_PATH": ppl_corpus_path,
                  "VOCAB_CLOZE_PATH": vocab_cloze_path,
@@ -190,9 +198,9 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
         np.save(pretokenized_bin_path, np.arange(1000, dtype=np.int32))
             
         # Patch transformers from_pretrained calls, wandb methods, and run_all_probes
-        with patch("lib.s2_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
-             patch("lib.s2_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
-             patch("lib.s2_dapt.dapt.run_all_probes") as mock_run_probes, \
+        with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
+             patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
+             patch("lib.s3_dapt.dapt.run_all_probes") as mock_run_probes, \
              patch("wandb.init") as mock_wandb_init, \
              patch("wandb.login") as mock_wandb_login, \
              patch("wandb.log") as mock_wandb_log, \
@@ -272,8 +280,8 @@ def test_run_dapt_pipeline_missing_files_raises_error(mock_model, mock_tokenizer
             "RETRIEVAL_REFERENCES_PATH": os.path.join(tmpdir, "missing_references.json"),
             "PRETOKENIZED_BIN_PATH": pretokenized_bin_path,
         }):
-            with patch("lib.s2_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
-                 patch("lib.s2_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model:
+            with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
+                 patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model:
                 mock_from_token.return_value = mock_tokenizer
                 mock_from_model.return_value = mock_model
                 
@@ -304,7 +312,7 @@ def test_run_pretokenization(mock_tokenizer):
             f.write(json.dumps({"text": "document 2"}) + "\n")
             f.write(json.dumps({"text": "document 3"}) + "\n")
             
-        with patch("lib.s1_5_pretokenize.pretokenize.AutoTokenizer.from_pretrained") as mock_from_token:
+        with patch("lib.s2_pretokenize.pretokenize.AutoTokenizer.from_pretrained") as mock_from_token:
             mock_from_token.return_value = mock_tokenizer
             
             cfg = PipelineConfig()
@@ -326,7 +334,7 @@ def test_run_pretokenization(mock_tokenizer):
 
 
 def test_eval_qa_accuracy_new_format(mock_model, mock_tokenizer):
-    from lib.s2_dapt.probes.qa_probe import eval_qa_accuracy
+    from lib.s3_dapt.probes.qa_probe import eval_qa_accuracy
     from pathlib import Path
     
     probe_items = [
@@ -340,13 +348,16 @@ def test_eval_qa_accuracy_new_format(mock_model, mock_tokenizer):
     
     # Custom mock tokenizer to handle prompt and choice input shapes
     def mock_tokenize_fn(text, *args, **kwargs):
-        # Determine sequence length based on prompt or choice addition
-        if "Answer:" in text and not any(text.endswith(c) for c in ["Serotonin", "Dopamine", "GABA", "Acetylcholine"]):
-            # Prompt only: 3 tokens
-            tokens = [1, 2, 3]
+        if "Answer:" in text:
+            if any(text.endswith(c) for c in ["Serotonin", "Dopamine", "GABA", "Acetylcholine"]):
+                # Prompt + choice: 6 tokens (BOS + prompt + choice)
+                tokens = [0, 1, 2, 3, 4, 5]
+            else:
+                # Prompt only: 4 tokens (BOS + prompt)
+                tokens = [0, 1, 2, 3]
         else:
-            # Prompt + choice: 5 tokens
-            tokens = [1, 2, 3, 4, 5]
+            # Choice only: 3 tokens (BOS + choice)
+            tokens = [0, 4, 5]
         return {
             "input_ids": torch.tensor([tokens]),
             "attention_mask": torch.tensor([[1] * len(tokens)])
@@ -355,37 +366,24 @@ def test_eval_qa_accuracy_new_format(mock_model, mock_tokenizer):
     mock_tokenizer.side_effect = mock_tokenize_fn
     mock_tokenizer.encode.return_value = [1, 2, 3]
     
-    # Let's count how many times model is called to differentiate the choices
-    call_count = 0
-    
     def mock_model_forward(*args, **kwargs):
-        batch_size = 1
-        if "input_ids" in kwargs:
-            batch_size = kwargs["input_ids"].shape[0]
-        elif len(args) > 0 and torch.is_tensor(args[0]):
-            batch_size = args[0].shape[0]
-        elif hasattr(mock_model, "call_args") and mock_model.call_args is not None:
-            call_kwargs = mock_model.call_args[1]
-            call_args = mock_model.call_args[0]
-            if "input_ids" in call_kwargs:
-                batch_size = call_kwargs["input_ids"].shape[0]
-            elif len(call_args) > 0 and torch.is_tensor(call_args[0]):
-                batch_size = call_args[0].shape[0]
+        input_ids = kwargs.get("input_ids")
+        if input_ids is None and len(args) > 0:
+            input_ids = args[0]
+        batch_size = input_ids.shape[0]
+        seq_len = input_ids.shape[1]
 
-        logits = torch.zeros((batch_size, 5, 10))
-        logits[:, 2, 4] = 1.0
-        logits[:, 3, 5] = 1.0
-
-        if batch_size > 1:
-            # Choice at index 1 is Dopamine, make it highly probable
-            logits[1, 2, 4] = 10.0
-            logits[1, 3, 5] = 10.0
+        logits = torch.zeros((batch_size, seq_len, 10))
+        if seq_len == 6:
+            logits[:, 3, 4] = 1.0
+            logits[:, 4, 5] = 1.0
+            if batch_size > 1:
+                # Dopamine (choice index 1) is correct conditionally
+                logits[1, 3, 4] = 10.0
+                logits[1, 4, 5] = 10.0
         else:
-            nonlocal call_count
-            if call_count == 1:
-                logits[0, 2, 4] = 10.0
-                logits[0, 3, 5] = 10.0
-            call_count += 1
+            logits[:, 0, 4] = 1.0
+            logits[:, 1, 5] = 1.0
 
         mock_output = MagicMock()
         mock_output.logits = logits
@@ -413,7 +411,7 @@ def test_eval_qa_accuracy_new_format(mock_model, mock_tokenizer):
 
 
 def test_eval_terminology_coverage_empty_prompt(mock_model, mock_tokenizer):
-    from lib.s2_dapt.probes.terminology_probe import eval_terminology_coverage
+    from lib.s3_dapt.probes.terminology_probe import eval_terminology_coverage
     from pathlib import Path
     
     # Custom mock tokenizer that returns empty input_ids when prompt is empty
@@ -467,7 +465,7 @@ def test_eval_terminology_coverage_empty_prompt(mock_model, mock_tokenizer):
 
 
 def test_eval_retrieval_precision_empty_prompt(mock_model, mock_tokenizer):
-    from lib.s2_dapt.probes.retrieval_probe import eval_retrieval_precision
+    from lib.s3_dapt.probes.retrieval_probe import eval_retrieval_precision
     from pathlib import Path
     
     def mock_tokenize_fn(text, *args, **kwargs):
@@ -547,9 +545,9 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
             "RETRIEVAL_REFERENCES_PATH": os.path.join(tmpdir, "missing_references.json"),
             "PRETOKENIZED_BIN_PATH": pretokenized_bin_path,
         }):
-            with patch("lib.s2_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
-                 patch("lib.s2_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
-                 patch("lib.s2_dapt.dapt.run_all_probes") as mock_run_probes:
+            with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
+                 patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
+                 patch("lib.s3_dapt.dapt.run_all_probes") as mock_run_probes:
                 mock_from_token.return_value = mock_tokenizer
                 mock_from_model.return_value = mock_model
                 mock_run_probes.return_value = {
@@ -583,7 +581,7 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
 
 
 def test_check_convergence_gates_disabled_probes():
-    from lib.s2_dapt.evaluation.gate_logic import check_convergence_gates, DAPTDecision
+    from lib.s3_dapt.evaluation.gate_logic import check_convergence_gates, DAPTDecision
     
     state = {
         "tokens_processed": 100,
@@ -684,7 +682,7 @@ def test_select_best_checkpoint_fallback_metrics():
 
 
 def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
-    from lib.s2_dapt.evaluation.eval_runner import run_inference_and_log_failures
+    from lib.s3_dapt.evaluation.eval_runner import run_inference_and_log_failures
     import tempfile
     
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -727,9 +725,9 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
         # Mock AutoModelForCausalLM.from_pretrained and AutoTokenizer.from_pretrained
         with patch("transformers.AutoModelForCausalLM.from_pretrained") as mock_model_load, \
              patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer_load, \
-             patch("lib.s2_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa, \
-             patch("lib.s2_dapt.probes.terminology_probe.get_failed_terminology_samples") as mock_get_failed_term, \
-             patch("lib.s2_dapt.probes.retrieval_probe.get_failed_retrieval_samples") as mock_get_failed_ret:
+             patch("lib.s3_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa, \
+             patch("lib.s3_dapt.probes.terminology_probe.get_failed_terminology_samples") as mock_get_failed_term, \
+             patch("lib.s3_dapt.probes.retrieval_probe.get_failed_retrieval_samples") as mock_get_failed_ret:
              
             mock_model_load.return_value = mock_model
             mock_tokenizer_load.return_value = mock_tokenizer

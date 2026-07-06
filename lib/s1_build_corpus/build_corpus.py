@@ -49,76 +49,89 @@ class CorpusBuilder:
 
         gpu_queue = self._make_gpu_queue()
 
-        # Create a manager and shared queue for streaming chunk results in real-time
-        manager = multiprocessing.Manager()
-        chunk_queue = manager.Queue()
-
-        sent_chunks = set()
-        sent_lock = threading.Lock()
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
         total_tokens = 0
         doc_index = 0
 
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        # We use multiprocessing.Pool with maxtasksperchild to prevent memory accumulation on CPU.
+        # Recycling the worker processes regularly releases memory back to the OS.
+        pool = multiprocessing.Pool(
+            processes=self.total_workers,
+            initializer=worker_init,
+            initargs=(gpu_queue,),
+            maxtasksperchild=10,
+        )
 
-        with open(self.output_path, "w", encoding="utf-8") as out:
-            # Start a background thread to process and write chunks immediately as they are put on the queue
-            def write_loop():
-                nonlocal total_tokens, doc_index
-                while True:
-                    item = chunk_queue.get()
-                    if item is None:
-                        break
-                    filename, chunk = item
-                    total_tokens += chunk.token_count
-                    out.write(json.dumps(self._record(doc_index, filename, chunk)) + "\n")
-                    out.flush()
-                    logger.info(
-                        f"[OK] #{doc_index} {filename} (chunk {chunk.chunk_index}) | "
-                        f"{chunk.token_count:,} tokens | cumulative {total_tokens:,}"
-                    )
-                    doc_index += 1
+        try:
+            with open(self.output_path, "w", encoding="utf-8") as out:
+                import pypdfium2 as pdfium
 
-                    with sent_lock:
-                        sent_chunks.add((filename, chunk.chunk_index))
-
-            writer_thread = threading.Thread(target=write_loop)
-            writer_thread.start()
-
-            try:
-                with ProcessPoolExecutor(
-                    max_workers=self.total_workers,
-                    initializer=worker_init,
-                    initargs=(gpu_queue,),
-                ) as pool:
-                    futures = {}
-                    for filename, path, is_temp in self.storage.stream_pdfs():
-                        future = pool.submit(worker_task, filename, path, self.chunk_size, chunk_queue)
-                        futures[future] = (path, is_temp)
-
-                    for future in as_completed(futures):
-                        path, is_temp = futures[future]
-                        result: ExtractionResult = future.result()
-
+                for filename, path, is_temp in self.storage.stream_pdfs():
+                    try:
+                        doc = pdfium.PdfDocument(path)
+                        try:
+                            page_count = len(doc)
+                        finally:
+                            doc.close()
+                    except Exception as e:
+                        logger.error(f"[ERROR] Could not open PDF {filename}: {e}")
                         if is_temp:
                             _try_delete(path)
+                        continue
 
+                    if page_count == 0:
+                        logger.warning(f"[SKIP] {filename} has 0 pages")
+                        if is_temp:
+                            _try_delete(path)
+                        continue
+
+                    # Create chunk tasks for this PDF
+                    chunk_size = max(2, self.chunk_size)
+                    stride = chunk_size - 1
+                    
+                    pdf_tasks = []
+                    start = 1
+                    chunk_idx = 0
+                    while start <= page_count:
+                        end = min(start + chunk_size - 1, page_count)
+                        pdf_tasks.append((filename, path, start, end, chunk_idx))
+                        if end >= page_count:
+                            break
+                        start += stride
+                        chunk_idx += 1
+
+                    logger.info(f"[PLAN] Processing {filename} ({page_count} pages) in {len(pdf_tasks)} chunks...")
+
+                    # Run tasks for this PDF in parallel using the pool
+                    results = pool.starmap(worker_task, pdf_tasks, chunksize=1)
+
+                    # Gather and sort valid chunks
+                    valid_chunks = []
+                    for result in results:
                         if result.succeeded:
-                            # Fallback for mock/test runs: if chunks are in result but not in the queue
-                            for chunk in result.chunks:
-                                chunk_key = (result.filename, chunk.chunk_index)
-                                with sent_lock:
-                                    already_sent = chunk_key in sent_chunks
-                                    if not already_sent:
-                                        sent_chunks.add(chunk_key)
-                                if not already_sent:
-                                    chunk_queue.put((result.filename, chunk))
+                            valid_chunks.extend(result.chunks)
                         else:
-                            logger.warning(f"[SKIP] {result.filename} | {result.status}")
-            finally:
-                # Signal the writer thread to stop and wait for it
-                chunk_queue.put(None)
-                writer_thread.join()
+                            logger.warning(f"[SKIP CHUNK] {result.filename} | {result.status}")
+
+                    valid_chunks.sort(key=lambda c: c.chunk_index)
+
+                    for chunk in valid_chunks:
+                        total_tokens += chunk.token_count
+                        out.write(json.dumps(self._record(doc_index, filename, chunk)) + "\n")
+                        out.flush()
+                        logger.info(
+                            f"[OK] #{doc_index} {filename} (chunk {chunk.chunk_index}) | "
+                            f"{chunk.token_count:,} tokens | cumulative {total_tokens:,}"
+                        )
+                        doc_index += 1
+
+                    if is_temp:
+                        _try_delete(path)
+
+        finally:
+            pool.close()
+            pool.join()
 
         logger.info(
             f"[DONE] {self.name} - {doc_index} chunks from documents, "
@@ -129,9 +142,8 @@ class CorpusBuilder:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _make_gpu_queue(self):  # returns multiprocessing.managers.AutoProxy[Queue]
-        manager = multiprocessing.Manager()
-        q = manager.Queue()
+    def _make_gpu_queue(self):
+        q = multiprocessing.Queue()
         for gpu_id in self.gpu_ids:
             for _ in range(self.workers_per_gpu):
                 q.put(gpu_id)

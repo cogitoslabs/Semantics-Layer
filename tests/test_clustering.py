@@ -10,11 +10,11 @@ import pytest
 import numpy as np
 
 from lib.utils import PipelineConfig
-from lib.s4_clustering.embedder import run_embedding, load_corpus
-from lib.s4_clustering.clusterer import run_clustering, ClusterAssignment
-from lib.s4_clustering.splitter import run_splitting
-from lib.s4_clustering.cluster_reporter import run_reporting
-from lib.s4_clustering import run_clustering_pipeline
+from lib.s5_clustering.embedder import run_embedding, load_corpus
+from lib.s5_clustering.clusterer import run_clustering, ClusterAssignment
+from lib.s5_clustering.splitter import run_splitting
+from lib.s5_clustering.cluster_reporter import run_reporting
+from lib.s5_clustering import run_clustering_pipeline
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def mock_corpus_file():
 
 @pytest.fixture
 def mock_sentence_transformer():
-    with patch("lib.s4_clustering.embedder.SentenceTransformer") as mock_class:
+    with patch("lib.s5_clustering.embedder.SentenceTransformer") as mock_class:
         mock_instance = MagicMock()
         # Mock encoding to return L2-normalized 768-dim random floats
         def mock_encode(texts, batch_size=64, show_progress_bar=False, convert_to_numpy=True):
