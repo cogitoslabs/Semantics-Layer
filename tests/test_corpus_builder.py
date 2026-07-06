@@ -95,23 +95,24 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
             mock_pool = MagicMock()
             mock_pool_cls.return_value = mock_pool
             
-            # Mock starmap to return our successful ExtractionResult
+            # Mock apply_async to return a mock task whose get() returns our successful ExtractionResult
             from lib.s1_build_corpus.worker import ChunkResult
             dummy_text = "This is a neuroscience reasoning and retrieval test document. " * 10
-            mock_pool.starmap.return_value = [
-                ExtractionResult(
-                    filename="paper.pdf",
-                    chunks=[
-                        ChunkResult(
-                            chunk_index=0,
-                            text=dummy_text,
-                            token_count=50,
-                            page_range=(1, 3)
-                        )
-                    ],
-                    status="SUCCESS"
-                )
-            ]
+            
+            mock_task = MagicMock()
+            mock_task.get.return_value = ExtractionResult(
+                filename="paper.pdf",
+                chunks=[
+                    ChunkResult(
+                        chunk_index=0,
+                        text=dummy_text,
+                        token_count=50,
+                        page_range=(1, 3)
+                    )
+                ],
+                status="SUCCESS"
+            )
+            mock_pool.apply_async.return_value = mock_task
 
             builder = CorpusBuilder(
                 storage=storage,
@@ -126,7 +127,7 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
         assert os.path.exists(output_jsonl)
         with open(output_jsonl, "r", encoding="utf-8") as f:
             lines = f.readlines()
-            assert len(lines) == 1
+            assert len(lines) == 2
             record = json.loads(lines[0])
             assert record["source_file"] == "paper.pdf"
             assert record["chunk_id"] == 0

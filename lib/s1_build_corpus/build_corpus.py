@@ -30,11 +30,15 @@ class CorpusBuilder:
         available_gpus: str = "0",
         workers_per_gpu: int = 1,
         chunk_size: int = 10,
+        maxtasksperchild: Optional[int] = None,
+        docling_options: Optional[dict] = None,
     ):
         self.name = "Docling"
         self.storage = storage
         self.output_path = Path(output_path)
         self.chunk_size = chunk_size
+        self.maxtasksperchild = maxtasksperchild
+        self.docling_options = docling_options
 
         self.gpu_ids = [int(g.strip()) for g in available_gpus.split(",")]
         self.workers_per_gpu = workers_per_gpu
@@ -59,75 +63,108 @@ class CorpusBuilder:
         pool = multiprocessing.Pool(
             processes=self.total_workers,
             initializer=worker_init,
-            initargs=(gpu_queue,),
-            maxtasksperchild=10,
+            initargs=(gpu_queue, self.docling_options),
+            maxtasksperchild=self.maxtasksperchild,
         )
 
         try:
             with open(self.output_path, "w", encoding="utf-8") as out:
                 import pypdfium2 as pdfium
 
-                for filename, path, is_temp in self.storage.stream_pdfs():
-                    try:
-                        doc = pdfium.PdfDocument(path)
+                # Limit the number of concurrently active PDFs to prevent downloading
+                # too many temp files from S3/GDrive simultaneously.
+                max_active_pdfs = max(2, 2 * self.total_workers)
+                active_pdfs = []  # list of (filename, path, is_temp, list_of_async_results)
+
+                pdf_generator = self.storage.stream_pdfs()
+                no_more_pdfs = False
+
+                while not no_more_pdfs or active_pdfs:
+                    # 1. Fill the queue with tasks
+                    while not no_more_pdfs and len(active_pdfs) < max_active_pdfs:
                         try:
-                            page_count = len(doc)
-                        finally:
-                            doc.close()
-                    except Exception as e:
-                        logger.error(f"[ERROR] Could not open PDF {filename}: {e}")
-                        if is_temp:
-                            _try_delete(path)
-                        continue
-
-                    if page_count == 0:
-                        logger.warning(f"[SKIP] {filename} has 0 pages")
-                        if is_temp:
-                            _try_delete(path)
-                        continue
-
-                    # Create chunk tasks for this PDF
-                    chunk_size = max(2, self.chunk_size)
-                    stride = chunk_size - 1
-                    
-                    pdf_tasks = []
-                    start = 1
-                    chunk_idx = 0
-                    while start <= page_count:
-                        end = min(start + chunk_size - 1, page_count)
-                        pdf_tasks.append((filename, path, start, end, chunk_idx))
-                        if end >= page_count:
+                            filename, path, is_temp = next(pdf_generator)
+                        except StopIteration:
+                            no_more_pdfs = True
                             break
-                        start += stride
-                        chunk_idx += 1
 
-                    logger.info(f"[PLAN] Processing {filename} ({page_count} pages) in {len(pdf_tasks)} chunks...")
+                        try:
+                            doc = pdfium.PdfDocument(path)
+                            try:
+                                page_count = len(doc)
+                            finally:
+                                doc.close()
+                        except Exception as e:
+                            logger.error(f"[ERROR] Could not open PDF {filename}: {e}")
+                            if is_temp:
+                                _try_delete(path)
+                            continue
 
-                    # Run tasks for this PDF in parallel using the pool
-                    results = pool.starmap(worker_task, pdf_tasks, chunksize=1)
+                        if page_count == 0:
+                            logger.warning(f"[SKIP] {filename} has 0 pages")
+                            if is_temp:
+                                _try_delete(path)
+                            continue
 
-                    # Gather and sort valid chunks
-                    valid_chunks = []
-                    for result in results:
-                        if result.succeeded:
-                            valid_chunks.extend(result.chunks)
-                        else:
-                            logger.warning(f"[SKIP CHUNK] {result.filename} | {result.status}")
+                        # Create chunk tasks for this PDF and submit asynchronously
+                        chunk_size = max(2, self.chunk_size)
+                        stride = chunk_size - 1
 
-                    valid_chunks.sort(key=lambda c: c.chunk_index)
+                        async_results = []
+                        start = 1
+                        chunk_idx = 0
+                        while start <= page_count:
+                            end = min(start + chunk_size - 1, page_count)
+                            # Submit task asynchronously
+                            task = pool.apply_async(
+                                worker_task,
+                                args=(filename, path, start, end, chunk_idx)
+                            )
+                            async_results.append(task)
+                            if end >= page_count:
+                                break
+                            start += stride
+                            chunk_idx += 1
 
-                    for chunk in valid_chunks:
-                        total_tokens += chunk.token_count
-                        out.write(json.dumps(self._record(doc_index, filename, chunk)) + "\n")
-                        out.flush()
+                        active_pdfs.append((filename, path, is_temp, async_results))
                         logger.info(
-                            f"[OK] #{doc_index} {filename} (chunk {chunk.chunk_index}) | "
-                            f"{chunk.token_count:,} tokens | cumulative {total_tokens:,}"
+                            f"[PLAN] Queued {filename} ({page_count} pages) in "
+                            f"{len(async_results)} chunks asynchronously..."
                         )
-                        doc_index += 1
 
-                    if is_temp:
-                        _try_delete(path)
+                    # 2. Process and write the oldest PDF in the queue
+                    if active_pdfs:
+                        filename, path, is_temp, async_results = active_pdfs[0]
+
+                        # Block on the chunks of the current PDF to preserve output file ordering
+                        results = []
+                        for task in async_results:
+                            results.append(task.get())
+
+                        # Gather and sort valid chunks
+                        valid_chunks = []
+                        for result in results:
+                            if result.succeeded:
+                                valid_chunks.extend(result.chunks)
+                            else:
+                                logger.warning(f"[SKIP CHUNK] {result.filename} | {result.status}")
+
+                        valid_chunks.sort(key=lambda c: c.chunk_index)
+
+                        for chunk in valid_chunks:
+                            total_tokens += chunk.token_count
+                            out.write(json.dumps(self._record(doc_index, filename, chunk)) + "\n")
+                            out.flush()
+                            logger.info(
+                                f"[OK] #{doc_index} {filename} (chunk {chunk.chunk_index}) | "
+                                f"{chunk.token_count:,} tokens | cumulative {total_tokens:,}"
+                            )
+                            doc_index += 1
+
+                        if is_temp:
+                            _try_delete(path)
+
+                        active_pdfs.pop(0)
 
         finally:
             pool.close()
@@ -173,6 +210,11 @@ def run_corpus_builder(cfg: PipelineConfig) -> None:
     Unified entry point for the corpus builder pipeline.
     Instantiates the storage adapter and corpus builder, then executes the pipeline.
     """
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass
+
     setup_logger("s1.build", log_dir=Path("logs"), log_filename="corpus_building.log")
     
     storage = get_adapter(
@@ -189,6 +231,16 @@ def run_corpus_builder(cfg: PipelineConfig) -> None:
         available_gpus=cfg.build.available_gpus,
         workers_per_gpu=cfg.build.workers_per_gpu,
         chunk_size=cfg.build.chunk_size,
+        maxtasksperchild=cfg.build.maxtasksperchild,
+        docling_options={
+            "do_ocr": cfg.build.docling_use_ocr,
+            "do_table_structure": cfg.build.docling_use_table_structure,
+            "do_code_enrichment": cfg.build.docling_use_code_enrichment,
+            "do_formula_enrichment": cfg.build.docling_use_formula_enrichment,
+            "do_picture_classification": cfg.build.docling_use_picture_classification,
+            "do_picture_description": cfg.build.docling_use_picture_description,
+            "num_threads": cfg.build.docling_num_threads,
+        }
     )
     builder.build()
 

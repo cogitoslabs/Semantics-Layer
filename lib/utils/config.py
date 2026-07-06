@@ -40,6 +40,14 @@ class CorpusBuildConfig:
     workers_per_gpu: int      = field(default_factory=lambda: _get("WORKERS_PER_GPU", 1, int))
     chunk_size: int           = field(default_factory=lambda: _get("CHUNK_SIZE", 10, int))
     output_path: Path         = field(default_factory=lambda: Path(_get("OUTPUT_PATH", "./data/dapt/domain_dapt_corpus.jsonl")))
+    maxtasksperchild: Optional[int] = field(default_factory=lambda: _get("MAX_TASKS_PER_CHILD", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+    docling_use_ocr: bool      = field(default_factory=lambda: _get("DOCLING_USE_OCR", False, bool))
+    docling_use_table_structure: bool = field(default_factory=lambda: _get("DOCLING_USE_TABLE_STRUCTURE", False, bool))
+    docling_use_code_enrichment: bool = field(default_factory=lambda: _get("DOCLING_USE_CODE_ENRICHMENT", False, bool))
+    docling_use_formula_enrichment: bool = field(default_factory=lambda: _get("DOCLING_USE_FORMULA_ENRICHMENT", False, bool))
+    docling_use_picture_classification: bool = field(default_factory=lambda: _get("DOCLING_USE_PICTURE_CLASSIFICATION", False, bool))
+    docling_use_picture_description: bool = field(default_factory=lambda: _get("DOCLING_USE_PICTURE_DESCRIPTION", False, bool))
+    docling_num_threads: int   = field(default_factory=lambda: _get("DOCLING_NUM_THREADS", 4, int))
 
 
 @dataclass
@@ -319,6 +327,10 @@ class PipelineConfig:
             errors.append(f"WORKERS_PER_GPU must be >= 1, got {self.build.workers_per_gpu}")
         if self.build.chunk_size < 2:
             errors.append(f"CHUNK_SIZE must be >= 2, got {self.build.chunk_size}")
+        if self.build.maxtasksperchild is not None and self.build.maxtasksperchild < 1:
+            errors.append(f"MAX_TASKS_PER_CHILD must be >= 1 or None, got {self.build.maxtasksperchild}")
+        if self.build.docling_num_threads < 1:
+            errors.append(f"DOCLING_NUM_THREADS must be >= 1, got {self.build.docling_num_threads}")
         if self.wandb.log_interval_steps < 1:
             errors.append(f"WANDB_LOG_INTERVAL_STEPS must be >= 1, got {self.wandb.log_interval_steps}")
 

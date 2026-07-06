@@ -46,6 +46,7 @@ class ExtractionResult:
 
 def worker_init(
     gpu_queue: Any,  # multiprocessing.Queue
+    docling_options: Optional[dict] = None,
 ) -> None:
     """
     Called once per worker process.
@@ -71,17 +72,27 @@ def worker_init(
     device = "cuda" if cuda_available else "cpu"
 
     options = PdfPipelineOptions()
-    options.accelerator_options = AcceleratorOptions(num_threads=4, device=device)
+    num_threads = docling_options.get("num_threads", 4) if docling_options is not None else 4
+    options.accelerator_options = AcceleratorOptions(num_threads=num_threads, device=device)
 
-    if not cuda_available:
-        options.do_ocr = False
-        options.do_table_structure = False
-        options.do_code_enrichment = False
-        options.do_formula_enrichment = False
-        options.do_picture_classification = False
-        options.do_picture_description = False
-        options.generate_page_images = False
-        options.generate_picture_images = False
+    if docling_options is not None:
+        options.do_ocr = docling_options.get("do_ocr", False)
+        options.do_table_structure = docling_options.get("do_table_structure", False)
+        options.do_code_enrichment = docling_options.get("do_code_enrichment", False)
+        options.do_formula_enrichment = docling_options.get("do_formula_enrichment", False)
+        options.do_picture_classification = docling_options.get("do_picture_classification", False)
+        options.do_picture_description = docling_options.get("do_picture_description", False)
+    else:
+        if not cuda_available:
+            options.do_ocr = False
+            options.do_table_structure = False
+            options.do_code_enrichment = False
+            options.do_formula_enrichment = False
+            options.do_picture_classification = False
+            options.do_picture_description = False
+
+    options.generate_page_images = False
+    options.generate_picture_images = False
 
     if cuda_available:
         pdf_format_option = PdfFormatOption(pipeline_options=options)
