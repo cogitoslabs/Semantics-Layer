@@ -11,10 +11,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from lib.utils import setup_logger, get_logger, get_adapter, StorageAdapter, PipelineConfig
+from lib.utils import setup_logger, get_logger, get_adapter, StorageAdapter, PipelineConfig, CorpusBuildConfig
+from lib.utils.config import LoggingConfig
 from .worker import worker_init, worker_task, ExtractionResult
 
-logger = get_logger("s1.build")
+logger = get_logger(__name__)
 
 
 class CorpusBuilder:
@@ -26,22 +27,27 @@ class CorpusBuilder:
     def __init__(
         self,
         storage: StorageAdapter,
-        output_path: str,
-        available_gpus: str = "0",
-        workers_per_gpu: int = 1,
-        chunk_size: int = 10,
-        maxtasksperchild: Optional[int] = None,
-        docling_options: Optional[dict] = None,
+        cfg: CorpusBuildConfig,
+        logging_cfg: LoggingConfig,
     ):
         self.name = "Docling"
         self.storage = storage
-        self.output_path = Path(output_path)
-        self.chunk_size = chunk_size
-        self.maxtasksperchild = maxtasksperchild
-        self.docling_options = docling_options
+        self.output_path = Path(cfg.output_path)
+        self.chunk_size = cfg.chunk_size
+        self.maxtasksperchild = cfg.maxtasksperchild
+        self.logging_cfg = logging_cfg
+        self.docling_options = {
+            "do_ocr": cfg.docling_use_ocr,
+            "do_table_structure": cfg.docling_use_table_structure,
+            "do_code_enrichment": cfg.docling_use_code_enrichment,
+            "do_formula_enrichment": cfg.docling_use_formula_enrichment,
+            "do_picture_classification": cfg.docling_use_picture_classification,
+            "do_picture_description": cfg.docling_use_picture_description,
+            "num_threads": cfg.docling_num_threads,
+        }
 
-        self.gpu_ids = [int(g.strip()) for g in available_gpus.split(",")]
-        self.workers_per_gpu = workers_per_gpu
+        self.gpu_ids = [int(g.strip()) for g in cfg.available_gpus.split(",")]
+        self.workers_per_gpu = cfg.workers_per_gpu
         self.total_workers = len(self.gpu_ids) * self.workers_per_gpu
 
 
@@ -63,7 +69,7 @@ class CorpusBuilder:
         pool = multiprocessing.Pool(
             processes=self.total_workers,
             initializer=worker_init,
-            initargs=(gpu_queue, self.docling_options),
+            initargs=(gpu_queue, self.docling_options, self.logging_cfg),
             maxtasksperchild=self.maxtasksperchild,
         )
 
@@ -215,32 +221,19 @@ def run_corpus_builder(cfg: PipelineConfig) -> None:
     except RuntimeError:
         pass
 
-    setup_logger("s1.build", log_dir=Path("logs"), log_filename="corpus_building.log")
-    
-    storage = get_adapter(
-        target=cfg.build.storage_target,
-        local_directory_path=cfg.build.local_directory_path,
-        aws_bucket_name=cfg.build.aws_bucket_name,
-        aws_prefix=cfg.build.aws_prefix,
-        gdrive_folder_id=cfg.build.gdrive_folder_id,
+    import sys
+    setup_logger(
+        f"{__name__}.{sys._getframe().f_code.co_name}",
+        cfg.logging,
     )
-
+    global logger
+    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
+    
+    storage = get_adapter(cfg.storage)
+ 
     builder = CorpusBuilder(
         storage=storage,
-        output_path=str(cfg.build.output_path),
-        available_gpus=cfg.build.available_gpus,
-        workers_per_gpu=cfg.build.workers_per_gpu,
-        chunk_size=cfg.build.chunk_size,
-        maxtasksperchild=cfg.build.maxtasksperchild,
-        docling_options={
-            "do_ocr": cfg.build.docling_use_ocr,
-            "do_table_structure": cfg.build.docling_use_table_structure,
-            "do_code_enrichment": cfg.build.docling_use_code_enrichment,
-            "do_formula_enrichment": cfg.build.docling_use_formula_enrichment,
-            "do_picture_classification": cfg.build.docling_use_picture_classification,
-            "do_picture_description": cfg.build.docling_use_picture_description,
-            "num_threads": cfg.build.docling_num_threads,
-        }
+        cfg=cfg.build,
+        logging_cfg=cfg.logging,
     )
     builder.build()
-

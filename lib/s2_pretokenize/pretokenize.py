@@ -17,14 +17,20 @@ from transformers import AutoTokenizer
 from lib.utils.logger import get_logger, setup_logger
 from lib.utils import PipelineConfig
 
-logger = get_logger("s2.pretokenize")
+logger = get_logger(__name__)
 
 
 def run_pretokenization(
     cfg: PipelineConfig,
     val_ratio: float = 0.20,
 ) -> None:
-    setup_logger("s2.pretokenize", log_dir=Path("logs"), log_filename="pretokenization.log")
+    import sys
+    setup_logger(
+        f"{__name__}.{sys._getframe().f_code.co_name}",
+        cfg.logging,
+    )
+    global logger
+    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
     
     corpus_path = str(cfg.build.output_path)
     base_model_name = cfg.model.base_model_name

@@ -10,7 +10,6 @@ dependencies = [
     "docling>=2.102.1",
     "python-dotenv>=1.0.0",
     "hf-xet>=1.5.1",
-    "pydrive2>=1.21.3",
     "tiktoken>=0.13.0",
     "bert-score>=0.3.13",
     "wandb>=0.16.0",

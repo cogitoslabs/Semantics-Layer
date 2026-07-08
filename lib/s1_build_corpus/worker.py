@@ -16,7 +16,7 @@ import tiktoken
 from lib.utils.logger import get_logger
 from lib.utils import clean_corpus_text
 
-logger = get_logger("s1.worker")
+logger = get_logger(__name__)
 
 
 # Process-local state set during initialisation
@@ -47,6 +47,7 @@ class ExtractionResult:
 def worker_init(
     gpu_queue: Any,  # multiprocessing.Queue
     docling_options: Optional[dict] = None,
+    logging_cfg: Any = None,
 ) -> None:
     """
     Called once per worker process.
@@ -55,9 +56,17 @@ def worker_init(
     """
     global _docling_converter
 
+    import sys
     from lib.utils import setup_logger
-    from pathlib import Path
-    setup_logger("s1.worker", log_dir=Path("logs"), log_filename="corpus_building.log")
+    from lib.utils.config import LoggingConfig
+    if logging_cfg is None:
+        logging_cfg = LoggingConfig()
+    setup_logger(
+        f"{__name__}.{sys._getframe().f_code.co_name}",
+        logging_cfg,
+    )
+    global logger
+    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
 
     gpu_id = gpu_queue.get()
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)

@@ -114,12 +114,19 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
             )
             mock_pool.apply_async.return_value = mock_task
 
-            builder = CorpusBuilder(
-                storage=storage,
-                output_path=output_jsonl,
+            from pathlib import Path
+            from lib.utils import CorpusBuildConfig
+            from lib.utils.config import LoggingConfig
+            cfg_build = CorpusBuildConfig(
+                output_path=Path(output_jsonl),
                 available_gpus="0",
                 workers_per_gpu=1,
                 chunk_size=3
+            )
+            builder = CorpusBuilder(
+                storage=storage,
+                cfg=cfg_build,
+                logging_cfg=LoggingConfig(),
             )
             builder.build()
 

@@ -156,7 +156,7 @@ def test_run_dapt_pipeline(mock_model, mock_tokenizer):
                 cfg.corpus.max_corpus_passes = 1
                 cfg.optimizer.learning_rate = 1e-5
                 cfg.optimizer.train_batch_size = 1
-                cfg.storage.checkpoint_dir = Path(output_dir)
+                cfg.model.checkpoint_dir = Path(output_dir)
                 
                 run_dapt_pipeline(cfg)
                 
@@ -242,7 +242,7 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
             cfg.corpus.max_corpus_passes = 1
             cfg.optimizer.learning_rate = 1e-5
             cfg.optimizer.train_batch_size = 1
-            cfg.storage.checkpoint_dir = Path(output_dir)
+            cfg.model.checkpoint_dir = Path(output_dir)
             
             run_dapt_pipeline(cfg)
             
@@ -294,7 +294,7 @@ def test_run_dapt_pipeline_missing_files_raises_error(mock_model, mock_tokenizer
                     cfg.corpus.max_corpus_passes = 1
                     cfg.optimizer.learning_rate = 1e-5
                     cfg.optimizer.train_batch_size = 1
-                    cfg.storage.checkpoint_dir = Path(output_dir)
+                    cfg.model.checkpoint_dir = Path(output_dir)
                     
                     run_dapt_pipeline(cfg)
                 assert "Required evaluation files are missing" in str(exc_info.value)
@@ -573,7 +573,7 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
                 cfg.corpus.max_corpus_passes = 1
                 cfg.optimizer.learning_rate = 1e-5
                 cfg.optimizer.train_batch_size = 1
-                cfg.storage.checkpoint_dir = Path(output_dir)
+                cfg.model.checkpoint_dir = Path(output_dir)
                 
                 # Should not raise FileNotFoundError because disabled files are bypassed
                 run_dapt_pipeline(cfg)
@@ -712,8 +712,8 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
             
         # Create pipeline config
         cfg = PipelineConfig()
-        cfg.storage.checkpoint_dir = model_dir
-        cfg.storage.log_dir = Path(tmpdir) / "logs"
+        cfg.model.checkpoint_dir = model_dir
+        cfg.logging.log_dir = Path(tmpdir) / "logs"
         cfg.data.qa_probe_path = qa_path
         cfg.data.vocab_cloze_path = vocab_path
         cfg.data.retrieval_prompts_path = retrieval_prompts_path
@@ -740,7 +740,7 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
             run_inference_and_log_failures(cfg)
             
             # Verify failures file was written
-            failed_evals_file = cfg.storage.log_dir / "failed_evals.json"
+            failed_evals_file = cfg.logging.log_dir / "failed_evals.json"
             assert failed_evals_file.exists()
             
             with open(failed_evals_file, "r") as f:

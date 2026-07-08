@@ -1,5 +1,5 @@
 """
-Storage adapters for streaming PDFs from local disk, S3, or Google Drive.
+Storage adapters for streaming PDFs from local disk or S3.
 
 Each adapter yields (filename, local_path, is_temporary) tuples.
 Temporary files (remote sources) are cleaned up by the caller after processing.
@@ -12,9 +12,8 @@ from pathlib import Path
 from typing import Generator, Tuple, Optional
 
 import boto3
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
 
+from .config import StorageConfig
 
 PdfStream = Generator[Tuple[str, str, bool], None, None]
 
@@ -52,25 +51,6 @@ class S3StorageAdapter(StorageAdapter):
                     yield filename, tmp_path, True
 
 
-class GoogleDriveAdapter(StorageAdapter):
-    def __init__(self, folder_id: str):
-        gauth = GoogleAuth()
-        gauth.LocalWebserverAuth()
-        self.drive = GoogleDrive(gauth)
-        self.folder_id = folder_id
-
-    def stream_pdfs(self) -> PdfStream:
-        query = (
-            f"'{self.folder_id}' in parents "
-            "and mimeType='application/pdf' "
-            "and trashed=false"
-        )
-        for file in self.drive.ListFile({"q": query}).GetList():
-            tmp_path = _make_temp_pdf()
-            file.GetContentFile(tmp_path)
-            yield file["title"], tmp_path, True
-
-
 def _make_temp_pdf() -> str:
     """Creates a named temp file and returns its path. Caller is responsible for deletion."""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
@@ -79,29 +59,21 @@ def _make_temp_pdf() -> str:
 
 
 def get_adapter(
-    target: str,
-    local_directory_path: Optional[str] = None,
-    aws_bucket_name: Optional[str] = None,
-    aws_prefix: Optional[str] = None,
-    gdrive_folder_id: Optional[str] = None,
+    cfg: StorageConfig,
 ) -> StorageAdapter:
     """Instantiate the correct adapter using passed configuration."""
-    target = target.lower()
+    target = cfg.storage_target.lower()
 
     if target in ("local", "windows"):
-        return LocalStorageAdapter(local_directory_path or ".")
+        return LocalStorageAdapter(cfg.local_directory_path or ".")
     if target == "s3":
-        if not aws_bucket_name:
+        if not cfg.aws_bucket_name:
             raise ValueError("AWS_BUCKET_NAME must be provided for S3 storage target.")
         return S3StorageAdapter(
-            bucket=aws_bucket_name,
-            prefix=aws_prefix or "",
+            bucket=cfg.aws_bucket_name,
+            prefix=cfg.aws_prefix or "",
         )
-    if target == "gdrive":
-        if not gdrive_folder_id:
-            raise ValueError("GDRIVE_FOLDER_ID must be provided for gdrive storage target.")
-        return GoogleDriveAdapter(gdrive_folder_id)
 
     raise ValueError(
-        f"Unknown STORAGE_TARGET '{target}'. Expected: local, s3, or gdrive."
+        f"Unknown STORAGE_TARGET '{target}'. Expected: local or s3."
     )

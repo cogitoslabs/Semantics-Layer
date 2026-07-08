@@ -22,7 +22,7 @@ from lib.s3_dapt.training_helpers import (
 from lib.s3_dapt.evaluation.gate_logic import DAPTDecision, handle_hard_cap
 from lib.utils.logger import setup_logger, get_logger, MetricsWriter
 
-logger = get_logger("dapt")
+logger = get_logger(__name__)
 
 
 # ── Main pipeline entry point ─────────────────────────────────────────────────
@@ -49,16 +49,16 @@ def _run_dapt_pipeline_impl(
     resources: Optional[Dict[str, Any]] = None
 ) -> None:
 
-    output_dir = str(cfg.storage.checkpoint_dir)
+    output_dir = str(cfg.model.checkpoint_dir)
 
     # Set up logger
+    import sys
     setup_logger(
-        name="dapt",
-        log_dir=cfg.storage.log_dir,
-        level=cfg.misc.log_level,
+        f"{__name__}.{sys._getframe().f_code.co_name}",
+        cfg.logging,
     )
     global logger
-    logger = get_logger("dapt.pipeline")
+    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
 
     logger.info(cfg.summary())
 
@@ -120,7 +120,7 @@ def _run_dapt_pipeline_impl(
         "steps_completed"  : 0,
     }
 
-    metrics_writer = MetricsWriter(cfg.storage.metrics_log_file)
+    metrics_writer = MetricsWriter(cfg.logging.metrics_log_file)
     last_checkpoint_path_ref = [None]
 
     # Mixed precision / autocast context setup
@@ -273,7 +273,7 @@ def _run_dapt_pipeline_impl(
                     state=state,
                     gate_details=gate_details,
                     last_checkpoint_path  = last_checkpoint_path_ref[0],
-                    risk_report_path      = cfg.storage.risk_report_path,
+                    risk_report_path      = cfg.logging.risk_report_path,
                     qa_acc_threshold      = cfg.gates.qa_acc_threshold,
                     qa_low_threshold      = cfg.gates.qa_low_threshold,
                     ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
@@ -329,7 +329,7 @@ def _run_dapt_pipeline_impl(
             state=state,
             gate_details=gate_details,
             last_checkpoint_path  = last_checkpoint_path_ref[0],
-            risk_report_path      = cfg.storage.risk_report_path,
+            risk_report_path      = cfg.logging.risk_report_path,
             qa_acc_threshold      = cfg.gates.qa_acc_threshold,
             qa_low_threshold      = cfg.gates.qa_low_threshold,
             ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,

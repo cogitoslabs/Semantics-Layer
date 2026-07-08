@@ -283,7 +283,7 @@ def test_trace_token_filter(test_cfg):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         test_cfg.rad.traces_dir = tmp_path / "traces"
-        test_cfg.storage.log_dir = tmp_path / "logs"
+        test_cfg.logging.log_dir = tmp_path / "logs"
 
         samples = [
             {"question": "Q1", "answer": "A1", "sample_id": "s1", "cluster": "c1"},
@@ -323,7 +323,7 @@ def test_trace_token_filter(test_cfg):
 
             # Check files
             grounded_file = test_cfg.rad.traces_dir / "grounded_traces.jsonl"
-            discarded_file = test_cfg.storage.log_dir / "rad_prep" / "discarded_traces.jsonl"
+            discarded_file = test_cfg.logging.log_dir / "rad_prep" / "discarded_traces.jsonl"
 
             assert grounded_file.exists()
             assert discarded_file.exists()
@@ -349,7 +349,7 @@ def test_pipeline_end_to_end(test_cfg):
         test_cfg.rad.index_dir = tmp_path / "index"
         test_cfg.rad.traces_dir = tmp_path / "traces"
         test_cfg.rad.qa_samples_path = tmp_path / "probe_qa.jsonl"
-        test_cfg.storage.log_dir = tmp_path / "logs"
+        test_cfg.logging.log_dir = tmp_path / "logs"
 
         # Write mock corpus
         with open(test_cfg.rad.retrieval_corpus_path, "w") as f:
@@ -391,9 +391,9 @@ def test_pipeline_end_to_end(test_cfg):
             assert test_cfg.rad.chunks_path.exists()
             assert (test_cfg.rad.index_dir / "index.faiss").exists()
             assert (test_cfg.rad.traces_dir / "grounded_traces.jsonl").exists()
-            assert (test_cfg.storage.log_dir / "rad_prep" / "phase_manifest.json").exists()
-
-            with open(test_cfg.storage.log_dir / "rad_prep" / "phase_manifest.json", "r") as f:
+            assert (test_cfg.logging.log_dir / "rad_prep" / "phase_manifest.json").exists()
+            
+            with open(test_cfg.logging.log_dir / "rad_prep" / "phase_manifest.json", "r") as f:
                 manifest = json.load(f)
                 assert manifest["status"] == "complete"
                 assert manifest["metrics"]["grounded_trace_count"] == 2

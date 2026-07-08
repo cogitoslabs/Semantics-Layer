@@ -7,6 +7,11 @@ wheels/
 *.egg-info
 
 .env
+.env.cpu
+.env.gpu
+.env.common
+.env.*
+!.env.example
 
 # Virtual environments
 .venv

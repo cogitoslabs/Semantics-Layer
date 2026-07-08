@@ -1,6 +1,104 @@
 # Change History
 
+## Status: Completed (Grouped and Restructured .env Files)
 
+- Reordered and grouped all environment variables across [.env.common](file:///e:/Projects/cnd/Semantics/.env.common), [.env.example](file:///e:/Projects/cnd/Semantics/.env.example), [.env.cpu](file:///e:/Projects/cnd/Semantics/.env.cpu), and [.env.gpu](file:///e:/Projects/cnd/Semantics/.env.gpu) to align exactly with the dataclass structures in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py).
+- Renamed all step-based group headers to dataclass-based headers following the pattern `# [field_name] ([dataclass_name])`.
+- Synchronized missing variables (such as `SLOW_EVAL_INTERVAL_TOKENS`, `PRETOKENIZED_BIN_PATH`, and `GRADIENT_ACCUMULATION_STEPS`) across all environments.
+- Moved hardware-specific optimization variable `MAX_TASKS_PER_CHILD` out of [.env.common](file:///e:/Projects/cnd/Semantics/.env.common) to specific hardware configuration overrides in [.env.cpu](file:///e:/Projects/cnd/Semantics/.env.cpu) and [.env.gpu](file:///e:/Projects/cnd/Semantics/.env.gpu).
+- Verified that all 65 unit and integration tests compile and run successfully.
+
+---
+
+## Status: Completed (Simplified Logger Signature)
+
+- Removed the redundant `log_filename` parameter from [setup_logger](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py#L16)'s signature and call sites.
+- Configured [setup_logger](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py#L16) in [logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py) to read `log_filename = cfg.log_file` directly from `LoggingConfig`.
+- Simplified the call sites in [build_corpus.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/build_corpus.py), [worker.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/worker.py), [pretokenize.py](file:///e:/Projects/cnd/Semantics/lib/s2_pretokenize/pretokenize.py), and [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) by removing the explicit `log_filename` argument.
+- Verified that all 65 unit and integration tests compile and pass successfully.
+
+---
+
+## Status: Completed (Consolidated Log Files)
+
+- Replaced separate phase-specific log files with a single consolidated `LOG_FILE=pipeline.log` across the entire codebase.
+- Removed `CORPUS_LOG_FILE`, `PRETOKENIZE_LOG_FILE`, and `DAPT_LOG_FILE` environment variables from [.env.common](file:///e:/Projects/cnd/Semantics/.env.common) and [.env.example](file:///e:/Projects/cnd/Semantics/.env.example).
+- Cleaned up `LoggingConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py#L188) to parse the unified `LOG_FILE` instead of the distinct files.
+- Modified the default fallback log file name in [logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py#L30) to point to `"pipeline.log"`.
+- Updated all call sites in [build_corpus.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/build_corpus.py), [worker.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/worker.py), [pretokenize.py](file:///e:/Projects/cnd/Semantics/lib/s2_pretokenize/pretokenize.py), and [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) to pass `cfg.logging.log_file`.
+- Verified that all 65 unit and integration tests compile and pass successfully.
+
+---
+
+## Status: Completed (Dynamic Logger Introspection)
+
+- Eliminated hardcoded function name string references (e.g. `run_corpus_builder` or `_run_dapt_pipeline_impl`) in logging setup.
+- Used Python runtime introspection via `sys._getframe().f_code.co_name` to dynamically set up functions' logger names (i.e. `f"{__name__}.{sys._getframe().f_code.co_name}"`).
+- Configured module-level default loggers using `__name__` and dynamically reassigned them using `global logger` when functions execute.
+- Verified that all 65 unit and integration tests compile and pass successfully.
+
+---
+
+## Status: Completed (Dynamic Logger Names & Configured Filenames)
+
+- Refactored all `setup_logger` calls to use dynamic naming schemas (`f"{__name__}.{function_name}"`) instead of hardcoded strings (e.g., `"s1.build"`).
+- Aligned module-level logger declarations (`get_logger`) to match the configured loggers' naming conventions.
+- Added log filename configuration to `.env.common` and `.env.example` under `# Logging & Checkpoint Storage`:
+  - `CORPUS_LOG_FILE=corpus_building.log`
+  - `PRETOKENIZE_LOG_FILE=pretokenization.log`
+  - `DAPT_LOG_FILE=dapt_convergence.log`
+- Added the corresponding configuration fields (`corpus_log_file`, `pretokenize_log_file`, `dapt_log_file`) to `LoggingConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py#L188).
+- Updated [build_corpus.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/build_corpus.py), [worker.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/worker.py), [pretokenize.py](file:///e:/Projects/cnd/Semantics/lib/s2_pretokenize/pretokenize.py), and [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) to use dynamic names and fetch filenames from `LoggingConfig`.
+- Verified that all 65 unit and integration tests compile and pass successfully.
+
+---
+
+## Status: Completed (Logger Config Refactoring)
+
+- Refactored [setup_logger](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py#L13) in [logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py) to accept the unified `cfg: LoggingConfig` as its second parameter instead of individual `log_dir` and `level` fields.
+- Consolidated log level configuration by moving `log_level` from `MiscConfig` to `LoggingConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py#L188).
+- Updated all `setup_logger` call sites across the codebase:
+  - Inside [build_corpus.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/build_corpus.py), updated the main logging setup and adapted `CorpusBuilder` to propagate the unified `LoggingConfig` to the worker process initializer.
+  - Inside [worker.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/worker.py), modified `worker_init` to accept `logging_cfg` and configure the logger with it.
+  - Inside [pretokenize.py](file:///e:/Projects/cnd/Semantics/lib/s2_pretokenize/pretokenize.py), updated `setup_logger` to pass `cfg.logging`.
+  - Inside [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py), modified `setup_logger` to pass `cfg.logging`.
+  - Inside [test_corpus_builder.py](file:///e:/Projects/cnd/Semantics/tests/test_corpus_builder.py), updated mock builder initialization to provide `LoggingConfig`.
+- Verified that all 65 unit and integration tests compile and pass successfully.
+
+---
+
+## Status: Completed (Package Export Cleanups)
+
+- Simplified public package surfaces by removing unused or redundant exports from `__init__.py` files.
+- Refactored [utils/__init__.py](file:///e:/Projects/cnd/Semantics/lib/utils/__init__.py) to keep only the symbols actually imported from the `lib.utils` package-level namespace:
+  - Kept: `setup_logger`, `get_logger`, `PipelineConfig`, `DAPTConfig`, `CorpusBuildConfig`, `StorageAdapter`, `get_adapter`, `FunctionProfiler`, `clean_corpus_text`.
+  - Removed internal/sub-module level classes and functions: `MetricsWriter`, `save_json`, `load_json`, `save_checkpoint`, `load_checkpoint`, `select_best_checkpoint`, `StorageConfig`, `LoggingConfig`.
+- Simplified [s1_build_corpus/__init__.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/__init__.py) to export only `run_corpus_builder`.
+- Verified that all remaining `__init__.py` subpackage files (`s2_pretokenize`, `s3_dapt`, `s4_rad_prep`, `s5_clustering`, `s6_teacher_benchmarking`) are already clean and only expose their respective pipeline execution functions.
+- Verified that all 65 unit tests pass successfully.
+
+---
+
+## Status: Completed (Configuration Restructuring)
+
+- Refactored [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) to separate concerns inside [PipelineConfig](file:///e:/Projects/cnd/Semantics/lib/utils/config.py#L325):
+  - [StorageConfig](file:///e:/Projects/cnd/Semantics/lib/utils/config.py#L175) strictly holds data for the storage adapter.
+  - Moved checkpoints-related configurations (`checkpoint_dir`, `best_checkpoint_manifest`, and `checkpoint_keep_last`) under [ModelConfig](file:///e:/Projects/cnd/Semantics/lib/utils/config.py#L158).
+  - Created a new dataclass `LoggingConfig` to group logs and metrics settings (`log_dir`, `metrics_log_file`, and `risk_report_path`).
+- Updated all config property references in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py), [training_helpers.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/training_helpers.py), [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py), [rad_prep.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/rad_prep.py), and [trace_generator.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/trace_generator.py) to align with the new structure.
+- Exposed `StorageConfig` and `LoggingConfig` in [__init__.py](file:///e:/Projects/cnd/Semantics/lib/utils/__init__.py).
+- Adjusted [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py) and [test_rad_prep.py](file:///e:/Projects/cnd/Semantics/tests/test_rad_prep.py) testing mocks to utilize the new namespaces.
+- Verified that all 65 unit tests compile and run successfully.
+
+---
+
+## Status: Completed (StorageConfig Import Fix)
+
+- Fixed a `NameError`/linter warning in [storage.py](file:///e:/Projects/cnd/Semantics/lib/utils/storage.py) line 60, where the `StorageConfig` class was referenced in the type signature of `get_adapter` but not imported in the file.
+- Added a relative import `from .config import StorageConfig` to `storage.py` and updated the parameter type hint from `"StorageConfig"` string literal to the class directly.
+- Verified that all unit tests continue to pass successfully.
+
+---
 
 ## Status: Completed (Phase 2, Step 2.1 — Teacher Benchmarking Eval Sampler Fix)
 

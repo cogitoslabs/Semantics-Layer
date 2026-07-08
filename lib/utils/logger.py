@@ -10,21 +10,22 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
+from .config import LoggingConfig
+
+
 def setup_logger(
     name: str,
-    log_dir: Path,
-    level: str = "INFO",
-    log_filename: Optional[str] = None,
+    cfg: LoggingConfig,
 ) -> logging.Logger:
     """
     Set up a logger that writes to both stdout and a rotating log file.
     All modules should call this once and share the logger by name.
     """
+    log_dir = cfg.log_dir
+    level = cfg.log_level
+    log_filename = cfg.log_file
+
     log_dir.mkdir(parents=True, exist_ok=True)
-    
-    if not log_filename:
-        log_filename = "dapt_convergence.log" if "dapt" in name.lower() else "corpus_building.log"
-        
     log_file = log_dir / log_filename
 
     numeric_level = getattr(logging, level.upper(), logging.INFO)

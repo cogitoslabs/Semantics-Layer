@@ -10,9 +10,45 @@ from typing import Optional, List, Dict
 from datetime import datetime
 
 
-# Load .env from project root
+# Load environment configuration dynamically based on GPU availability
 root_dir = Path(__file__).resolve().parent.parent.parent
+
+def is_gpu_available() -> bool:
+    """Detect if an NVIDIA or Apple Silicon GPU is present on the system."""
+    import shutil
+    # 1. Quick check for nvidia-smi tool in PATH
+    if shutil.which("nvidia-smi") is not None:
+        return True
+    
+    # 2. Check standard CUDA environment variable
+    if "CUDA_VISIBLE_DEVICES" in os.environ:
+        return True
+
+    # 3. Check for macOS/MPS or CUDA via lazy torch import to prevent startup lag
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return True
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return True
+    except ImportError:
+        pass
+
+    return False
+
+# Priority order (first loaded takes precedence under override=False):
+# 1. Local overrides (.env) if present
+# 2. Specific hardware settings (.env.gpu or .env.cpu)
+# 3. Shared settings (.env.common)
 load_dotenv(dotenv_path=root_dir / ".env")
+
+if is_gpu_available():
+    load_dotenv(dotenv_path=root_dir / ".env.gpu")
+else:
+    load_dotenv(dotenv_path=root_dir / ".env.cpu")
+
+load_dotenv(dotenv_path=root_dir / ".env.common")
+
 
 
 def _get(key: str, default, cast=str):
@@ -31,11 +67,6 @@ def _get(key: str, default, cast=str):
 
 @dataclass
 class CorpusBuildConfig:
-    storage_target: str       = field(default_factory=lambda: _get("STORAGE_TARGET", "local"))
-    local_directory_path: str = field(default_factory=lambda: _get("LOCAL_DIRECTORY_PATH", "."))
-    aws_bucket_name: Optional[str] = field(default_factory=lambda: _get("AWS_BUCKET_NAME", None))
-    aws_prefix: str           = field(default_factory=lambda: _get("AWS_PREFIX", ""))
-    gdrive_folder_id: Optional[str] = field(default_factory=lambda: _get("GDRIVE_FOLDER_ID", None))
     available_gpus: str       = field(default_factory=lambda: _get("AVAILABLE_GPUS", "0"))
     workers_per_gpu: int      = field(default_factory=lambda: _get("WORKERS_PER_GPU", 1, int))
     chunk_size: int           = field(default_factory=lambda: _get("CHUNK_SIZE", 10, int))
@@ -129,6 +160,10 @@ class ModelConfig:
     model_dtype: str               = field(default_factory=lambda: _get("MODEL_DTYPE", "bfloat16"))
     max_seq_len: int               = field(default_factory=lambda: _get("MAX_SEQ_LEN", 512, int))
 
+    checkpoint_dir: Path           = field(default_factory=lambda: Path(_get("CHECKPOINT_DIR", "models/checkpoints")))
+    best_checkpoint_manifest: Path = field(default_factory=lambda: Path(_get("BEST_CHECKPOINT_MANIFEST", "logs/best_checkpoint.json")))
+    checkpoint_keep_last: int      = field(default_factory=lambda: _get("CHECKPOINT_KEEP_LAST", 5, int))
+
 
 @dataclass
 class OptimizerConfig:
@@ -143,18 +178,24 @@ class OptimizerConfig:
 
 @dataclass
 class StorageConfig:
-    checkpoint_dir: Path           = field(default_factory=lambda: Path(_get("CHECKPOINT_DIR", "models/checkpoints")))
+    storage_target: str       = field(default_factory=lambda: _get("STORAGE_TARGET", "local"))
+    local_directory_path: str = field(default_factory=lambda: _get("LOCAL_DIRECTORY_PATH", "."))
+    aws_bucket_name: Optional[str] = field(default_factory=lambda: _get("AWS_BUCKET_NAME", None))
+    aws_prefix: str           = field(default_factory=lambda: _get("AWS_PREFIX", ""))
+
+
+@dataclass
+class LoggingConfig:
     log_dir: Path                  = field(default_factory=lambda: Path(_get("LOG_DIR", "logs")))
     metrics_log_file: Path         = field(default_factory=lambda: Path(_get("METRICS_LOG_FILE", "logs/dapt_eval_metrics.jsonl")))
-    best_checkpoint_manifest: Path = field(default_factory=lambda: Path(_get("BEST_CHECKPOINT_MANIFEST", "logs/best_checkpoint.json")))
     risk_report_path: Path         = field(default_factory=lambda: Path(_get("RISK_REPORT_PATH", "logs/dapt_hard_cap_risk_report.json")))
-    checkpoint_keep_last: int      = field(default_factory=lambda: _get("CHECKPOINT_KEEP_LAST", 5, int))
+    log_level: str                 = field(default_factory=lambda: _get("LOG_LEVEL", "INFO"))
+    log_file: str                  = field(default_factory=lambda: _get("LOG_FILE", "pipeline.log"))
 
 
 @dataclass
 class MiscConfig:
     seed: int                      = field(default_factory=lambda: _get("SEED", 42, int))
-    log_level: str                 = field(default_factory=lambda: _get("LOG_LEVEL", "INFO"))
 
 
 @dataclass
@@ -292,6 +333,7 @@ class PipelineConfig:
     model: ModelConfig        = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     storage: StorageConfig    = field(default_factory=StorageConfig)
+    logging: LoggingConfig    = field(default_factory=LoggingConfig)
     misc: MiscConfig          = field(default_factory=MiscConfig)
     wandb: WandbConfig        = field(default_factory=WandbConfig)
     rad: RADPrepConfig        = field(default_factory=RADPrepConfig)
@@ -399,8 +441,8 @@ class PipelineConfig:
     def ensure_dirs(self):
         """Create output directories if they don't exist."""
         for d in [
-            self.storage.checkpoint_dir,
-            self.storage.log_dir,
+            self.model.checkpoint_dir,
+            self.logging.log_dir,
             self.rad.index_dir,
             self.rad.traces_dir,
             self.clustering.output_dir,
@@ -433,8 +475,8 @@ class PipelineConfig:
             f"  RAD Mode        : {self.rad.retrieval_mode}\n"
             f"  RAD Top-K       : {self.rad.top_k}\n"
             f"  RAD Threshold   : {self.rad.relevance_threshold}\n"
-            f"  Checkpoint dir  : {self.storage.checkpoint_dir}\n"
-            f"  Log dir         : {self.storage.log_dir}\n"
+            f"  Checkpoint dir  : {self.model.checkpoint_dir}\n"
+            f"  Log dir         : {self.logging.log_dir}\n"
             f"{'='*60}\n"
         )
 

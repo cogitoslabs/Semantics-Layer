@@ -240,11 +240,11 @@ def run_all_probes(
         if cfg.probes.run_retrieval and "failures" in ret_result:
             failed_runs["retrieval"] = ret_result["failures"]
 
-        failures_json_path = cfg.storage.log_dir / "failed_evals.json"
+        failures_json_path = cfg.logging.log_dir / "failed_evals.json"
         try:
             import os
             import json
-            os.makedirs(cfg.storage.log_dir, exist_ok=True)
+            os.makedirs(cfg.logging.log_dir, exist_ok=True)
             with open(failures_json_path, "w", encoding="utf-8") as f:
                 json.dump(failed_runs, f, indent=2)
             logger.info(f"Failed evaluations automatically saved to {failures_json_path}")
@@ -256,11 +256,11 @@ def run_all_probes(
 
 def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
     """
-    Load the final model and tokenizer from cfg.storage.checkpoint_dir,
+    Load the final model and tokenizer from cfg.model.checkpoint_dir,
     run inference on active evaluation probes, log all failed samples,
     and save them to a structured JSON file.
     """
-    failures_json_path = cfg.storage.log_dir / "failed_evals.json"
+    failures_json_path = cfg.logging.log_dir / "failed_evals.json"
     if failures_json_path.exists():
         logger.info(f"Failed evaluations already exist at {failures_json_path}. Skipping redundant final inference.")
         return
@@ -272,7 +272,7 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
     from lib.s3_dapt.probes.terminology_probe import get_failed_terminology_samples
     from lib.s3_dapt.probes.retrieval_probe import get_failed_retrieval_samples
 
-    model_dir = cfg.storage.checkpoint_dir
+    model_dir = cfg.model.checkpoint_dir
     if not model_dir.exists():
         logger.error(f"Saved model directory not found at {model_dir}. Cannot run final inference.")
         return
@@ -381,9 +381,9 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
             logger.error(f"Error during Retrieval probe failure logging: {e}")
 
     # Save to file
-    failures_json_path = cfg.storage.log_dir / "failed_evals.json"
+    failures_json_path = cfg.logging.log_dir / "failed_evals.json"
     try:
-        os.makedirs(cfg.storage.log_dir, exist_ok=True)
+        os.makedirs(cfg.logging.log_dir, exist_ok=True)
         with open(failures_json_path, "w", encoding="utf-8") as f:
             json.dump(failed_runs, f, indent=2)
         logger.info(f"Detailed failed evaluations saved to {failures_json_path}")

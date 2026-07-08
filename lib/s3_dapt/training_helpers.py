@@ -144,8 +144,8 @@ def handle_evaluation_cycle(
         model=model,
         optimizer=optimizer,
         state=state,
-        checkpoint_dir=cfg.storage.checkpoint_dir,
-        keep_last=cfg.storage.checkpoint_keep_last,
+        checkpoint_dir=cfg.model.checkpoint_dir,
+        keep_last=cfg.model.checkpoint_keep_last,
     )
     state["last_checkpoint"] = str(last_checkpoint_path)
     last_checkpoint_path_ref[0] = last_checkpoint_path
@@ -220,9 +220,9 @@ def run_final_eval(model, tokenizer, cfg, state, metrics_writer, device):
     """Loads best checkpoint and performs high-fidelity BERTScore evaluation."""
     best_ckpt = select_best_checkpoint(
         eval_history              = state["eval_history"],
-        checkpoint_dir            = cfg.storage.checkpoint_dir,
+        checkpoint_dir            = cfg.model.checkpoint_dir,
         ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
-        manifest_path             = cfg.storage.best_checkpoint_manifest,
+        manifest_path             = cfg.model.best_checkpoint_manifest,
         run_qa                    = cfg.probes.run_qa,
         run_perplexity            = cfg.probes.run_perplexity,
         run_terminology           = cfg.probes.run_terminology,
@@ -249,5 +249,5 @@ def run_final_eval(model, tokenizer, cfg, state, metrics_writer, device):
             "selected_from": "final_evaluation_run",
             "metrics": final_metrics["metrics"],
         }
-        save_json(manifest, cfg.storage.best_checkpoint_manifest)
+        save_json(manifest, cfg.model.best_checkpoint_manifest)
     return best_ckpt

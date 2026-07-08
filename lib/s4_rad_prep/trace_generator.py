@@ -207,7 +207,7 @@ class TraceGenerator:
 
         self.traces_dir = Path(cfg.rad.traces_dir)
         self.traces_dir.mkdir(parents=True, exist_ok=True)
-        self.discarded_log = Path(cfg.storage.log_dir) / "rad_prep" / "discarded_traces.jsonl"
+        self.discarded_log = Path(cfg.logging.log_dir) / "rad_prep" / "discarded_traces.jsonl"
         self.discarded_log.parent.mkdir(parents=True, exist_ok=True)
 
     def generate_traces(self, samples: List[Dict[str, Any]], retrieved_results: List[Any], no_retrieval_router: Any) -> None:
