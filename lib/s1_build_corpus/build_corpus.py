@@ -33,8 +33,12 @@ class CorpusBuilder:
         self.name = "Docling"
         self.storage = storage
         self.output_path = Path(cfg.output_path)
+        self.gpu_ids = cfg.gpu_ids
+        self.workers_per_gpu = cfg.workers_per_gpu
+        self.total_workers = cfg.total_workers
         self.chunk_size = cfg.chunk_size
         self.maxtasksperchild = cfg.maxtasksperchild
+
         self.logging_cfg = logging_cfg
         self.docling_options = {
             "do_ocr": cfg.docling_use_ocr,
@@ -45,10 +49,6 @@ class CorpusBuilder:
             "do_picture_description": cfg.docling_use_picture_description,
             "num_threads": cfg.docling_num_threads,
         }
-
-        self.gpu_ids = [int(g.strip()) for g in cfg.available_gpus.split(",")]
-        self.workers_per_gpu = cfg.workers_per_gpu
-        self.total_workers = len(self.gpu_ids) * self.workers_per_gpu
 
 
     def build(self) -> None:
@@ -75,74 +75,36 @@ class CorpusBuilder:
 
         try:
             with open(self.output_path, "w", encoding="utf-8") as out:
-                import pypdfium2 as pdfium
+                # Limit the number of concurrently active documents to prevent downloading
+                # too many temp files simultaneously.
+                max_active_docs = max(2, 2 * self.total_workers)
+                active_docs = []  # list of (filename, path, is_temp, list_of_async_results)
 
-                # Limit the number of concurrently active PDFs to prevent downloading
-                # too many temp files from S3/GDrive simultaneously.
-                max_active_pdfs = max(2, 2 * self.total_workers)
-                active_pdfs = []  # list of (filename, path, is_temp, list_of_async_results)
+                doc_generator = self.storage.stream_documents()
+                more_docs = True
 
-                pdf_generator = self.storage.stream_pdfs()
-                no_more_pdfs = False
-
-                while not no_more_pdfs or active_pdfs:
+                while more_docs or active_docs:
                     # 1. Fill the queue with tasks
-                    while not no_more_pdfs and len(active_pdfs) < max_active_pdfs:
+                    while more_docs and len(active_docs) < max_active_docs:
                         try:
-                            filename, path, is_temp = next(pdf_generator)
+                            filename, path, is_temp = next(doc_generator)
                         except StopIteration:
-                            no_more_pdfs = True
+                            more_docs = False
                             break
 
-                        try:
-                            doc = pdfium.PdfDocument(path)
-                            try:
-                                page_count = len(doc)
-                            finally:
-                                doc.close()
-                        except Exception as e:
-                            logger.error(f"[ERROR] Could not open PDF {filename}: {e}")
-                            if is_temp:
-                                _try_delete(path)
-                            continue
+                        suffix = Path(path).suffix.lower()
+                        if suffix == ".pdf":
+                            success = self._queue_pdf(pool, filename, path, is_temp, active_docs)
+                            if not success:
+                                continue
+                        else:
+                            self._queue_text_doc(pool, filename, path, is_temp, active_docs)
 
-                        if page_count == 0:
-                            logger.warning(f"[SKIP] {filename} has 0 pages")
-                            if is_temp:
-                                _try_delete(path)
-                            continue
+                    # 2. Process and write the oldest document in the queue
+                    if active_docs:
+                        filename, path, is_temp, async_results = active_docs[0]
 
-                        # Create chunk tasks for this PDF and submit asynchronously
-                        chunk_size = max(2, self.chunk_size)
-                        stride = chunk_size - 1
-
-                        async_results = []
-                        start = 1
-                        chunk_idx = 0
-                        while start <= page_count:
-                            end = min(start + chunk_size - 1, page_count)
-                            # Submit task asynchronously
-                            task = pool.apply_async(
-                                worker_task,
-                                args=(filename, path, start, end, chunk_idx)
-                            )
-                            async_results.append(task)
-                            if end >= page_count:
-                                break
-                            start += stride
-                            chunk_idx += 1
-
-                        active_pdfs.append((filename, path, is_temp, async_results))
-                        logger.info(
-                            f"[PLAN] Queued {filename} ({page_count} pages) in "
-                            f"{len(async_results)} chunks asynchronously..."
-                        )
-
-                    # 2. Process and write the oldest PDF in the queue
-                    if active_pdfs:
-                        filename, path, is_temp, async_results = active_pdfs[0]
-
-                        # Block on the chunks of the current PDF to preserve output file ordering
+                        # Block on the chunks of the current document to preserve output file ordering
                         results = []
                         for task in async_results:
                             results.append(task.get())
@@ -170,7 +132,7 @@ class CorpusBuilder:
                         if is_temp:
                             _try_delete(path)
 
-                        active_pdfs.pop(0)
+                        active_docs.pop(0)
 
         finally:
             pool.close()
@@ -192,13 +154,90 @@ class CorpusBuilder:
                 q.put(gpu_id)
         return q
 
+    def _queue_pdf(
+        self,
+        pool: Any,
+        filename: str,
+        path: str,
+        is_temp: bool,
+        active_docs: list
+    ) -> bool:
+        """
+        Extracts PDF page count, splits pages into chunks, and queues async tasks.
+        Returns True if successful, False if the PDF was skipped or failed to parse.
+        Handles temporary file cleanup on failure.
+        """
+        import pypdfium2 as pdfium
+        try:
+            doc = pdfium.PdfDocument(path)
+            try:
+                page_count = len(doc)
+            finally:
+                doc.close()
+        except Exception as e:
+            logger.error(f"[ERROR] Could not open PDF {filename}: {e}")
+            if is_temp:
+                _try_delete(path)
+            return False
+
+        if page_count == 0:
+            logger.warning(f"[SKIP] {filename} has 0 pages")
+            if is_temp:
+                _try_delete(path)
+            return False
+
+        chunk_size = max(2, self.chunk_size)
+        stride = chunk_size - 1
+
+        async_results = []
+        start = 1
+        chunk_idx = 0
+        while start <= page_count:
+            end = min(start + chunk_size - 1, page_count)
+            task = pool.apply_async(
+                worker_task,
+                args=(filename, path, start, end, chunk_idx)
+            )
+            async_results.append(task)
+            if end >= page_count:
+                break
+            start += stride
+            chunk_idx += 1
+
+        active_docs.append((filename, path, is_temp, async_results))
+        logger.info(
+            f"[PLAN] Queued PDF {filename} ({page_count} pages) in "
+            f"{len(async_results)} chunks asynchronously..."
+        )
+        return True
+
+    def _queue_text_doc(
+        self,
+        pool: Any,
+        filename: str,
+        path: str,
+        is_temp: bool,
+        active_docs: list
+    ) -> None:
+        """Queues an async task for extracting the full text/HTML document."""
+        async_results = []
+        task = pool.apply_async(
+            worker_task,
+            args=(filename, path, None, None, 0, self.chunk_size)
+        )
+        async_results.append(task)
+        active_docs.append((filename, path, is_temp, async_results))
+        logger.info(
+            f"[PLAN] Queued document {filename} asynchronously..."
+        )
+
     @staticmethod
     def _record(index: int, filename: str, chunk: Any) -> dict:
         return {
             "id": f"domain_doc_{index:06d}",
             "source_file": filename,
             "chunk_id": chunk.chunk_index,
-            "page_range": list(chunk.page_range),
+            "page_range": list(chunk.page_range) if chunk.page_range else None,
             "text": chunk.text,
             "token_count": chunk.token_count,
         }
@@ -228,6 +267,10 @@ def run_corpus_builder(cfg: PipelineConfig) -> None:
     )
     global logger
     logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
+
+    # Log cached auto-resolution details to files and stream
+    for log_msg in cfg.build.resolution_logs:
+        logger.info(log_msg)
     
     storage = get_adapter(cfg.storage)
  

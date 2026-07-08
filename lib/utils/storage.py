@@ -15,22 +15,23 @@ import boto3
 
 from .config import StorageConfig
 
-PdfStream = Generator[Tuple[str, str, bool], None, None]
+DocStream = Generator[Tuple[str, str, bool], None, None]
 
 
 class StorageAdapter(ABC):
     @abstractmethod
-    def stream_pdfs(self) -> PdfStream:
-        """Yields (filename, local_path, is_temporary) for every PDF in the source."""
+    def stream_documents(self) -> DocStream:
+        """Yields (filename, local_path, is_temporary) for every supported document in the source."""
 
 
 class LocalStorageAdapter(StorageAdapter):
     def __init__(self, directory: str):
         self.directory = Path(directory)
 
-    def stream_pdfs(self) -> PdfStream:
-        for path in self.directory.rglob("*.pdf"):
-            yield path.name, str(path), False
+    def stream_documents(self) -> DocStream:
+        for path in self.directory.rglob("*"):
+            if path.is_file() and path.suffix.lower() in (".pdf", ".txt", ".html"):
+                yield path.name, str(path), False
 
 
 class S3StorageAdapter(StorageAdapter):
@@ -39,21 +40,22 @@ class S3StorageAdapter(StorageAdapter):
         self.prefix = prefix
         self.s3 = boto3.client("s3")
 
-    def stream_pdfs(self) -> PdfStream:
+    def stream_documents(self) -> DocStream:
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
-                if key.lower().endswith(".pdf"):
+                suffix = Path(key).suffix.lower()
+                if suffix in (".pdf", ".txt", ".html"):
                     filename = Path(key).name
-                    tmp_path = _make_temp_pdf()
+                    tmp_path = _make_temp_file(suffix)
                     self.s3.download_file(self.bucket, key, tmp_path)
                     yield filename, tmp_path, True
 
 
-def _make_temp_pdf() -> str:
-    """Creates a named temp file and returns its path. Caller is responsible for deletion."""
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+def _make_temp_file(suffix: str) -> str:
+    """Creates a named temp file with specific suffix and returns its path. Caller is responsible for deletion."""
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     tmp.close()
     return tmp.name
 
@@ -77,3 +79,4 @@ def get_adapter(
     raise ValueError(
         f"Unknown STORAGE_TARGET '{target}'. Expected: local or s3."
     )
+

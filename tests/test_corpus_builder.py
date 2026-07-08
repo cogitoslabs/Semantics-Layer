@@ -10,11 +10,11 @@ from lib.s1_build_corpus.build_corpus import CorpusBuilder, run_corpus_builder
 
 
 class DummyStorageAdapter(StorageAdapter):
-    def __init__(self, pdf_paths):
-        self.pdf_paths = pdf_paths
+    def __init__(self, doc_paths):
+        self.doc_paths = doc_paths
 
-    def stream_pdfs(self):
-        for path in self.pdf_paths:
+    def stream_documents(self):
+        for path in self.doc_paths:
             yield os.path.basename(path), path, False
 
 
@@ -141,3 +141,110 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
             assert record["page_range"] == [1, 3]
             assert record["token_count"] == 50
             assert "neuroscience" in record["text"]
+
+
+def test_worker_task_txt_html(mock_gpu_queue, mock_docling):
+    # Initialize worker
+    worker_init(mock_gpu_queue)
+    
+    # Run task for TXT (no start/end pages, chunk_size=2)
+    # The dummy text is short enough to fit in a single chunk
+    result_txt = worker_task("test.txt", "dummy_path.txt", chunk_size=2)
+    assert result_txt.succeeded
+    assert result_txt.filename == "test.txt"
+    assert len(result_txt.chunks) == 1
+    assert result_txt.chunks[0].chunk_index == 0
+    assert result_txt.chunks[0].page_range is None
+    assert "neuroscience" in result_txt.chunks[0].text
+    
+    # Run task for HTML (no start/end pages, chunk_size=2)
+    result_html = worker_task("test.html", "dummy_path.html", chunk_size=2)
+    assert result_html.succeeded
+    assert result_html.filename == "test.html"
+    assert len(result_html.chunks) == 1
+    assert result_html.chunks[0].chunk_index == 0
+    assert result_html.chunks[0].page_range is None
+    assert "neuroscience" in result_html.chunks[0].text
+
+
+def test_worker_task_sliding_window(mock_gpu_queue, mock_docling):
+    # Initialize worker
+    worker_init(mock_gpu_queue)
+    
+    # Set converter mock to return a long string
+    long_text = "This is a long neuroscience document block. " * 100 # ~1000 tokens
+    _, mock_instance = mock_docling
+    mock_instance.convert.return_value.document.export_to_markdown.return_value = long_text
+    
+    # Run task with chunk_size=1 (target_tokens = 400, overlap = 40)
+    result = worker_task("test.txt", "dummy_path.txt", chunk_size=1)
+    
+    assert result.succeeded
+    assert len(result.chunks) > 1
+    for i, chunk in enumerate(result.chunks):
+        assert chunk.chunk_index == i
+        assert chunk.page_range is None
+        assert chunk.token_count > 0
+
+
+def test_corpus_builder_auto_resolution():
+    from pathlib import Path
+    from lib.utils import CorpusBuildConfig
+    from lib.utils.config import LoggingConfig
+
+    # 1. Test GPU Mode Auto Resolution
+    with patch("lib.utils.system_detection.get_available_gpus_and_vram") as mock_gpus, \
+         patch("lib.utils.system_detection.get_cpu_cores") as mock_cpus, \
+         patch("lib.utils.system_detection.get_available_system_ram_gb") as mock_ram:
+        
+        mock_gpus.return_value = [(0, 16.0)]
+        mock_cpus.return_value = 8
+        mock_ram.return_value = 32.0
+
+        cfg = CorpusBuildConfig(
+            output_path=Path("dummy.jsonl"),
+            available_gpus="AUTO",
+            workers_per_gpu="AUTO",
+            chunk_size="AUTO",
+            maxtasksperchild="AUTO"
+        )
+        builder = CorpusBuilder(
+            storage=MagicMock(),
+            cfg=cfg,
+            logging_cfg=LoggingConfig(),
+        )
+
+        assert builder.gpu_ids == [0]
+        assert builder.workers_per_gpu == 4
+        assert builder.total_workers == 4
+        assert builder.chunk_size == 10
+        assert builder.maxtasksperchild == 8
+
+    # 2. Test CPU Fallback Mode Auto Resolution
+    with patch("lib.utils.system_detection.get_available_gpus_and_vram") as mock_gpus, \
+         patch("lib.utils.system_detection.get_cpu_cores") as mock_cpus, \
+         patch("lib.utils.system_detection.get_available_system_ram_gb") as mock_ram:
+        
+        mock_gpus.return_value = []
+        mock_cpus.return_value = 8
+        mock_ram.return_value = 32.0
+
+        cfg = CorpusBuildConfig(
+            output_path=Path("dummy.jsonl"),
+            available_gpus="AUTO",
+            workers_per_gpu="AUTO",
+            chunk_size="AUTO",
+            maxtasksperchild="AUTO"
+        )
+        builder = CorpusBuilder(
+            storage=MagicMock(),
+            cfg=cfg,
+            logging_cfg=LoggingConfig(),
+        )
+
+        assert builder.gpu_ids == [-1]
+        assert builder.workers_per_gpu == 4
+        assert builder.total_workers == 4
+        assert builder.chunk_size == 10
+        assert builder.maxtasksperchild == 8
+

@@ -49,12 +49,34 @@ else:
 
 load_dotenv(dotenv_path=root_dir / ".env.common")
 
+DOCLING_NUM_THREADS_WAS_AUTO = False
+
+# Resolve DOCLING_NUM_THREADS immediately to prevent downstream pydantic validations on import (e.g. in docling)
+if os.environ.get("DOCLING_NUM_THREADS", "").strip().upper() == "AUTO":
+    DOCLING_NUM_THREADS_WAS_AUTO = True
+    try:
+        from lib.utils.system_detection import get_cpu_cores
+        cpu_count = get_cpu_cores()
+    except Exception:
+        cpu_count = 4
+    workers_per_gpu_raw = os.environ.get("WORKERS_PER_GPU", "1")
+    try:
+        if workers_per_gpu_raw.strip().upper() == "AUTO":
+            workers = max(1, cpu_count // 2)
+        else:
+            workers = int(workers_per_gpu_raw)
+    except Exception:
+        workers = 1
+    resolved_threads = max(1, cpu_count // workers)
+    os.environ["DOCLING_NUM_THREADS"] = str(resolved_threads)
 
 
 def _get(key: str, default, cast=str):
     raw = os.environ.get(key, None)
     if raw is None:
         return cast(default) if not isinstance(default, cast) else default
+    if isinstance(raw, str) and raw.strip().upper() == "AUTO":
+        return "AUTO"
     try:
         if cast is bool:
             if isinstance(raw, str):
@@ -68,17 +90,153 @@ def _get(key: str, default, cast=str):
 @dataclass
 class CorpusBuildConfig:
     available_gpus: str       = field(default_factory=lambda: _get("AVAILABLE_GPUS", "0"))
-    workers_per_gpu: int      = field(default_factory=lambda: _get("WORKERS_PER_GPU", 1, int))
-    chunk_size: int           = field(default_factory=lambda: _get("CHUNK_SIZE", 10, int))
+    workers_per_gpu: int | str = field(default_factory=lambda: _get("WORKERS_PER_GPU", 1, int))
+    chunk_size: int | str      = field(default_factory=lambda: _get("CHUNK_SIZE", 10, int))
     output_path: Path         = field(default_factory=lambda: Path(_get("OUTPUT_PATH", "./data/dapt/domain_dapt_corpus.jsonl")))
-    maxtasksperchild: Optional[int] = field(default_factory=lambda: _get("MAX_TASKS_PER_CHILD", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+    maxtasksperchild: int | str | None = field(default_factory=lambda: _get("MAX_TASKS_PER_CHILD", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
     docling_use_ocr: bool      = field(default_factory=lambda: _get("DOCLING_USE_OCR", False, bool))
     docling_use_table_structure: bool = field(default_factory=lambda: _get("DOCLING_USE_TABLE_STRUCTURE", False, bool))
     docling_use_code_enrichment: bool = field(default_factory=lambda: _get("DOCLING_USE_CODE_ENRICHMENT", False, bool))
     docling_use_formula_enrichment: bool = field(default_factory=lambda: _get("DOCLING_USE_FORMULA_ENRICHMENT", False, bool))
     docling_use_picture_classification: bool = field(default_factory=lambda: _get("DOCLING_USE_PICTURE_CLASSIFICATION", False, bool))
     docling_use_picture_description: bool = field(default_factory=lambda: _get("DOCLING_USE_PICTURE_DESCRIPTION", False, bool))
-    docling_num_threads: int   = field(default_factory=lambda: _get("DOCLING_NUM_THREADS", 4, int))
+    docling_num_threads: int | str = field(default_factory=lambda: _get("DOCLING_NUM_THREADS", 4, int))
+
+    # Dynamic fields resolved at runtime
+    gpu_ids: List[int] = field(default_factory=list, init=False)
+    total_workers: int = field(default=0, init=False)
+    resolution_logs: List[str] = field(default_factory=list, init=False)
+
+    def __post_init__(self):
+        self.resolve_auto()
+
+    def _log_auto(self, msg: str, logger) -> None:
+        print(msg)
+        self.resolution_logs.append(msg)
+        logger.info(msg)
+
+    def resolve_auto(self) -> None:
+        """Resolve AUTO configuration parameters dynamically using system info."""
+        resolved_available_gpus = self.available_gpus
+        resolved_workers_per_gpu = self.workers_per_gpu
+        resolved_chunk_size = self.chunk_size
+        resolved_maxtasksperchild = self.maxtasksperchild
+        resolved_docling_num_threads = self.docling_num_threads
+
+        # Check if we need to auto-detect any parameters
+        has_auto = (
+            str(resolved_available_gpus).strip().upper() == "AUTO"
+            or str(resolved_workers_per_gpu).strip().upper() == "AUTO"
+            or str(resolved_chunk_size).strip().upper() == "AUTO"
+            or (resolved_maxtasksperchild is not None and str(resolved_maxtasksperchild).strip().upper() == "AUTO")
+            or DOCLING_NUM_THREADS_WAS_AUTO
+        )
+
+        if not has_auto:
+            # Parse directly without executing hardware detection
+            self.gpu_ids = [int(g.strip()) for g in str(resolved_available_gpus).split(",") if g.strip()]
+            self.workers_per_gpu = int(resolved_workers_per_gpu)
+            self.total_workers = len(self.gpu_ids) * self.workers_per_gpu
+            self.chunk_size = int(resolved_chunk_size)
+            self.maxtasksperchild = resolved_maxtasksperchild
+            self.docling_num_threads = int(resolved_docling_num_threads)
+            os.environ["DOCLING_NUM_THREADS"] = str(self.docling_num_threads)
+            return
+
+        from lib.utils.logger import get_logger
+        logger = get_logger(__name__)
+
+        from lib.utils.system_detection import (
+            get_cpu_cores,
+            get_available_system_ram_gb,
+            get_available_gpus_and_vram,
+        )
+
+        # 1. System hardware detection (only run when AUTO is requested)
+        system_gpus = get_available_gpus_and_vram()
+        cpu_count = get_cpu_cores()
+        ram_gb = get_available_system_ram_gb()
+
+        # 2. Resolve GPU IDs
+        if str(resolved_available_gpus).strip().upper() == "AUTO":
+            if system_gpus:
+                self.gpu_ids = [gpu[0] for gpu in system_gpus]
+                self._log_auto(f"[AUTO] Detected GPUs: {self.gpu_ids}", logger)
+            else:
+                self.gpu_ids = [-1]  # CPU fallback
+                self._log_auto("[AUTO] No GPUs detected. Falling back to CPU mode.", logger)
+        else:
+            self.gpu_ids = [int(g.strip()) for g in str(resolved_available_gpus).split(",") if g.strip()]
+
+        # 3. Resolve Workers Per GPU & Total Workers
+        if str(resolved_workers_per_gpu).strip().upper() == "AUTO":
+            # Baseline: 4 GB RAM/VRAM per worker
+            if self.gpu_ids == [-1]:
+                # CPU fallback worker calculation
+                # Limit by CPU cores and RAM
+                max_workers_by_cpu = max(1, cpu_count // 2)
+                max_workers_by_ram = max(1, int(ram_gb // 4))
+                self.workers_per_gpu = min(max_workers_by_cpu, max_workers_by_ram)
+                self._log_auto(
+                    f"[AUTO] CPU Mode workers resolved: {self.workers_per_gpu} "
+                    f"(CPU Cores: {cpu_count}, RAM: {ram_gb:.1f} GB)",
+                    logger
+                )
+            else:
+                # GPU worker calculation
+                # Detect min VRAM per GPU
+                min_vram = min(gpu[1] for gpu in system_gpus) if system_gpus else 8.0
+                gpu_workers = max(1, int(min_vram // 4))
+                # Check system boundaries (CPU / System RAM)
+                max_total_workers = min(max(1, cpu_count - 1), max(1, int(ram_gb // 4)))
+                total_gpu_workers = gpu_workers * len(self.gpu_ids)
+                if total_gpu_workers > max_total_workers:
+                    self.workers_per_gpu = max(1, max_total_workers // len(self.gpu_ids))
+                    self._log_auto(
+                        f"[AUTO] Scaled down workers_per_gpu to {self.workers_per_gpu} to respect CPU/RAM bounds "
+                        f"(Cores: {cpu_count}, RAM: {ram_gb:.1f} GB, Min VRAM: {min_vram:.1f} GB)",
+                        logger
+                    )
+                else:
+                    self.workers_per_gpu = gpu_workers
+                    self._log_auto(
+                        f"[AUTO] GPU workers per device resolved: {self.workers_per_gpu} "
+                        f"(Min VRAM: {min_vram:.1f} GB)",
+                        logger
+                    )
+        else:
+            self.workers_per_gpu = int(resolved_workers_per_gpu)
+
+        self.total_workers = len(self.gpu_ids) * self.workers_per_gpu
+
+        # 4. Resolve Chunk Size
+        if str(resolved_chunk_size).strip().upper() == "AUTO":
+            if self.total_workers <= 2:
+                self.chunk_size = 16
+            elif 3 <= self.total_workers <= 8:
+                self.chunk_size = 10
+            else:
+                self.chunk_size = 6
+            self._log_auto(f"[AUTO] Chunk size resolved to {self.chunk_size} pages for {self.total_workers} workers", logger)
+        else:
+            self.chunk_size = int(resolved_chunk_size)
+
+        # 5. Resolve Max Tasks Per Child
+        if resolved_maxtasksperchild is not None and str(resolved_maxtasksperchild).strip().upper() == "AUTO":
+            self.maxtasksperchild = max(3, min(20, int(ram_gb / self.total_workers)))
+            self._log_auto(f"[AUTO] max_tasks_per_child resolved to {self.maxtasksperchild} based on system RAM and workers", logger)
+        else:
+            self.maxtasksperchild = resolved_maxtasksperchild
+
+        # 6. Resolve Docling Num Threads
+        if DOCLING_NUM_THREADS_WAS_AUTO:
+            self.docling_num_threads = max(1, cpu_count // self.total_workers)
+            os.environ["DOCLING_NUM_THREADS"] = str(self.docling_num_threads)
+            self._log_auto(f"[AUTO] docling_num_threads resolved to {self.docling_num_threads} (CPU Cores: {cpu_count}, Total Workers: {self.total_workers})", logger)
+        else:
+            self.docling_num_threads = int(resolved_docling_num_threads)
+            os.environ["DOCLING_NUM_THREADS"] = str(self.docling_num_threads)
+
 
 
 @dataclass
@@ -365,13 +523,17 @@ class PipelineConfig:
                 f"QA_LOW_THRESHOLD ({self.gates.qa_low_threshold}) must be <= "
                 f"QA_ACC_THRESHOLD ({self.gates.qa_acc_threshold})"
             )
-        if self.build.workers_per_gpu < 1:
+        if self.build.workers_per_gpu != "AUTO" and self.build.workers_per_gpu < 1:
             errors.append(f"WORKERS_PER_GPU must be >= 1, got {self.build.workers_per_gpu}")
-        if self.build.chunk_size < 2:
+        if self.build.chunk_size != "AUTO" and self.build.chunk_size < 2:
             errors.append(f"CHUNK_SIZE must be >= 2, got {self.build.chunk_size}")
-        if self.build.maxtasksperchild is not None and self.build.maxtasksperchild < 1:
+        if (
+            self.build.maxtasksperchild is not None
+            and self.build.maxtasksperchild != "AUTO"
+            and self.build.maxtasksperchild < 1
+        ):
             errors.append(f"MAX_TASKS_PER_CHILD must be >= 1 or None, got {self.build.maxtasksperchild}")
-        if self.build.docling_num_threads < 1:
+        if self.build.docling_num_threads != "AUTO" and self.build.docling_num_threads < 1:
             errors.append(f"DOCLING_NUM_THREADS must be >= 1, got {self.build.docling_num_threads}")
         if self.wandb.log_interval_steps < 1:
             errors.append(f"WANDB_LOG_INTERVAL_STEPS must be >= 1, got {self.wandb.log_interval_steps}")

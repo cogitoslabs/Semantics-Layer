@@ -134,6 +134,62 @@ def worker_task(
         if _docling_converter is None:
             return ExtractionResult(filename, [], "ERROR: Docling converter not initialized")
 
+        from pathlib import Path
+        suffix = Path(pdf_path).suffix.lower()
+        is_pdf = suffix == ".pdf"
+
+        tokenizer = tiktoken.get_encoding("cl100k_base")
+
+        if not is_pdf:
+            conv_result = _docling_converter.convert(pdf_path)
+            try:
+                chunk_text = conv_result.document.export_to_markdown()
+                chunk_text = clean_corpus_text(chunk_text)
+                if not chunk_text or len(chunk_text.strip()) < MIN_CONTENT_LENGTH:
+                    return ExtractionResult(filename, [], "SKIPPED")
+
+                tokens = tokenizer.encode(chunk_text)
+                target_tokens = chunk_size * 400
+                overlap_tokens = target_tokens // 10
+
+                chunks = []
+                if len(tokens) <= target_tokens:
+                    chunks.append(ChunkResult(
+                        chunk_index=0,
+                        text=chunk_text,
+                        token_count=len(tokens),
+                        page_range=None
+                    ))
+                else:
+                    step = target_tokens - overlap_tokens
+                    c_idx = 0
+                    start_idx = 0
+                    while start_idx < len(tokens):
+                        end_idx = min(start_idx + target_tokens, len(tokens))
+                        chunk_tokens = tokens[start_idx:end_idx]
+                        dec_text = tokenizer.decode(chunk_tokens)
+                        if len(dec_text.strip()) >= MIN_CONTENT_LENGTH:
+                            chunks.append(ChunkResult(
+                                chunk_index=c_idx,
+                                text=dec_text,
+                                token_count=len(chunk_tokens),
+                                page_range=None
+                            ))
+                            c_idx += 1
+                        if end_idx == len(tokens):
+                            break
+                        start_idx += step
+
+                if not chunks:
+                    return ExtractionResult(filename, [], "SKIPPED")
+                return ExtractionResult(filename, chunks, "SUCCESS")
+            finally:
+                try:
+                    if hasattr(conv_result, "input") and conv_result.input and hasattr(conv_result.input, "_backend") and conv_result.input._backend:
+                        conv_result.input._backend.unload()
+                except Exception:
+                    pass
+
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(pdf_path)
         try:
@@ -143,8 +199,6 @@ def worker_task(
 
         if page_count == 0:
             return ExtractionResult(filename, [], "ERROR: PDF has 0 pages or could not be read")
-
-        tokenizer = tiktoken.get_encoding("cl100k_base")
 
         # Single page-range chunk mode (used by refactored builder)
         if start_page is not None and end_page is not None:
