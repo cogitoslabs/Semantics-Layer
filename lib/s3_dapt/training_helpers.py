@@ -65,14 +65,14 @@ def verify_eval_files(cfg: DAPTConfig) -> None:
     missing_files = []
     checks = []
     if cfg.probes.run_qa:
-        checks.append(("QA probe", cfg.data.qa_probe_path))
+        checks.append(("Probe 2 - QA probe", cfg.data.qa_probe_path))
     if cfg.probes.run_perplexity:
-        checks.append(("PPL corpus", cfg.data.ppl_corpus_path))
-    if cfg.probes.run_terminology:
-        checks.append(("Vocab cloze", cfg.data.vocab_cloze_path))
-    if cfg.probes.run_retrieval:
-        checks.append(("Retrieval prompts", cfg.data.retrieval_prompts_path))
-        checks.append(("Retrieval references", cfg.data.retrieval_references_path))
+        checks.append(("Probe 1 - Perplexity probe corpus", cfg.data.ppl_corpus_path))
+    if cfg.probes.run_cloze:
+        checks.append(("Probe 3 - Cloze probe set", cfg.data.cloze_set_path))
+    if cfg.probes.run_concept:
+        checks.append(("Probe 4 - Concept Probe prompts", cfg.data.concept_prompts_path))
+        checks.append(("Probe 4 - Concept Probe references", cfg.data.concept_references_path))
 
     for name, path in checks:
         if not path.exists():
@@ -142,7 +142,7 @@ def handle_evaluation_cycle(
     # Save checkpoint
     last_checkpoint_path = save_checkpoint(
         model=model,
-        optimizer=optimizer,
+        optimizer=optimizer if cfg.model.save_optimizer_state else None,
         state=state,
         checkpoint_dir=cfg.model.checkpoint_dir,
         keep_last=cfg.model.checkpoint_keep_last,
@@ -176,14 +176,14 @@ def handle_evaluation_cycle(
         qa_acc_threshold          = cfg.gates.qa_acc_threshold,
         ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
         ppl_plateau_window        = cfg.gates.ppl_plateau_window,
-        term_cov_threshold        = cfg.gates.term_cov_threshold,
-        ret_prec_threshold        = cfg.gates.ret_prec_threshold,
+        cloze_threshold           = cfg.gates.cloze_threshold,
+        concept_threshold         = cfg.gates.concept_threshold,
         hard_stop_tokens          = cfg.corpus.hard_stop_tokens,
         total_corpus_tokens       = cfg.corpus.total_corpus_tokens,
         run_qa                    = cfg.probes.run_qa,
         run_perplexity            = cfg.probes.run_perplexity,
-        run_terminology           = cfg.probes.run_terminology,
-        run_retrieval             = cfg.probes.run_retrieval,
+        run_cloze                 = cfg.probes.run_cloze,
+        run_concept               = cfg.probes.run_concept,
     )
 
     log_gate_status(
@@ -193,13 +193,13 @@ def handle_evaluation_cycle(
         qa_threshold   = cfg.gates.qa_acc_threshold,
         ppl_threshold  = cfg.gates.ppl_improvement_threshold,
         ppl_window     = cfg.gates.ppl_plateau_window,
-        term_threshold = cfg.gates.term_cov_threshold,
-        ret_threshold  = cfg.gates.ret_prec_threshold,
+        cloze_threshold = cfg.gates.cloze_threshold,
+        concept_threshold = cfg.gates.concept_threshold,
         total_corpus_tokens = cfg.corpus.total_corpus_tokens,
         run_qa                = cfg.probes.run_qa,
         run_perplexity        = cfg.probes.run_perplexity,
-        run_terminology       = cfg.probes.run_terminology,
-        run_retrieval         = cfg.probes.run_retrieval,
+        run_cloze             = cfg.probes.run_cloze,
+        run_concept           = cfg.probes.run_concept,
     )
 
     if cfg.wandb.enabled:
@@ -225,8 +225,8 @@ def run_final_eval(model, tokenizer, cfg, state, metrics_writer, device):
         manifest_path             = cfg.model.best_checkpoint_manifest,
         run_qa                    = cfg.probes.run_qa,
         run_perplexity            = cfg.probes.run_perplexity,
-        run_terminology           = cfg.probes.run_terminology,
-        run_retrieval             = cfg.probes.run_retrieval,
+        run_cloze                 = cfg.probes.run_cloze,
+        run_concept               = cfg.probes.run_concept,
     )
     
     if best_ckpt:

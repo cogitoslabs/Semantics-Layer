@@ -30,14 +30,14 @@ def check_convergence_gates(
     qa_acc_threshold: float,
     ppl_improvement_threshold: float,
     ppl_plateau_window: int,
-    term_cov_threshold: float,
-    ret_prec_threshold: float,
+    cloze_threshold: float,
+    concept_threshold: float,
     hard_stop_tokens: int,
     total_corpus_tokens: int,
     run_qa: bool = True,
     run_perplexity: bool = True,
-    run_terminology: bool = True,
-    run_retrieval: bool = True,
+    run_cloze: bool = True,
+    run_concept: bool = True,
 ) -> Tuple[DAPTDecision, Dict[str, Any]]:
     """
     Evaluate all convergence gates and return the decision plus a gate detail dict.
@@ -49,8 +49,8 @@ def check_convergence_gates(
     """
     ppl_history = state["perplexity_history"]
     qa_acc      = state["qa_acc_history"][-1]  if state["qa_acc_history"]  else 0.0
-    term_cov    = state["term_cov_history"][-1] if state["term_cov_history"] else 0.0
-    ret_prec    = state["ret_prec_history"][-1] if state["ret_prec_history"] else 0.0
+    cloze_cov   = state["cloze_cov_history"][-1] if state["cloze_cov_history"] else 0.0
+    concept_prec = state["concept_prec_history"][-1] if state["concept_prec_history"] else 0.0
 
     # ── Primary Gate A: QA Accuracy ──────────────────────────────────────────
     if run_qa:
@@ -71,14 +71,14 @@ def check_convergence_gates(
         ppl_improvements = []
 
     # ── Secondary Gate (at least one) ────────────────────────────────────────
-    term_gate = (term_cov >= term_cov_threshold) if run_terminology else False
-    ret_gate  = (ret_prec >= ret_prec_threshold) if run_retrieval else False
+    cloze_gate   = (cloze_cov >= cloze_threshold) if run_cloze else False
+    concept_gate = (concept_prec >= concept_threshold) if run_concept else False
     
     active_secondary_gates = []
-    if run_terminology:
-        active_secondary_gates.append(term_gate)
-    if run_retrieval:
-        active_secondary_gates.append(ret_gate)
+    if run_cloze:
+        active_secondary_gates.append(cloze_gate)
+    if run_concept:
+        active_secondary_gates.append(concept_gate)
     secondary_gate = any(active_secondary_gates) if active_secondary_gates else True
 
     all_primary   = qa_gate and ppl_gate
@@ -89,10 +89,10 @@ def check_convergence_gates(
         "qa_acc"           : qa_acc,
         "ppl_gate"         : ppl_gate,
         "ppl_improvements" : ppl_improvements,
-        "term_gate"        : term_gate,
-        "term_cov"         : term_cov,
-        "ret_gate"         : ret_gate,
-        "ret_prec"         : ret_prec,
+        "cloze_gate"       : cloze_gate,
+        "cloze_cov"        : cloze_cov,
+        "concept_gate"     : concept_gate,
+        "concept_prec"     : concept_prec,
         "secondary_gate"   : secondary_gate,
         "all_converged"    : all_converged,
     }
@@ -120,13 +120,13 @@ def log_gate_status(
     qa_threshold: float,
     ppl_threshold: float,
     ppl_window: int,
-    term_threshold: float,
-    ret_threshold: float,
+    cloze_threshold: float,
+    concept_threshold: float,
     total_corpus_tokens: int,
     run_qa: bool = True,
     run_perplexity: bool = True,
-    run_terminology: bool = True,
-    run_retrieval: bool = True,
+    run_cloze: bool = True,
+    run_concept: bool = True,
 ) -> None:
     msg = format_gate_status(
         eval_id               = state["eval_count"],
@@ -135,24 +135,24 @@ def log_gate_status(
         qa_acc                = gate_details["qa_acc"],
         ppl_history           = state["perplexity_history"],
         ppl_improvements      = gate_details["ppl_improvements"],
-        term_cov              = gate_details["term_cov"],
-        ret_prec              = gate_details["ret_prec"],
+        cloze_cov             = gate_details["cloze_cov"],
+        concept_prec          = gate_details["concept_prec"],
         qa_gate               = gate_details["qa_gate"],
         ppl_gate              = gate_details["ppl_gate"],
         secondary_gate        = gate_details["secondary_gate"],
         qa_threshold          = qa_threshold,
         ppl_threshold         = ppl_threshold,
         ppl_window            = ppl_window,
-        term_threshold        = term_threshold,
-        ret_threshold         = ret_threshold,
+        cloze_threshold       = cloze_threshold,
+        concept_threshold     = concept_threshold,
         decision              = decision.value,
         run_qa                = run_qa,
         run_perplexity        = run_perplexity,
-        run_terminology       = run_terminology,
-        run_retrieval         = run_retrieval,
+        run_cloze             = run_cloze,
+        run_concept           = run_concept,
         qa_history            = state.get("qa_acc_history"),
-        term_history          = state.get("term_cov_history"),
-        ret_history           = state.get("ret_prec_history"),
+        cloze_history         = state.get("cloze_cov_history"),
+        concept_history       = state.get("concept_prec_history"),
     )
     logger.info(msg)
 
@@ -167,13 +167,13 @@ def handle_hard_cap(
     qa_acc_threshold: float,
     qa_low_threshold: float,
     ppl_improvement_threshold: float,
-    term_cov_threshold: float,
-    ret_prec_threshold: float,
+    cloze_threshold: float,
+    concept_threshold: float,
     total_corpus_tokens: int,
     run_qa: bool = True,
     run_perplexity: bool = True,
-    run_terminology: bool = True,
-    run_retrieval: bool = True,
+    run_cloze: bool = True,
+    run_concept: bool = True,
 ) -> Tuple[Path, Dict[str, Any]]:
     """
     Called when the hard cap fires and gates are not all met.
@@ -188,8 +188,8 @@ def handle_hard_cap(
     Returns (last_checkpoint_path, risk_report).
     """
     qa_acc   = gate_details["qa_acc"]
-    term_cov = gate_details["term_cov"]
-    ret_prec = gate_details["ret_prec"]
+    cloze_cov = gate_details["cloze_cov"]
+    concept_prec = gate_details["concept_prec"]
     ppl_hist = state["perplexity_history"]
 
     # ── Identify failed gates ─────────────────────────────────────────────────
@@ -212,12 +212,12 @@ def handle_hard_cap(
 
     if not gate_details["secondary_gate"]:
         msg = "Neither secondary gate met: "
-        if run_terminology and run_retrieval:
-            msg += f"term_cov={term_cov:.4f} (need >={term_cov_threshold}), ret_prec={ret_prec:.4f} (need >={ret_prec_threshold})"
-        elif run_terminology:
-            msg += f"term_cov={term_cov:.4f} (need >={term_cov_threshold}) [retrieval probe disabled]"
-        elif run_retrieval:
-            msg += f"ret_prec={ret_prec:.4f} (need >={ret_prec_threshold}) [terminology probe disabled]"
+        if run_cloze and run_concept:
+            msg += f"cloze_cov={cloze_cov:.4f} (need >={cloze_threshold}), concept_prec={concept_prec:.4f} (need >={concept_threshold})"
+        elif run_cloze:
+            msg += f"cloze_cov={cloze_cov:.4f} (need >={cloze_threshold}) [concept probe disabled]"
+        elif run_concept:
+            msg += f"concept_prec={concept_prec:.4f} (need >={concept_threshold}) [cloze probe disabled]"
         else:
             msg += "Both secondary probes disabled but secondary gate failed (unexpected)"
         failed_gates.append(msg)
@@ -260,8 +260,8 @@ def handle_hard_cap(
         "final_metrics"     : {
             "qa_accuracy"       : qa_acc,
             "perplexity"        : ppl_hist[-1] if ppl_hist else None,
-            "term_coverage"     : term_cov,
-            "retrieval_precision": ret_prec,
+            "cloze_coverage"    : cloze_cov,
+            "concept_precision" : concept_prec,
         },
         "failed_gates"      : failed_gates,
         "remediation"       : {

@@ -18,13 +18,16 @@ _bg_save_thread = None
 
 
 def copy_state_dict_to_cpu(state_dict):
-    """Recursively clone any tensors in a nested state dict to CPU."""
+    """Clone any tensors in a nested state dict to CPU efficiently."""
     if isinstance(state_dict, dict):
-        return {k: copy_state_dict_to_cpu(v) for k, v in state_dict.items()}
+        return {
+            k: (v.to("cpu", non_blocking=True) if torch.is_tensor(v) else copy_state_dict_to_cpu(v))
+            for k, v in state_dict.items()
+        }
     elif isinstance(state_dict, list):
         return [copy_state_dict_to_cpu(v) for v in state_dict]
     elif torch.is_tensor(state_dict):
-        return state_dict.cpu().clone()
+        return state_dict.to("cpu", non_blocking=True)
     else:
         return state_dict
 
@@ -55,7 +58,7 @@ def save_checkpoint(
     # Clone states to CPU instantly on main thread
     try:
         model_state_cpu = copy_state_dict_to_cpu(model.state_dict())
-        optimizer_state_cpu = copy_state_dict_to_cpu(optimizer.state_dict())
+        optimizer_state_cpu = copy_state_dict_to_cpu(optimizer.state_dict()) if optimizer is not None else None
         training_state_cpu = {
             k: v for k, v in state.items()
             if k not in ("model_state_dict", "optimizer_state_dict")
@@ -65,9 +68,10 @@ def save_checkpoint(
             "eval_id": eval_id,
             "tokens_processed": state["tokens_processed"],
             "model_state_dict": model_state_cpu,
-            "optimizer_state_dict": optimizer_state_cpu,
             "training_state": training_state_cpu,
         }
+        if optimizer_state_cpu is not None:
+            cpu_payload["optimizer_state_dict"] = optimizer_state_cpu
     except Exception as e:
         logger.warning(f"Failed to clone state dicts to CPU: {e}")
         cpu_payload = None
@@ -76,19 +80,18 @@ def save_checkpoint(
         if cpu_payload is None:
             # If cloning failed, try saving directly (synchronous fallback in background)
             try:
-                torch.save(
-                    {
-                        "eval_id": eval_id,
-                        "tokens_processed": state["tokens_processed"],
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "training_state": {
-                            k: v for k, v in state.items()
-                            if k not in ("model_state_dict", "optimizer_state_dict")
-                        },
+                payload = {
+                    "eval_id": eval_id,
+                    "tokens_processed": state["tokens_processed"],
+                    "model_state_dict": model.state_dict(),
+                    "training_state": {
+                        k: v for k, v in state.items()
+                        if k not in ("model_state_dict", "optimizer_state_dict")
                     },
-                    ckpt_path,
-                )
+                }
+                if optimizer is not None:
+                    payload["optimizer_state_dict"] = optimizer.state_dict()
+                torch.save(payload, ckpt_path)
                 logger.info(f"Checkpoint saved synchronously in background: {ckpt_path}")
             except Exception as ex:
                 logger.warning(f"Failed to save torch checkpoint in background: {ex}")
@@ -157,8 +160,8 @@ def select_best_checkpoint(
     manifest_path: Path,
     run_qa: bool = True,
     run_perplexity: bool = True,
-    run_terminology: bool = True,
-    run_retrieval: bool = True,
+    run_cloze: bool = True,
+    run_concept: bool = True,
 ) -> Optional[Path]:
     """
     Select the best DAPT checkpoint to carry forward to Phase 0.5.
@@ -188,10 +191,10 @@ def select_best_checkpoint(
         metrics = e.get("metrics", {})
         if run_qa:
             return metrics.get("qa_accuracy", 0.0)
-        elif run_terminology:
-            return metrics.get("term_coverage", 0.0)
-        elif run_retrieval:
-            return metrics.get("retrieval_precision", 0.0)
+        elif run_cloze:
+            return metrics.get("cloze_coverage", 0.0)
+        elif run_concept:
+            return metrics.get("concept_precision", 0.0)
         elif run_perplexity:
             ppl = metrics.get("perplexity", 0.0)
             return -ppl if ppl > 0 else -1e9
@@ -213,10 +216,10 @@ def select_best_checkpoint(
     # Format the log message with the primary selection metric
     if run_qa:
         metric_str = f"QA acc={best['metrics']['qa_accuracy']:.4f}"
-    elif run_terminology:
-        metric_str = f"Term cov={best['metrics']['term_coverage']:.4f}"
-    elif run_retrieval:
-        metric_str = f"Ret prec={best['metrics']['retrieval_precision']:.4f}"
+    elif run_cloze:
+        metric_str = f"Cloze cov={best['metrics']['cloze_coverage']:.4f}"
+    elif run_concept:
+        metric_str = f"Concept prec={best['metrics']['concept_precision']:.4f}"
     elif run_perplexity:
         metric_str = f"PPL={best['metrics']['perplexity']:.3f}"
     else:

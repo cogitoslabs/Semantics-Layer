@@ -54,3 +54,65 @@ def test_remove_metadata_and_layout():
         "Final valid sentence."
     )
     assert cleaned == expected
+
+
+def test_unescape_and_strip_placeholders():
+    text = (
+        "The brain &amp; the mind.\n"
+        "<!-- image -->\n"
+        "Some details here.\n"
+        "```\n"
+        "stray fence line\n"
+        "```\n"
+    )
+    cleaned = clean_corpus_text(text)
+    assert "&amp;" not in cleaned
+    assert "The brain & the mind." in cleaned
+    assert "<!-- image -->" not in cleaned
+    assert "```" not in cleaned
+    assert "stray fence line" in cleaned
+
+
+def test_remove_inline_references():
+    from lib.utils.clean_text import remove_inline_references
+    
+    text = (
+        "This is narrative text about the brain.\n"
+        "## Selected Reading\n"
+        "- Kandel E. R. (2013). Principles of Neural Science."
+    )
+    
+    # Target book should slice
+    pns_cleaned = remove_inline_references(text, "Principles of Neural Science.pdf")
+    assert pns_cleaned == "This is narrative text about the brain."
+    
+    # Non-target book should NOT slice
+    non_target_cleaned = remove_inline_references(text, "Other Book.pdf")
+    assert "## Selected Reading" in non_target_cleaned
+
+
+def test_is_standalone_index_or_bibliography():
+    from lib.utils.clean_text import is_standalone_index_or_bibliography
+    
+    # Standalone index chunk
+    index_text = (
+        "## INDEX\n"
+        "Abducens nerve, 143, 146\n"
+        "Accessory nerve, 147\n"
+    )
+    assert is_standalone_index_or_bibliography(index_text, "Book.pdf") is True
+    
+    # Standalone bibliography chunk
+    bib_text = (
+        "Sanes JR, Jessell TM. 2013. Synapse formation. In: Kandel ER (eds). Principles of Neural Science. New York: McGraw-Hill.\n"
+        "Young et al. 2001. Distribution of vasopressin. Academic Press."
+    )
+    assert is_standalone_index_or_bibliography(bib_text, "Book.pdf") is True
+    
+    # Normal prose
+    prose_text = (
+        "The brain contains billions of neurons that communicate via synapses.\n"
+        "This is an introductory chapter on neuroscience."
+    )
+    assert is_standalone_index_or_bibliography(prose_text, "Book.pdf") is False
+

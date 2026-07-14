@@ -35,25 +35,47 @@ def setup_logger(
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
 
+    # Automatically set up parent loggers "dapt" and "lib" to catch all sub-logs
+    for parent_name in ["dapt", "lib"]:
+        parent_logger = logging.getLogger(parent_name)
+        if not parent_logger.handlers:
+            parent_logger.setLevel(numeric_level)
+            parent_logger.propagate = False
+
+            ch_p = logging.StreamHandler(sys.stdout)
+            ch_p.setLevel(numeric_level)
+            ch_p.setFormatter(formatter)
+            parent_logger.addHandler(ch_p)
+
+            fh_p = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+            fh_p.setLevel(numeric_level)
+            fh_p.setFormatter(formatter)
+            parent_logger.addHandler(fh_p)
+
     logger = logging.getLogger(name)
     logger.setLevel(numeric_level)
-    logger.propagate = False
+
+    # Enable propagation for sub-loggers of dapt or lib so they route to the parent handlers
+    if name.startswith("dapt.") or name.startswith("lib."):
+        logger.propagate = True
+    else:
+        logger.propagate = False
 
     # Avoid duplicate handlers on re-import
     if logger.handlers:
         return logger
 
-    # Console handler
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(numeric_level)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
+    # If it is not a sub-logger of dapt or lib, attach handlers directly
+    if not (name.startswith("dapt.") or name.startswith("lib.")):
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(numeric_level)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
 
-    # File handler
-    fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
-    fh.setLevel(numeric_level)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
+        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+        fh.setLevel(numeric_level)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
 
     return logger
 
@@ -113,32 +135,32 @@ def format_gate_status(
     qa_acc: float,
     ppl_history: list,
     ppl_improvements: list,
-    term_cov: float,
-    ret_prec: float,
+    cloze_cov: float,
+    concept_prec: float,
     qa_gate: bool,
     ppl_gate: bool,
     secondary_gate: bool,
     qa_threshold: float,
     ppl_threshold: float,
     ppl_window: int,
-    term_threshold: float,
-    ret_threshold: float,
+    cloze_threshold: float,
+    concept_threshold: float,
     decision: str,
     run_qa: bool = True,
     run_perplexity: bool = True,
-    run_terminology: bool = True,
-    run_retrieval: bool = True,
+    run_cloze: bool = True,
+    run_concept: bool = True,
     qa_history: list = None,
-    term_history: list = None,
-    ret_history: list = None,
+    cloze_history: list = None,
+    concept_history: list = None,
 ) -> str:
     """Produce a human-readable gate status block for logging."""
     tick = lambda b, active=True: "[PASS]" if b else ("[SKIP]" if not active else "[FAIL]")
     ppl_str = ", ".join(f"{p:.2f}%" for p in ppl_improvements) if ppl_improvements else "n/a (need >=2 evals)"
     ppl_vals = ", ".join(f"{p:.3f}" for p in ppl_history)
     qa_vals = ", ".join(f"{q:.4f}" for q in qa_history) if qa_history else "n/a"
-    term_vals = ", ".join(f"{t:.4f}" for t in term_history) if term_history else "n/a"
-    ret_vals = ", ".join(f"{r:.4f}" for r in ret_history) if ret_history else "n/a"
+    cloze_vals = ", ".join(f"{t:.4f}" for t in cloze_history) if cloze_history else "n/a"
+    concept_vals = ", ".join(f"{r:.4f}" for r in concept_history) if concept_history else "n/a"
 
     return (
         f"\n{'-'*62}\n"
@@ -154,10 +176,10 @@ def format_gate_status(
         f"  PPL history      : [{ppl_vals}]\n"
         f"\n"
         f"  SECONDARY GATES (at least one required)\n"
-        f"  {tick(term_cov >= term_threshold, run_terminology)} Term Coverage : {term_cov:.4f}  (threshold >= {term_threshold})\n"
-        f"  Term history     : [{term_vals}]\n"
-        f"  {tick(ret_prec >= ret_threshold, run_retrieval)} Ret Precision : {ret_prec:.4f}  (threshold >= {ret_threshold})\n"
-        f"  Ret history      : [{ret_vals}]\n"
+        f"  {tick(cloze_cov >= cloze_threshold, run_cloze)} Cloze Coverage: {cloze_cov:.4f}  (threshold >= {cloze_threshold})\n"
+        f"  Cloze history    : [{cloze_vals}]\n"
+        f"  {tick(concept_prec >= concept_threshold, run_concept)} Concept Precision : {concept_prec:.4f}  (threshold >= {concept_threshold})\n"
+        f"  Concept history  : [{concept_vals}]\n"
         f"\n"
         f"  DECISION -> {decision}\n"
         f"{'-'*62}\n"

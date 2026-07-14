@@ -13,6 +13,74 @@ from datetime import datetime
 # Load environment configuration dynamically based on GPU availability
 root_dir = Path(__file__).resolve().parent.parent.parent
 
+
+def resolve_local_model_path(model_name: str) -> str:
+    """
+    Checks if model_name exists locally under 'models/' directory first.
+    If found and it is a valid model path (contains config.json if directory),
+    returns the absolute path of the local directory as a string.
+    Otherwise, returns model_name.
+    """
+    if not model_name:
+        return model_name
+
+    def is_valid_model_path(path: Path) -> bool:
+        if not path.exists():
+            return False
+        if path.is_dir():
+            return (path / "config.json").is_file()
+        return True
+
+    # If it is already a valid absolute path or relative path, return it
+    p = Path(model_name)
+    if is_valid_model_path(p):
+        return str(p.resolve())
+
+    # We check under models/ relative to the root directory
+    last_part = model_name.replace("\\", "/").split("/")[-1]
+    base = root_dir / "models"
+
+    if base.is_dir():
+        # 1. Check exact match
+        exact_path = base / last_part
+        if exact_path.is_dir() and (exact_path / "config.json").is_file():
+            try:
+                from lib.utils.logger import get_logger
+                logger = get_logger(__name__)
+                logger.info(f"Resolved model '{model_name}' to local path '{exact_path.resolve()}'")
+            except Exception:
+                print(f"Resolved model '{model_name}' to local path '{exact_path.resolve()}'")
+            return str(exact_path.resolve())
+
+        # 2. Check lowercase match (e.g. smollm2-135m)
+        lower_path = base / last_part.lower()
+        if lower_path.is_dir() and (lower_path / "config.json").is_file():
+            try:
+                from lib.utils.logger import get_logger
+                logger = get_logger(__name__)
+                logger.info(f"Resolved model '{model_name}' to local path '{lower_path.resolve()}'")
+            except Exception:
+                print(f"Resolved model '{model_name}' to local path '{lower_path.resolve()}'")
+            return str(lower_path.resolve())
+
+        # 3. Check case-insensitive scanning of the directory
+        try:
+            for child in base.iterdir():
+                if child.is_dir() and child.name.lower() == last_part.lower() and (child / "config.json").is_file():
+                    try:
+                        from lib.utils.logger import get_logger
+                        logger = get_logger(__name__)
+                        logger.info(f"Resolved model '{model_name}' to local path '{child.resolve()}'")
+                    except Exception:
+                        print(f"Resolved model '{model_name}' to local path '{child.resolve()}'")
+                    return str(child.resolve())
+        except Exception:
+            pass
+
+    return model_name
+
+
+
 def is_gpu_available() -> bool:
     """Detect if an NVIDIA or Apple Silicon GPU is present on the system."""
     import shutil
@@ -74,7 +142,17 @@ if os.environ.get("DOCLING_NUM_THREADS", "").strip().upper() == "AUTO":
 def _get(key: str, default, cast=str):
     raw = os.environ.get(key, None)
     if raw is None:
-        return cast(default) if not isinstance(default, cast) else default
+        if default is None:
+            return None
+        try:
+            if isinstance(default, cast):
+                return default
+        except TypeError:
+            pass
+        try:
+            return cast(default)
+        except Exception:
+            return default
     if isinstance(raw, str) and raw.strip().upper() == "AUTO":
         return "AUTO"
     try:
@@ -87,12 +165,19 @@ def _get(key: str, default, cast=str):
         raise ValueError(f"[config] Cannot parse env var {key}={raw!r} as {cast.__name__}: {e}")
 
 
+def _get_with_fallback(key: str, fallback_key: str, default, cast=str):
+    if key in os.environ:
+        return _get(key, default, cast)
+    return _get(fallback_key, default, cast)
+
+
 @dataclass
 class CorpusBuildConfig:
     available_gpus: str       = field(default_factory=lambda: _get("AVAILABLE_GPUS", "0"))
     workers_per_gpu: int | str = field(default_factory=lambda: _get("WORKERS_PER_GPU", 1, int))
     chunk_size: int | str      = field(default_factory=lambda: _get("CHUNK_SIZE", 10, int))
     output_path: Path         = field(default_factory=lambda: Path(_get("OUTPUT_PATH", "./data/dapt/domain_dapt_corpus.jsonl")))
+    extracted_output_path: Path = field(default_factory=lambda: Path(_get("EXTRACTED_OUTPUT_PATH", "./data/dapt/in/domain_dapt_corpus_extracted.jsonl")))
     maxtasksperchild: int | str | None = field(default_factory=lambda: _get("MAX_TASKS_PER_CHILD", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
     docling_use_ocr: bool      = field(default_factory=lambda: _get("DOCLING_USE_OCR", False, bool))
     docling_use_table_structure: bool = field(default_factory=lambda: _get("DOCLING_USE_TABLE_STRUCTURE", False, bool))
@@ -261,8 +346,8 @@ class GateConfig:
     ppl_plateau_window: int          = field(default_factory=lambda: _get("PPL_PLATEAU_WINDOW", 2, int))
 
     # Secondary Gate
-    term_cov_threshold: float      = field(default_factory=lambda: _get("TERM_COV_THRESHOLD", 0.80, float))
-    ret_prec_threshold: float      = field(default_factory=lambda: _get("RET_PREC_THRESHOLD", 0.60, float))
+    cloze_threshold: float         = field(default_factory=lambda: _get_with_fallback("CLOZE_THRESHOLD", "TERM_COV_THRESHOLD", 0.30, float))
+    concept_threshold: float       = field(default_factory=lambda: _get_with_fallback("CONCEPT_THRESHOLD", "RET_PREC_THRESHOLD", 0.50, float))
 
     # Remediation routing
     qa_low_threshold: float        = field(default_factory=lambda: _get("QA_LOW_THRESHOLD", 0.40, float))
@@ -273,42 +358,59 @@ class ProbeConfig:
     # Probe Activation Toggles
     run_perplexity: bool           = field(default_factory=lambda: _get("RUN_PERPLEXITY_PROBE", True, bool))
     run_qa: bool                  = field(default_factory=lambda: _get("RUN_QA_PROBE", True, bool))
-    run_terminology: bool         = field(default_factory=lambda: _get("RUN_TERMINOLOGY_PROBE", True, bool))
-    run_retrieval: bool           = field(default_factory=lambda: _get("RUN_RETRIEVAL_PROBE", True, bool))
+    run_cloze: bool               = field(default_factory=lambda: _get_with_fallback("RUN_CLOZE_PROBE", "RUN_TERMINOLOGY_PROBE", True, bool))
+    run_concept: bool             = field(default_factory=lambda: _get_with_fallback("RUN_CONCEPT_PROBE", "RUN_RETRIEVAL_PROBE", True, bool))
+
+    # Perplexity probe
+    perplexity_max_seq_len: int | None = field(default_factory=lambda: _get("PERPLEXITY_MAX_SEQ_LEN", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+    perplexity_batch_size: int | None  = field(default_factory=lambda: _get("PERPLEXITY_BATCH_SIZE", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+
+    # QA probe
+    qa_max_seq_len: int                   = field(default_factory=lambda: _get("QA_MAX_SEQ_LEN", 512, int))
+    qa_batch_size: int | None             = field(default_factory=lambda: _get("QA_BATCH_SIZE", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
 
     # Terminology cloze
-    term_cov_top_k: int            = field(default_factory=lambda: _get("TERM_COV_TOP_K", 5, int))
-    term_cov_max_new_tokens: int   = field(default_factory=lambda: _get("TERM_COV_MAX_NEW_TOKENS", 3, int))
-    term_cov_gen_batch_size: int   = field(default_factory=lambda: _get("TERM_COV_GEN_BATCH_SIZE", 16, int))
+    cloze_top_k: int            = field(default_factory=lambda: _get_with_fallback("CLOZE_TOP_K", "TERM_COV_TOP_K", 5, int))
+    cloze_max_new_tokens: int   = field(default_factory=lambda: _get_with_fallback("CLOZE_MAX_NEW_TOKENS", "TERM_COV_MAX_NEW_TOKENS", 3, int))
+    cloze_gen_batch_size: int   = field(default_factory=lambda: _get_with_fallback("CLOZE_GEN_BATCH_SIZE", "TERM_COV_GEN_BATCH_SIZE", 16, int))
+    cloze_max_seq_len: int      = field(default_factory=lambda: _get_with_fallback("CLOZE_MAX_SEQ_LEN", "TERM_COV_MAX_SEQ_LEN", 256, int))
 
     # Anatomical retrieval
     bertscore_model: str           = field(default_factory=lambda: _get("BERTSCORE_MODEL", "allenai/scibert_scivocab_uncased", str))
-    ret_prec_max_new_tokens: int   = field(default_factory=lambda: _get("RET_PREC_MAX_NEW_TOKENS", 100, int))
-    ret_prec_gen_batch_size: int   = field(default_factory=lambda: _get("RET_PREC_GEN_BATCH_SIZE", 16, int))
+    concept_max_new_tokens: int   = field(default_factory=lambda: _get_with_fallback("CONCEPT_MAX_NEW_TOKENS", "RET_PREC_MAX_NEW_TOKENS", 100, int))
+    concept_gen_batch_size: int   = field(default_factory=lambda: _get_with_fallback("CONCEPT_GEN_BATCH_SIZE", "RET_PREC_GEN_BATCH_SIZE", 16, int))
+    concept_max_seq_len: int      = field(default_factory=lambda: _get_with_fallback("CONCEPT_MAX_SEQ_LEN", "RET_PREC_MAX_SEQ_LEN", 256, int))
+    concept_bertscore_batch_size: int = field(default_factory=lambda: _get_with_fallback("CONCEPT_BERTSCORE_BATCH_SIZE", "RET_PREC_BERTSCORE_BATCH_SIZE", 32, int))
 
     # PPL eval corpus size
     perplexity_eval_tokens: int    = field(default_factory=lambda: _get("PERPLEXITY_EVAL_TOKENS", 10_000_000, int))
+
+    def __post_init__(self):
+        self.bertscore_model = resolve_local_model_path(self.bertscore_model)
 
 
 @dataclass
 class DataConfig:
     qa_probe_path: Path            = field(default_factory=lambda: Path(
-        os.environ.get("PROBE_QA_PATH", os.environ.get("QA_PROBE_PATH", "evals/dapt/probe_qa.jsonl"))
+        os.environ.get("QA_PROBE_PATH", os.environ.get("PROBE_QA_PATH", "evals/dapt/probe_qa.jsonl"))
     ))
     ppl_corpus_path: Path          = field(default_factory=lambda: Path(
-        os.environ.get("PPL_CORPUS_PATH", os.environ.get("PPL_HELD_OUT_PATH", "evals/dapt/ppl_held_out.txt"))
+        os.environ.get("PPL_CORPUS_PATH", os.environ.get("PPL_HELD_OUT_PATH", "data/dapt/ppl_validation_tokens.npy"))
     ))
-    vocab_cloze_path: Path         = field(default_factory=lambda: Path(
-        os.environ.get("VOCAB_CLOZE_PATH", "evals/dapt/vocab_cloze_set.json")
+    cloze_set_path: Path           = field(default_factory=lambda: Path(
+        os.environ.get("CLOZE_SET_PATH", os.environ.get("VOCAB_CLOZE_PATH", "evals/dapt/vocab_cloze_set.json"))
     ))
-    retrieval_prompts_path: Path  = field(default_factory=lambda: Path(
-        os.environ.get("RETRIEVAL_PROMPTS_PATH", "evals/dapt/retrieval_prompts.json")
+    concept_prompts_path: Path     = field(default_factory=lambda: Path(
+        os.environ.get("CONCEPT_PROMPTS_PATH", os.environ.get("RETRIEVAL_PROMPTS_PATH", "evals/dapt/retrieval_prompts.json"))
     ))
-    retrieval_references_path: Path = field(default_factory=lambda: Path(
-        os.environ.get("RETRIEVAL_REFERENCES_PATH", "evals/dapt/retrieval_references.json")
+    concept_references_path: Path  = field(default_factory=lambda: Path(
+        os.environ.get("CONCEPT_REFERENCES_PATH", os.environ.get("RETRIEVAL_REFERENCES_PATH", "evals/dapt/retrieval_references.json"))
     ))
     pretokenized_bin_path: Path    = field(default_factory=lambda: Path(
         os.environ.get("PRETOKENIZED_BIN_PATH", "data/dapt/train_tokens.npy")
+    ))
+    dapt_in_dir: Path              = field(default_factory=lambda: Path(
+        os.environ.get("DAPT_IN_DIR", "data/dapt/in")
     ))
 
 
@@ -321,6 +423,11 @@ class ModelConfig:
     checkpoint_dir: Path           = field(default_factory=lambda: Path(_get("CHECKPOINT_DIR", "models/checkpoints")))
     best_checkpoint_manifest: Path = field(default_factory=lambda: Path(_get("BEST_CHECKPOINT_MANIFEST", "logs/best_checkpoint.json")))
     checkpoint_keep_last: int      = field(default_factory=lambda: _get("CHECKPOINT_KEEP_LAST", 5, int))
+    save_optimizer_state: bool     = field(default_factory=lambda: _get("SAVE_OPTIMIZER_STATE", False, bool))
+    torch_compile: bool            = field(default_factory=lambda: _get("TORCH_COMPILE", True, bool))
+
+    def __post_init__(self):
+        self.base_model_name = resolve_local_model_path(self.base_model_name)
 
 
 @dataclass
@@ -504,10 +611,10 @@ class PipelineConfig:
 
         if not (0.0 <= self.gates.qa_acc_threshold <= 1.0):
             errors.append(f"QA_ACC_THRESHOLD must be in [0,1], got {self.gates.qa_acc_threshold}")
-        if not (0.0 <= self.gates.term_cov_threshold <= 1.0):
-            errors.append(f"TERM_COV_THRESHOLD must be in [0,1], got {self.gates.term_cov_threshold}")
-        if not (0.0 <= self.gates.ret_prec_threshold <= 1.0):
-            errors.append(f"RET_PREC_THRESHOLD must be in [0,1], got {self.gates.ret_prec_threshold}")
+        if not (0.0 <= self.gates.cloze_threshold <= 1.0):
+            errors.append(f"CLOZE_THRESHOLD must be in [0,1], got {self.gates.cloze_threshold}")
+        if not (0.0 <= self.gates.concept_threshold <= 1.0):
+            errors.append(f"CONCEPT_THRESHOLD must be in [0,1], got {self.gates.concept_threshold}")
         if self.gates.ppl_plateau_window < 2:
             errors.append(f"PPL_PLATEAU_WINDOW must be >= 2, got {self.gates.ppl_plateau_window}")
         if self.corpus.max_corpus_passes < 1:
@@ -628,11 +735,11 @@ class PipelineConfig:
             f"  Hard stop       : {self.corpus.hard_stop_tokens/1e3:.1f}K tokens\n"
             f"  Eval interval   : {self.corpus.eval_interval_tokens/1e3:.0f}K tokens\n"
             f"  Slow eval int   : {self.corpus.slow_eval_interval_tokens/1e3:.0f}K tokens\n"
-            f"  QA gate         : >= {self.gates.qa_acc_threshold:.0%} (Enabled: {self.probes.run_qa})\n"
-            f"  PPL gate        : < {self.gates.ppl_improvement_threshold}% for "
+            f"  Probe 1 - Perplexity gate: < {self.gates.ppl_improvement_threshold}% for "
             f"{self.gates.ppl_plateau_window} consecutive evals (Enabled: {self.probes.run_perplexity})\n"
-            f"  Term cov gate   : >= {self.gates.term_cov_threshold:.0%} (Enabled: {self.probes.run_terminology})\n"
-            f"  Ret prec gate   : >= {self.gates.ret_prec_threshold:.0%} (Enabled: {self.probes.run_retrieval})\n"
+            f"  Probe 2 - QA gate        : >= {self.gates.qa_acc_threshold:.0%} (Enabled: {self.probes.run_qa})\n"
+            f"  Probe 3 - Cloze gate     : >= {self.gates.cloze_threshold:.0%} (Enabled: {self.probes.run_cloze})\n"
+            f"  Probe 4 - Concept gate   : >= {self.gates.concept_threshold:.0%} (Enabled: {self.probes.run_concept})\n"
             f"  RAD Embedding   : {self.rad.embedding_model}\n"
             f"  RAD Mode        : {self.rad.retrieval_mode}\n"
             f"  RAD Top-K       : {self.rad.top_k}\n"

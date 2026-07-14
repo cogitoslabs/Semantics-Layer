@@ -94,7 +94,7 @@ def test_run_dapt_pipeline(mock_model, mock_tokenizer):
         corpus_path = os.path.join(tmpdir, "corpus.jsonl")
         probe_qa_path = os.path.join(tmpdir, "probe_qa.jsonl")
         output_dir = os.path.join(tmpdir, "out_model")
-        ppl_corpus_path = os.path.join(tmpdir, "ppl_held_out.txt")
+        ppl_corpus_path = os.path.join(tmpdir, "ppl_validation_tokens.npy")
         vocab_cloze_path = os.path.join(tmpdir, "vocab_cloze_set.json")
         retrieval_prompts_path = os.path.join(tmpdir, "retrieval_prompts.json")
         retrieval_references_path = os.path.join(tmpdir, "retrieval_references.json")
@@ -108,8 +108,7 @@ def test_run_dapt_pipeline(mock_model, mock_tokenizer):
         with open(probe_qa_path, "w") as f:
             f.write(json.dumps({"question": "Q1", "choices": ["A", "B"], "answer_idx": 0}) + "\n")
  
-        with open(ppl_corpus_path, "w") as f:
-            f.write("dummy ppl text")
+        np.save(ppl_corpus_path, np.array([1, 2, 3, 4, 5], dtype=np.int32))
         with open(vocab_cloze_path, "w") as f:
             json.dump([{"prompt": "dummy prompt", "target_term": "dummy term", "category": "dummy"}], f)
         with open(retrieval_prompts_path, "w") as f:
@@ -143,8 +142,8 @@ def test_run_dapt_pipeline(mock_model, mock_tokenizer):
                         "qa_accuracy": 50.0,
                         "qa_correct": 1,
                         "qa_total": 2,
-                        "term_coverage": 0.5,
-                        "retrieval_precision": 0.5,
+                        "cloze_coverage": 0.5,
+                        "concept_precision": 0.5,
                     }
                 }
                 
@@ -171,7 +170,7 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
         corpus_path = os.path.join(tmpdir, "corpus.jsonl")
         probe_qa_path = os.path.join(tmpdir, "probe_qa.jsonl")
         output_dir = os.path.join(tmpdir, "out_model")
-        ppl_corpus_path = os.path.join(tmpdir, "ppl_held_out.txt")
+        ppl_corpus_path = os.path.join(tmpdir, "ppl_validation_tokens.npy")
         vocab_cloze_path = os.path.join(tmpdir, "vocab_cloze_set.json")
         retrieval_prompts_path = os.path.join(tmpdir, "retrieval_prompts.json")
         retrieval_references_path = os.path.join(tmpdir, "retrieval_references.json")
@@ -185,8 +184,7 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
         with open(probe_qa_path, "w") as f:
             f.write(json.dumps({"question": "Q1", "choices": ["A", "B"], "answer_idx": 0}) + "\n")
  
-        with open(ppl_corpus_path, "w") as f:
-            f.write("dummy ppl text")
+        np.save(ppl_corpus_path, np.array([1, 2, 3, 4, 5], dtype=np.int32))
         with open(vocab_cloze_path, "w") as f:
             json.dump([{"prompt": "dummy prompt", "target_term": "dummy term", "category": "dummy"}], f)
         with open(retrieval_prompts_path, "w") as f:
@@ -229,8 +227,8 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
                     "qa_accuracy": 50.0,
                     "qa_correct": 1,
                     "qa_total": 2,
-                    "term_coverage": 0.5,
-                    "retrieval_precision": 0.5,
+                    "cloze_coverage": 0.5,
+                    "concept_precision": 0.5,
                 }
             }
             
@@ -304,7 +302,7 @@ def test_run_pretokenization(mock_tokenizer):
     with tempfile.TemporaryDirectory() as tmpdir:
         corpus_path = os.path.join(tmpdir, "corpus.jsonl")
         pretokenized_bin_path = os.path.join(tmpdir, "train_tokens.npy")
-        ppl_corpus_path = os.path.join(tmpdir, "ppl_held_out.txt")
+        ppl_corpus_path = os.path.join(tmpdir, "ppl_validation_tokens.npy")
         
         # Write a dummy corpus
         with open(corpus_path, "w") as f:
@@ -331,6 +329,9 @@ def test_run_pretokenization(mock_tokenizer):
             # Load tokens
             tokens = np.load(pretokenized_bin_path)
             assert len(tokens) > 0
+            
+            val_tokens = np.load(ppl_corpus_path)
+            assert len(val_tokens) > 0
 
 
 def test_eval_qa_accuracy_new_format(mock_model, mock_tokenizer):
@@ -410,8 +411,8 @@ def test_eval_qa_accuracy_new_format(mock_model, mock_tokenizer):
         assert result["per_cluster_accuracy"]["neurotransmitters"] == 1.0
 
 
-def test_eval_terminology_coverage_empty_prompt(mock_model, mock_tokenizer):
-    from lib.s3_dapt.probes.terminology_probe import eval_terminology_coverage
+def test_eval_cloze_coverage_empty_prompt(mock_model, mock_tokenizer):
+    from lib.s3_dapt.probes.cloze_probe import eval_cloze_coverage
     from pathlib import Path
     
     # Custom mock tokenizer that returns empty input_ids when prompt is empty
@@ -452,7 +453,7 @@ def test_eval_terminology_coverage_empty_prompt(mock_model, mock_tokenizer):
         with open(vocab_cloze_path, "w", encoding="utf-8") as f:
             json.dump(cloze_items, f)
             
-        result = eval_terminology_coverage(
+        result = eval_cloze_coverage(
             model=mock_model,
             tokenizer=mock_tokenizer,
             vocab_cloze_path=vocab_cloze_path,
@@ -464,8 +465,8 @@ def test_eval_terminology_coverage_empty_prompt(mock_model, mock_tokenizer):
         assert result["total"] == 2
 
 
-def test_eval_retrieval_precision_empty_prompt(mock_model, mock_tokenizer):
-    from lib.s3_dapt.probes.retrieval_probe import eval_retrieval_precision
+def test_eval_concept_precision_empty_prompt(mock_model, mock_tokenizer):
+    from lib.s3_dapt.probes.concept_probe import eval_concept_precision
     from pathlib import Path
     
     def mock_tokenize_fn(text, *args, **kwargs):
@@ -503,7 +504,7 @@ def test_eval_retrieval_precision_empty_prompt(mock_model, mock_tokenizer):
         with open(references_path, "w", encoding="utf-8") as f:
             json.dump(["ref1", "ref2"], f)
             
-        result = eval_retrieval_precision(
+        result = eval_concept_precision(
             model=mock_model,
             tokenizer=mock_tokenizer,
             retrieval_prompts_path=prompts_path,
@@ -537,12 +538,12 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
         # but disable the probes associated with them.
         with patch.dict(os.environ, {
             "RUN_PERPLEXITY_PROBE": "False",
-            "RUN_TERMINOLOGY_PROBE": "False",
-            "RUN_RETRIEVAL_PROBE": "False",
+            "RUN_CLOZE_PROBE": "False",
+            "RUN_CONCEPT_PROBE": "False",
             "PPL_CORPUS_PATH": os.path.join(tmpdir, "missing_ppl.txt"),
-            "VOCAB_CLOZE_PATH": os.path.join(tmpdir, "missing_vocab.json"),
-            "RETRIEVAL_PROMPTS_PATH": os.path.join(tmpdir, "missing_prompts.json"),
-            "RETRIEVAL_REFERENCES_PATH": os.path.join(tmpdir, "missing_references.json"),
+            "CLOZE_SET_PATH": os.path.join(tmpdir, "missing_vocab.json"),
+            "CONCEPT_PROMPTS_PATH": os.path.join(tmpdir, "missing_prompts.json"),
+            "CONCEPT_REFERENCES_PATH": os.path.join(tmpdir, "missing_references.json"),
             "PRETOKENIZED_BIN_PATH": pretokenized_bin_path,
         }):
             with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
@@ -560,8 +561,8 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
                         "qa_accuracy": 50.0,
                         "qa_correct": 1,
                         "qa_total": 2,
-                        "term_coverage": 0.0,
-                        "retrieval_precision": 0.0,
+                        "cloze_coverage": 0.0,
+                        "concept_precision": 0.0,
                     }
                 }
                 
@@ -587,8 +588,8 @@ def test_check_convergence_gates_disabled_probes():
         "tokens_processed": 100,
         "perplexity_history": [],
         "qa_acc_history": [0.0],
-        "term_cov_history": [0.0],
-        "ret_prec_history": [0.0],
+        "cloze_cov_history": [0.0],
+        "concept_prec_history": [0.0],
     }
     
     # QA and PPL are disabled, secondary are enabled but have 0.0 metrics.
@@ -599,14 +600,14 @@ def test_check_convergence_gates_disabled_probes():
         qa_acc_threshold=0.55,
         ppl_improvement_threshold=2.0,
         ppl_plateau_window=2,
-        term_cov_threshold=0.80,
-        ret_prec_threshold=0.60,
+        cloze_threshold=0.80,
+        concept_threshold=0.60,
         hard_stop_tokens=1000,
         total_corpus_tokens=500,
         run_qa=False,
         run_perplexity=False,
-        run_terminology=True,
-        run_retrieval=True,
+        run_cloze=True,
+        run_concept=True,
     )
     
     assert decision == DAPTDecision.CONTINUE
@@ -620,14 +621,14 @@ def test_check_convergence_gates_disabled_probes():
         qa_acc_threshold=0.55,
         ppl_improvement_threshold=2.0,
         ppl_plateau_window=2,
-        term_cov_threshold=0.80,
-        ret_prec_threshold=0.60,
+        cloze_threshold=0.80,
+        concept_threshold=0.60,
         hard_stop_tokens=1000,
         total_corpus_tokens=500,
         run_qa=False,
         run_perplexity=False,
-        run_terminology=False,
-        run_retrieval=False,
+        run_cloze=False,
+        run_concept=False,
     )
     assert decision == DAPTDecision.CONVERGED
     assert gate_details["all_converged"] is True
@@ -641,8 +642,8 @@ def test_select_best_checkpoint_fallback_metrics():
             "eval_id": 1,
             "metrics": {
                 "qa_accuracy": 0.0,
-                "term_coverage": 0.1,
-                "retrieval_precision": 0.0,
+                "cloze_coverage": 0.1,
+                "concept_precision": 0.0,
                 "perplexity": 10.0,
             }
         },
@@ -650,8 +651,8 @@ def test_select_best_checkpoint_fallback_metrics():
             "eval_id": 2,
             "metrics": {
                 "qa_accuracy": 0.0,
-                "term_coverage": 0.9,
-                "retrieval_precision": 0.0,
+                "cloze_coverage": 0.9,
+                "concept_precision": 0.0,
                 "perplexity": 8.0,
             }
         }
@@ -665,7 +666,7 @@ def test_select_best_checkpoint_fallback_metrics():
         (checkpoint_dir / "dapt_eval_0001.pt").write_text("dummy")
         (checkpoint_dir / "dapt_eval_0002.pt").write_text("dummy")
         
-        # QA is disabled, so we fall back to Terminology coverage (run_terminology=True)
+        # QA is disabled, so we fall back to Terminology coverage (run_cloze=True)
         best_ckpt = select_best_checkpoint(
             eval_history=eval_history,
             checkpoint_dir=checkpoint_dir,
@@ -673,11 +674,11 @@ def test_select_best_checkpoint_fallback_metrics():
             manifest_path=manifest_path,
             run_qa=False,
             run_perplexity=False,
-            run_terminology=True,
-            run_retrieval=False,
+            run_cloze=True,
+            run_concept=False,
         )
         
-        # Should select eval 2 because term_coverage is 0.9 > 0.1
+        # Should select eval 2 because cloze_coverage is 0.9 > 0.1
         assert best_ckpt.name == "dapt_eval_0002.pt"
 
 
@@ -715,19 +716,19 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
         cfg.model.checkpoint_dir = model_dir
         cfg.logging.log_dir = Path(tmpdir) / "logs"
         cfg.data.qa_probe_path = qa_path
-        cfg.data.vocab_cloze_path = vocab_path
-        cfg.data.retrieval_prompts_path = retrieval_prompts_path
-        cfg.data.retrieval_references_path = retrieval_references_path
+        cfg.data.cloze_set_path = vocab_path
+        cfg.data.concept_prompts_path = retrieval_prompts_path
+        cfg.data.concept_references_path = retrieval_references_path
         cfg.probes.run_qa = True
-        cfg.probes.run_terminology = True
-        cfg.probes.run_retrieval = True
+        cfg.probes.run_cloze = True
+        cfg.probes.run_concept = True
         
         # Mock AutoModelForCausalLM.from_pretrained and AutoTokenizer.from_pretrained
         with patch("transformers.AutoModelForCausalLM.from_pretrained") as mock_model_load, \
              patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer_load, \
              patch("lib.s3_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa, \
-             patch("lib.s3_dapt.probes.terminology_probe.get_failed_terminology_samples") as mock_get_failed_term, \
-             patch("lib.s3_dapt.probes.retrieval_probe.get_failed_retrieval_samples") as mock_get_failed_ret:
+             patch("lib.s3_dapt.probes.cloze_probe.get_failed_cloze_samples") as mock_get_failed_term, \
+             patch("lib.s3_dapt.probes.concept_probe.get_failed_concept_samples") as mock_get_failed_ret:
              
             mock_model_load.return_value = mock_model
             mock_tokenizer_load.return_value = mock_tokenizer
@@ -750,13 +751,118 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
             assert len(data["qa"]) == 1
             assert data["qa"][0]["question"] == "Q2"
             
-            assert "terminology" in data
-            assert len(data["terminology"]) == 1
-            assert data["terminology"][0]["target_term"] == "Term1"
+            assert "cloze" in data
+            assert len(data["cloze"]) == 1
+            assert data["cloze"][0]["target_term"] == "Term1"
             
-            assert "retrieval" in data
-            assert len(data["retrieval"]) == 1
-            assert data["retrieval"][0]["score"] == 0.35
+            assert "concept" in data
+            assert len(data["concept"]) == 1
+            assert data["concept"][0]["score"] == 0.35
+
+
+def test_concept_probe_lexical_f1_and_delegation(mock_model, mock_tokenizer):
+    from lib.s3_dapt.probes.concept_probe import (
+        compute_lexical_f1_batch,
+        _patched_tokenizer_context,
+        get_failed_concept_samples
+    )
+    import transformers
+    
+    # 1. Test lexical F1 cleaning (punctuation stripping)
+    hyps = ["amygdala."]
+    refs = ["amygdala"]
+    scores = compute_lexical_f1_batch(hyps, refs)
+    assert scores[0] == 1.0
+    
+    # 2. Test scoped monkeypatch (it gets cleaned up)
+    orig_fn = transformers.AutoTokenizer.from_pretrained
+    with _patched_tokenizer_context():
+        assert transformers.AutoTokenizer.from_pretrained != orig_fn
+    assert transformers.AutoTokenizer.from_pretrained == orig_fn
+
+    # 3. Test get_failed_concept_samples delegation
+    mock_tokenizer.eos_token_id = 2
+    mock_tokenizer.encode.return_value = [5, 6]
+    mock_tokenizer.decode.return_value = "amygdala"
+    
+    def mock_model_generate(*args, **kwargs):
+        return torch.tensor([[2, 5, 6]])
+    mock_model.generate = mock_model_generate
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        prompts_path = Path(tmpdir) / "retrieval_prompts.json"
+        references_path = Path(tmpdir) / "retrieval_references.json"
+        
+        with open(prompts_path, "w", encoding="utf-8") as f:
+            json.dump(["Give me term"], f)
+        with open(references_path, "w", encoding="utf-8") as f:
+            json.dump(["hippocampus"], f) # different from "amygdala" => fails
+            
+        failures = get_failed_concept_samples(
+            model=mock_model,
+            tokenizer=mock_tokenizer,
+            retrieval_prompts_path=prompts_path,
+            retrieval_references_path=references_path,
+            bertscore_model="dummy_bertscore",
+            max_new_tokens=5,
+            device="cpu",
+            use_bertscore=False,
+            failure_threshold=0.8
+        )
+        assert len(failures) == 1
+        assert failures[0]["prompt"] == "Give me term"
+        assert failures[0]["reference"] == "hippocampus"
+
+
+def test_patched_tokenizer_context_monkeypatches_special_tokens():
+    from lib.s3_dapt.probes.concept_probe import _patched_tokenizer_context
+    import transformers
+    
+    class DummyTokenizerWithoutSpecialTokens:
+        def __init__(self):
+            self.model_max_length = 500
+            self.cls_token_id = 999
+            self.sep_token_id = 888
+
+    def mock_from_pretrained(*args, **kwargs):
+        return DummyTokenizerWithoutSpecialTokens()
+
+    with patch("transformers.AutoTokenizer.from_pretrained", side_effect=mock_from_pretrained):
+        with _patched_tokenizer_context():
+            tokenizer = transformers.AutoTokenizer.from_pretrained("dummy")
+            assert hasattr(tokenizer, "build_inputs_with_special_tokens")
+            special_tokens = tokenizer.build_inputs_with_special_tokens([1, 2, 3])
+            assert special_tokens == [999, 1, 2, 3, 888]
+
+
+def test_compute_bertscore_batch_handles_empty_candidates():
+    from lib.s3_dapt.probes.concept_probe import compute_bertscore_batch
+    
+    with patch("lib.s3_dapt.probes.concept_probe.get_bertscorer") as mock_get_scorer:
+        mock_scorer = MagicMock()
+        mock_scorer.score.return_value = (None, None, torch.tensor([0.9, 0.85]))
+        mock_get_scorer.return_value = mock_scorer
+        
+        hypotheses = ["", "non-empty candidate 1", "  ", "non-empty candidate 2"]
+        references = ["ref1", "ref2", "ref3", "ref4"]
+        
+        scores = compute_bertscore_batch(
+            hypotheses=hypotheses,
+            references=references,
+            model_type="dummy",
+            device="cpu",
+            batch_size=2
+        )
+        
+        mock_scorer.score.assert_called_once_with(
+            cands=["non-empty candidate 1", "non-empty candidate 2"],
+            refs=["ref2", "ref4"],
+            batch_size=2,
+            verbose=False
+        )
+        import pytest
+        assert scores == [0.0, pytest.approx(0.9), 0.0, pytest.approx(0.85)]
+
 
 
 

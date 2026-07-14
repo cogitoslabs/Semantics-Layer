@@ -1,11 +1,12 @@
 """
-probes/qa_probe.py — Probe A: Neuroscience QA Accuracy
+probes/qa_probe.py — Probe 2 - QA probe
 """
 
 import contextlib
 import json
+from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple, TypedDict, Union, overload
 
 import torch
 import torch.nn.functional as F
@@ -14,140 +15,386 @@ from lib.utils.logger import get_logger
 
 logger = get_logger("dapt.probe.qa")
 
-MCQ_LABELS = ["A", "B", "C", "D", "E"]
+DEFAULT_MAX_LENGTH = 512
+LOG_INTERVAL = 100
 
 
-def format_mcq_prompt(question: str, choices: List[str]) -> str:
-    lines = [f"Question: {question}\n"]
-    for i, choice in enumerate(choices):
-        label = MCQ_LABELS[i] if i < len(MCQ_LABELS) else str(i)
-        lines.append(f"{label}. {choice}")
-    lines.append("\nAnswer:")
-    return "\n".join(lines)
+class QAEvalResults(TypedDict):
+    accuracy: float
+    correct: int
+    total: int
+    per_cluster_accuracy: Dict[str, float]
+    failures: List[Dict[str, Any]]
+
+
+def load_qa_items(
+    qa_probe_path: Path,
+    max_samples: Optional[int] = None
+) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Load raw items from a JSONL file. Returns (items, skipped_json_lines_count).
+    """
+    qa_items: List[Dict[str, Any]] = []
+    skipped_json_count = 0
+    try:
+        with open(qa_probe_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    qa_items.append(json.loads(line_str))
+                    if max_samples is not None and len(qa_items) >= max_samples:
+                        break
+                except json.JSONDecodeError:
+                    skipped_json_count += 1
+    except FileNotFoundError:
+        logger.error(f"QA probe file not found at {qa_probe_path}")
+
+    return qa_items, skipped_json_count
+
+
+def validate_items(qa_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filter and validate items. Ensures:
+    1. 'question' is not None.
+    2. 'choices' list exists, is not empty.
+    3. 'answer_idx' exists and is a valid index within the choices.
+    """
+    valid_items = []
+    for item in qa_items:
+        question = item.get("question")
+        choices = item.get("choices")
+        answer_idx = item.get("answer_idx")
+        if question is not None and choices is not None and answer_idx is not None:
+            if isinstance(choices, list) and len(choices) > 0:
+                if isinstance(answer_idx, int) and 0 <= answer_idx < len(choices):
+                    valid_items.append(item)
+                    continue
+        logger.warning(
+            f"Skipping malformed or out-of-bounds QA item: {item}"
+        )
+    return valid_items
+
+
+@overload
+def score_choices_by_logprob(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    prompt: str,
+    choices: List[str],
+    device: str = "cuda",
+    use_pmi: bool = True,
+    use_length_norm: bool = True,
+    max_length: int = 512,
+) -> int:
+    ...
+
+
+@overload
+def score_choices_by_logprob(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    prompt: List[str],
+    choices: List[List[str]],
+    device: str = "cuda",
+    use_pmi: bool = True,
+    use_length_norm: bool = True,
+    max_length: int = 512,
+) -> List[int]:
+    ...
+
+
+@lru_cache(maxsize=8)
+def _detect_bos(tokenizer_id: int, tokenizer_ref) -> Tuple[bool, str]:
+    """Return (has_bos, uncond_prefix) for a tokenizer; result cached by tokenizer identity."""
+    bos_id = tokenizer_ref.bos_token_id
+    has_bos = False
+    if bos_id is not None:
+        try:
+            test_res = tokenizer_ref("test")
+            test_ids = test_res.get("input_ids", [])
+            if isinstance(test_ids, torch.Tensor):
+                test_list = test_ids.view(-1).tolist()
+            elif isinstance(test_ids, list):
+                test_list = test_ids[0] if (len(test_ids) > 0 and isinstance(test_ids[0], list)) else test_ids
+            else:
+                test_list = []
+            if len(test_list) > 0 and test_list[0] == bos_id:
+                has_bos = True
+        except Exception:
+            pass
+
+    uncond_prefix = ""
+    if not has_bos:
+        try:
+            tok = tokenizer_ref.bos_token
+            if isinstance(tok, str):
+                uncond_prefix = tok
+        except Exception:
+            pass
+        if not uncond_prefix:
+            try:
+                tok = tokenizer_ref.eos_token
+                if isinstance(tok, str):
+                    uncond_prefix = tok
+            except Exception:
+                pass
+
+    return has_bos, uncond_prefix
 
 
 def score_choices_by_logprob(
-    model,
-    tokenizer,
-    prompt: Any,
-    choices: Any,
+    model: torch.nn.Module,
+    tokenizer: Any,
+    prompt: Union[str, List[str]],
+    choices: Union[List[str], List[List[str]]],
     device: str = "cuda",
-) -> Any:
+    use_pmi: bool = True,
+    use_length_norm: bool = True,
+    max_length: int = 512,
+) -> Union[int, List[int]]:
     is_batched = not isinstance(prompt, str)
 
     if not is_batched:
-        prompts = [prompt]
-        choices_list = [choices]
+        # Prompt is a string, choices is a List[str]
+        prompts = [prompt]  # type: ignore
+        choices_list = [choices]  # type: ignore
     else:
-        prompts = prompt
-        choices_list = choices
+        # Prompt is List[str], choices is List[List[str]]
+        prompts = prompt  # type: ignore
+        choices_list = choices  # type: ignore
 
     if not prompts:
         return [] if is_batched else -1
 
+    # Validate that choices are not empty (defense-in-depth for direct API calls)
+    for chs in choices_list:
+        if not chs:
+            raise ValueError("Empty choices list provided to score_choices_by_logprob.")
+
     dev = torch.device(device)
 
+    # Verify that model parameter device matches the requested device (prevent silent side effects)
+    try:
+        model_device = next(iter(model.parameters())).device
+        if model_device.type != dev.type:
+            raise ValueError(
+                f"Model device ({model_device}) does not match requested device ({dev}). "
+                "Moving the model inside scoring functions is disabled to prevent training side effects."
+            )
+    except StopIteration:
+        pass
+
     # Ensure pad token is set
+    # Note: pad_token_id fallback to 0 is safe because pad tokens are fully masked out in the attention mask
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # 1. Tokenize all prompts to get their token lengths
-    prompt_lens = []
-    for p in prompts:
-        p_inputs = tokenizer(
-            p,
-            return_tensors="pt",
-            truncation=True,
-            max_length=512,
-        )
-        prompt_lens.append(p_inputs["input_ids"].shape[1])
+    # BOS detection is cached by tokenizer identity to avoid re-tokenizing "test" on every call
+    has_bos, uncond_prefix = _detect_bos(id(tokenizer), tokenizer)
 
-    # 2. Build flat texts for conditional (prompt + choice) and unconditional (choice)
-    flat_cond_texts = []
-    flat_cond_prompt_lens = []
-    flat_uncond_texts = []
+    # Build flat texts for conditional (prompt + " " + choice) and unconditional (choice)
+    flat_cond_texts: List[str] = []
+    flat_uncond_texts: List[str] = []
+    prompts_for_flat: List[str] = []  # Keep track of the original prompt string to compute its char length
 
     for j, (p, chs) in enumerate(zip(prompts, choices_list)):
-        p_len = prompt_lens[j]
         for choice in chs:
             flat_cond_texts.append(p + " " + choice)
-            flat_cond_prompt_lens.append(p_len)
-            flat_uncond_texts.append(choice)
+            flat_uncond_texts.append(uncond_prefix + choice)
+            prompts_for_flat.append(p)
 
-    # 3. Helper to tokenize, run forward pass, and compute log probabilities
-    def compute_logprobs(texts, split_lens=None):
-        tokenized_inputs = []
-        for text in texts:
-            t_input = tokenizer(
-                text,
-                return_tensors="pt",
-                truncation=True,
-                max_length=512,
-            )
-            tokenized_inputs.append(t_input)
+    N = len(flat_cond_texts)
 
-        max_len = max(t["input_ids"].shape[1] for t in tokenized_inputs)
-        pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else (tokenizer.eos_token_id or 0)
+    # 2. Hoist model dtype and autocast configuration
+    try:
+        model_dtype = next(iter(model.parameters())).dtype
+    except (StopIteration, TypeError, AttributeError):
+        model_dtype = torch.float32
 
-        input_ids_list = []
-        attention_mask_list = []
-        for t in tokenized_inputs:
-            ids = t["input_ids"][0]
-            mask = t["attention_mask"][0]
-            curr_len = len(ids)
-            pad_len = max_len - curr_len
+    is_cuda = "cuda" in str(device)
+    autocast_ctx = (
+        torch.amp.autocast(device_type="cuda", dtype=model_dtype)
+        if is_cuda and hasattr(torch, "amp")
+        else contextlib.nullcontext()
+    )    # Placeholders for scores
+    scores = [0.0] * (2 * N)
+    truncation_count = 0
+    prompt_len_cache: Dict[str, int] = {}
 
-            padded_ids = torch.cat([ids, torch.tensor([pad_id] * pad_len, dtype=ids.dtype, device=ids.device)])
-            padded_mask = torch.cat([mask, torch.tensor([0] * pad_len, dtype=mask.dtype, device=mask.device)])
+    # Temporarily set tokenizer truncation to 'left' to preserve answer choices at the end
+    original_truncation_side = tokenizer.truncation_side
+    tokenizer.truncation_side = "left"
 
-            input_ids_list.append(padded_ids)
-            attention_mask_list.append(padded_mask)
-
-        input_ids = torch.stack(input_ids_list).to(dev)
-        attention_mask = torch.stack(attention_mask_list).to(dev)
-
+    def run_forward(texts):
+        # Try batch tokenization first
         try:
-            model_dtype = next(iter(model.parameters())).dtype
-        except (StopIteration, TypeError, AttributeError):
-            model_dtype = torch.float32
+            tokenized = tokenizer(
+                texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+                return_offsets_mapping=True,
+            )
+            # Verify that the returned batch size matches the input list length
+            if tokenized["input_ids"].shape[0] != len(texts):
+                raise ValueError("Batch size mismatch from tokenizer")
+        except Exception:
+            # Fallback to loop-based tokenization for mock/slow tokenizers
+            tokenized_inputs = []
+            for t in texts:
+                t_input = tokenizer(
+                    t,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=max_length,
+                )
+                tokenized_inputs.append(t_input)
+            
+            # Manually pad and reconstruct tokenized dict
+            max_len = max(t["input_ids"].shape[1] for t in tokenized_inputs)
+            pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else (tokenizer.eos_token_id or 0)
+            
+            input_ids_list = []
+            attention_mask_list = []
+            for t in tokenized_inputs:
+                ids = t["input_ids"][0]
+                mask = t["attention_mask"][0]
+                curr_len = len(ids)
+                pad_len = max_len - curr_len
+                
+                padded_ids = torch.cat([ids, torch.tensor([pad_id] * pad_len, dtype=ids.dtype, device=ids.device)])
+                padded_mask = torch.cat([mask, torch.tensor([0] * pad_len, dtype=mask.dtype, device=mask.device)])
+                
+                input_ids_list.append(padded_ids)
+                attention_mask_list.append(padded_mask)
+                
+            tokenized = {
+                "input_ids": torch.stack(input_ids_list),
+                "attention_mask": torch.stack(attention_mask_list),
+            }
 
-        is_cuda = "cuda" in str(device)
-        autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=model_dtype) if is_cuda and hasattr(torch, "amp") else contextlib.nullcontext()
+        input_ids = tokenized["input_ids"].to(dev)
+        attention_mask = tokenized["attention_mask"].to(dev)
 
-        with torch.no_grad():
+        # Compute active lengths once to avoid redundant GPU transfers and calculations
+        seq_lens = attention_mask.sum(dim=1).tolist()
+
+        # Single forward pass for this batch
+        with torch.inference_mode():
             with autocast_ctx:
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask)
                 logits = outputs.logits
 
-        scores = []
-        for idx in range(len(texts)):
-            if split_lens is not None:
-                p_len = split_lens[idx]
+        return input_ids, logits, seq_lens, tokenized.get("offset_mapping")
+
+    try:
+        # Run conditional forward pass
+        cond_input_ids, cond_logits, cond_seq_lens, cond_offsets = run_forward(flat_cond_texts)
+
+        # Run unconditional forward pass (only if use_pmi is True)
+        if use_pmi:
+            uncond_input_ids, uncond_logits, uncond_seq_lens, uncond_offsets = run_forward(flat_uncond_texts)
+
+        # Compute logprobs for conditional sequences
+        for idx in range(N):
+            seq_len_idx = cond_seq_lens[idx]
+            if seq_len_idx >= max_length:
+                truncation_count += 1
+
+            prompt_str = prompts_for_flat[idx]
+            prompt_char_len = len(prompt_str)
+
+            # Find token boundary where the choice starts using character offset mapping if available
+            if cond_offsets is not None:
+                seq_offsets = cond_offsets[idx]
+                split_idx = seq_len_idx
+                for t_i, (start, end) in enumerate(seq_offsets):
+                    if t_i >= seq_len_idx:
+                        break
+                    if start >= prompt_char_len:
+                        split_idx = t_i
+                        break
             else:
-                p_len = 1  # For unconditional, split after BOS token
+                if prompt_str not in prompt_len_cache:
+                    prompt_tokenized = tokenizer(prompt_str, return_tensors="pt")
+                    prompt_len_cache[prompt_str] = prompt_tokenized["input_ids"].shape[1]
+                split_idx = prompt_len_cache[prompt_str]
 
-            seq_len_idx = attention_mask[idx].sum().item()
-
-            if seq_len_idx <= p_len:
-                scores.append(0.0)
+            if seq_len_idx <= split_idx:
+                scores[idx] = 0.0
                 continue
 
-            labels = input_ids[idx, p_len:seq_len_idx]
-            choice_logits = logits[idx, p_len - 1 : seq_len_idx - 1, :]
+            labels = cond_input_ids[idx, split_idx:seq_len_idx]
+            logits_start = max(0, split_idx - 1)
+            choice_logits = cond_logits[idx, logits_start : seq_len_idx - 1, :]
+
+            if split_idx == 0:
+                labels = labels[1:]
 
             log_probs = F.log_softmax(choice_logits, dim=-1)
             choice_len = len(labels)
             if choice_len == 0:
-                scores.append(0.0)
+                scores[idx] = 0.0
                 continue
+
             token_log_probs = log_probs[torch.arange(choice_len, device=dev), labels]
-            scores.append(token_log_probs.sum().item())
-        return scores
+            sum_log_prob = token_log_probs.sum().item()
 
-    cond_scores = compute_logprobs(flat_cond_texts, flat_cond_prompt_lens)
-    uncond_scores = compute_logprobs(flat_uncond_texts, None)
+            if use_length_norm:
+                scores[idx] = sum_log_prob / choice_len
+            else:
+                scores[idx] = sum_log_prob
 
-    # 4. Group scores back to identify predicted choice index for each prompt using PMI (cond - uncond)
+        # Compute logprobs for unconditional sequences (only if use_pmi is True)
+        if use_pmi:
+            for idx in range(N):
+                seq_len_idx = uncond_seq_lens[idx]
+                if seq_len_idx >= max_length:
+                    truncation_count += 1
+
+                # Unconditional: Check if first token is BOS or a prepended prefix
+                split_idx = 1 if (has_bos or len(uncond_prefix) > 0) else 0
+
+                if seq_len_idx <= split_idx:
+                    scores[N + idx] = 0.0
+                    continue
+
+                labels = uncond_input_ids[idx, split_idx:seq_len_idx]
+                logits_start = max(0, split_idx - 1)
+                choice_logits = uncond_logits[idx, logits_start : seq_len_idx - 1, :]
+
+                if split_idx == 0:
+                    labels = labels[1:]
+
+                log_probs = F.log_softmax(choice_logits, dim=-1)
+                choice_len = len(labels)
+                if choice_len == 0:
+                    scores[N + idx] = 0.0
+                    continue
+
+                token_log_probs = log_probs[torch.arange(choice_len, device=dev), labels]
+                sum_log_prob = token_log_probs.sum().item()
+
+                if use_length_norm:
+                    scores[N + idx] = sum_log_prob / choice_len
+                else:
+                    scores[N + idx] = sum_log_prob
+
+    finally:
+        # Restore the original truncation side
+        tokenizer.truncation_side = original_truncation_side
+
+    # Log truncation warnings consolidated for the batch
+    if truncation_count > 0:
+        logger.warning(
+            f"Truncated {truncation_count} sequence(s) from the left to max_length={max_length}. "
+            "This can impact choice prediction accuracy."
+        )
+
+    # 4. Group scores back to identify predicted choice index for each prompt
     predicted_indices = []
     curr_flat_idx = 0
     for chs in choices_list:
@@ -155,8 +402,13 @@ def score_choices_by_logprob(
         choice_scores = []
         for i in range(num_choices):
             idx = curr_flat_idx + i
-            pmi_score = cond_scores[idx] - uncond_scores[idx]
-            choice_scores.append(pmi_score)
+            cond_score = scores[idx]
+            uncond_score = scores[N + idx]
+            if use_pmi:
+                pmi_score = cond_score - uncond_score
+                choice_scores.append(pmi_score)
+            else:
+                choice_scores.append(cond_score)
         predicted_idx = int(torch.tensor(choice_scores).argmax().item())
         predicted_indices.append(predicted_idx)
         curr_flat_idx += num_choices
@@ -171,110 +423,120 @@ def eval_qa_accuracy(
     device: str = "cuda",
     max_samples: Optional[int] = None,
     batch_size: int = 32,
-) -> Dict[str, Any]:
+    use_pmi: bool = True,
+    use_length_norm: bool = True,
+    max_length: int = 512,
+) -> QAEvalResults:
     """
-    Run Probe A and return accuracy plus per-cluster diagnostics.
+    Run Probe 2 - QA probe and return accuracy plus per-cluster diagnostics.
     """
-    # Load from JSONL format with early-stopping for max_samples
-    qa_items: List[Dict[str, Any]] = []
-    try:
-        with open(qa_probe_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                try:
-                    qa_items.append(json.loads(line_str))
-                    if max_samples is not None and len(qa_items) >= max_samples:
-                        break
-                except json.JSONDecodeError:
-                    pass
-    except FileNotFoundError:
-        logger.error(f"QA probe file not found at {qa_probe_path}")
+    # 1. Load and validate QA items
+    qa_items, skipped_json_count = load_qa_items(qa_probe_path, max_samples)
+    if skipped_json_count > 0:
+        logger.warning(f"Skipped {skipped_json_count} malformed JSONL lines in QA probe file.")
 
     if not qa_items:
         logger.warning(f"No QA probe questions found at {qa_probe_path}")
-        return {"accuracy": 0.0, "correct": 0, "total": 0, "per_cluster_accuracy": {}, "failures": []}
+        return {
+            "accuracy": 0.0,
+            "correct": 0,
+            "total": 0,
+            "per_cluster_accuracy": {},
+            "failures": [],
+        }
 
+    # 2. Filter and validate items
+    valid_items = validate_items(qa_items)
+    if not valid_items:
+        logger.warning(f"No valid QA probe questions after filtering at {qa_probe_path}")
+        return {
+            "accuracy": 0.0,
+            "correct": 0,
+            "total": 0,
+            "per_cluster_accuracy": {},
+            "failures": [],
+        }
+
+    # Save training mode and set to eval
+    original_mode = model.training
     model.eval()
-    correct = 0
-    cluster_stats: Dict[str, Dict[str, int]] = {}
 
-    # Filter out malformed items first to make batching clean
-    valid_items = []
-    for item in qa_items:
-        question = item.get("question")
-        if "choices" in item and "answer_idx" in item and question is not None:
-            valid_items.append(item)
-        else:
-            logger.warning(
-                f"Skipping malformed or unsupported QA item (must be New format with 'choices' and 'answer_idx'): {item}"
+    try:
+        correct = 0
+        cluster_stats: Dict[str, Dict[str, int]] = {}
+        failures = []
+
+        # Process in batches
+        for b_idx in range(0, len(valid_items), batch_size):
+            batch_items = valid_items[b_idx : b_idx + batch_size]
+            prompts = []
+            choices_list = []
+            for item in batch_items:
+                prompts.append(f"Question: {item['question']}\nAnswer:")
+                choices_list.append(item["choices"])
+
+            predicted_indices = score_choices_by_logprob(
+                model,
+                tokenizer,
+                prompts,
+                choices_list,
+                device=device,
+                use_pmi=use_pmi,
+                use_length_norm=use_length_norm,
+                max_length=max_length,
             )
 
-    # Process in batches
-    failures = []
-    for b_idx in range(0, len(valid_items), batch_size):
-        batch_items = valid_items[b_idx : b_idx + batch_size]
-        prompts = []
-        choices_list = []
-        for item in batch_items:
-            prompts.append(f"Question: {item['question']}\nAnswer:")
-            choices_list.append(item["choices"])
+            for item, predicted in zip(batch_items, predicted_indices):
+                answer_idx = item["answer_idx"]
+                cluster = item.get("cluster", "unknown")
+                is_correct = int(predicted == answer_idx)
+                correct += is_correct
 
-        predicted_indices = score_choices_by_logprob(
-            model,
-            tokenizer,
-            prompts,
-            choices_list,
-            device=device,
-        )
+                if not is_correct:
+                    choices = item["choices"]
+                    failures.append({
+                        "question": item["question"],
+                        "choices": choices,
+                        "expected_idx": answer_idx,
+                        "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
+                        "predicted_idx": predicted,
+                        "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
+                        "cluster": cluster,
+                    })
 
-        for item, predicted in zip(batch_items, predicted_indices):
-            answer_idx = item["answer_idx"]
-            cluster = item.get("cluster", "unknown")
-            is_correct = int(predicted == answer_idx)
-            correct += is_correct
+                if cluster not in cluster_stats:
+                    cluster_stats[cluster] = {"correct": 0, "total": 0}
+                cluster_stats[cluster]["correct"] += is_correct
+                cluster_stats[cluster]["total"] += 1
 
-            if not is_correct:
-                choices = item["choices"]
-                failures.append({
-                    "question": item["question"],
-                    "choices": choices,
-                    "expected_idx": answer_idx,
-                    "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
-                    "predicted_idx": predicted,
-                    "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
-                    "cluster": cluster
-                })
+            processed_count = b_idx + len(batch_items)
+            if (b_idx // LOG_INTERVAL) < (processed_count // LOG_INTERVAL) or processed_count == len(valid_items):
+                running_acc = correct / processed_count
+                logger.debug(f"  QA probe: {processed_count}/{len(valid_items)} evaluated, running acc={running_acc:.3f}")
 
-            if cluster not in cluster_stats:
-                cluster_stats[cluster] = {"correct": 0, "total": 0}
-            cluster_stats[cluster]["correct"] += is_correct
-            cluster_stats[cluster]["total"] += 1
+        total = len(valid_items)
+        accuracy = correct / total if total > 0 else 0.0
 
-        processed_count = b_idx + len(batch_items)
-        if (b_idx // 100) < (processed_count // 100) or processed_count == len(valid_items):
-            running_acc = correct / processed_count
-            logger.debug(f"  QA probe: {processed_count}/{len(valid_items)} evaluated, running acc={running_acc:.3f}")
+        per_cluster = {
+            cluster: stats["correct"] / stats["total"]
+            for cluster, stats in cluster_stats.items()
+            if stats["total"] > 0
+        }
 
-    total = len(valid_items)
-    accuracy = correct / total if total > 0 else 0.0
+        logger.info(f"Probe 2 - QA probe: {accuracy:.4f} ({correct}/{total})")
 
-    per_cluster = {
-        cluster: stats["correct"] / stats["total"]
-        for cluster, stats in cluster_stats.items()
-        if stats["total"] > 0
-    }
+        return {
+            "accuracy": accuracy,
+            "correct": correct,
+            "total": total,
+            "per_cluster_accuracy": per_cluster,
+            "failures": failures,
+        }
 
-    logger.info(f"Probe A — QA Accuracy: {accuracy:.4f} ({correct}/{total})")
-
-    return {
-        "accuracy": accuracy,
-        "correct": correct,
-        "total": total,
-        "per_cluster_accuracy": per_cluster,
-        "failures": failures,
-    }
+    finally:
+        # Restore training mode if it was originally True
+        if original_mode:
+            model.train()
 
 
 def get_failed_qa_samples(
@@ -282,65 +544,68 @@ def get_failed_qa_samples(
     tokenizer,
     qa_probe_path: Path,
     device: str = "cuda",
+    max_samples: Optional[int] = None,
     batch_size: int = 32,
+    use_pmi: bool = True,
+    use_length_norm: bool = True,
+    max_length: int = 512,
 ) -> List[Dict[str, Any]]:
     """
-    Run Probe A and return a list of failed samples.
+    Run Probe 2 - QA probe and return a list of failed samples.
     """
-    qa_items: List[Dict[str, Any]] = []
-    try:
-        with open(qa_probe_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                try:
-                    qa_items.append(json.loads(line_str))
-                except json.JSONDecodeError:
-                    pass
-    except FileNotFoundError:
-        logger.error(f"QA probe file not found at {qa_probe_path}")
+    # 1. Load and validate QA items
+    qa_items, skipped_json_count = load_qa_items(qa_probe_path, max_samples)
+    if skipped_json_count > 0:
+        logger.warning(f"Skipped {skipped_json_count} malformed JSONL lines in QA probe file.")
+
+    if not qa_items:
         return []
 
+    valid_items = validate_items(qa_items)
+    if not valid_items:
+        return []
+
+    # Save training mode and set to eval
+    original_mode = model.training
     model.eval()
-    failures = []
 
-    valid_items = []
-    for item in qa_items:
-        question = item.get("question")
-        if "choices" in item and "answer_idx" in item and question is not None:
-            valid_items.append(item)
+    try:
+        failures = []
 
-    # Process in batches
-    for b_idx in range(0, len(valid_items), batch_size):
-        batch_items = valid_items[b_idx : b_idx + batch_size]
-        prompts = []
-        choices_list = []
-        for item in batch_items:
-            prompts.append(f"Question: {item['question']}\nAnswer:")
-            choices_list.append(item["choices"])
+        # Process in batches
+        for b_idx in range(0, len(valid_items), batch_size):
+            batch_items = valid_items[b_idx : b_idx + batch_size]
+            prompts = []
+            choices_list = []
+            for item in batch_items:
+                prompts.append(f"Question: {item['question']}\nAnswer:")
+                choices_list.append(item["choices"])
 
-        predicted_indices = score_choices_by_logprob(
-            model,
-            tokenizer,
-            prompts,
-            choices_list,
-            device=device,
-        )
+            predicted_indices = score_choices_by_logprob(
+                model,
+                tokenizer,
+                prompts,
+                choices_list,
+                device=device,
+                use_pmi=use_pmi,
+                use_length_norm=use_length_norm,
+                max_length=max_length,
+            )
 
-        for item, predicted in zip(batch_items, predicted_indices):
-            answer_idx = item["answer_idx"]
-            if predicted != answer_idx:
-                choices = item["choices"]
-                failures.append({
-                    "question": item["question"],
-                    "choices": choices,
-                    "expected_idx": answer_idx,
-                    "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
-                    "predicted_idx": predicted,
-                    "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
-                    "cluster": item.get("cluster", "unknown")
-                })
-    return failures
-
-
+            for item, predicted in zip(batch_items, predicted_indices):
+                answer_idx = item["answer_idx"]
+                if predicted != answer_idx:
+                    choices = item["choices"]
+                    failures.append({
+                        "question": item["question"],
+                        "choices": choices,
+                        "expected_idx": answer_idx,
+                        "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
+                        "predicted_idx": predicted,
+                        "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
+                        "cluster": item.get("cluster", "unknown")
+                    })
+        return failures
+    finally:
+        if original_mode:
+            model.train()

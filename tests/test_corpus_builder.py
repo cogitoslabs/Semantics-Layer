@@ -119,6 +119,7 @@ def test_corpus_builder_pipeline(mock_gpu_queue, mock_docling):
             from lib.utils.config import LoggingConfig
             cfg_build = CorpusBuildConfig(
                 output_path=Path(output_jsonl),
+                extracted_output_path=Path(output_jsonl),
                 available_gpus="0",
                 workers_per_gpu=1,
                 chunk_size=3

@@ -1,5 +1,94 @@
 # Change History
 
+## Status: Completed (Local Model Path Resolution)
+
+- Implemented local model directory path resolution in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) (`resolve_local_model_path`).
+- Configured both `ModelConfig` (`base_model_name`) and `ProbeConfig` (`bertscore_model`) to automatically resolve their values to absolute local directory paths if present under `models/` relative to the workspace root.
+- Dynamically handles exact matches, lowercase folder names (e.g. `smollm2-135m` matching `SmolLM2-135M`), and case-insensitive scanning of candidate directory names. Falls back to original Hugging Face repository names if the directories do not exist.
+- Added validation check to verify `config.json` exists inside the target local directory before resolving to it. This prevents resolving to incomplete local directories (such as folders containing only `pytorch_model.bin` and `vocab.txt` but lacking configuration metadata) and gracefully falls back to Hugging Face Hub, resolving Google Colab loading issues.
+- Patched `get_bertscorer` in [concept_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/concept_probe.py) to dynamically register the resolved local path in `bert_score.utils.model2layers`. This prevents a `KeyError` within the `bert_score` library when initializing `BERTScorer` with a local directory path instead of a hardcoded Hugging Face repository name.
+- Created comprehensive unit tests in [test_config.py](file:///e:/Projects/cnd/Semantics/tests/test_config.py) to verify exact, case-insensitive, direct path, and fallback resolution mechanisms.
+- Verified that all 77 unit and integration tests compile and run successfully.
+
+---
+
+## Status: Completed (DAPT Corpus Cleaning Enhancements)
+
+
+- Implemented standalone index and bibliography detection heuristics in [clean_text.py](file:///e:/Projects/cnd/Semantics/lib/utils/clean_text.py) (`is_standalone_index_or_bibliography`) using regular expressions mapping lists of page numbers, Roman numerals, and dense bibliography entries. Standalone index/bibliography chunks are skipped entirely during post-build cleaning.
+- Implemented inline references truncation in [clean_text.py](file:///e:/Projects/cnd/Semantics/lib/utils/clean_text.py) (`remove_inline_references`) to identify inline reference sections in PNS, Neuroscience, and Fundamentals textbooks and slice the text to retain only the preceding narrative portion.
+- Enhanced `clean_corpus_text` in [clean_text.py](file:///e:/Projects/cnd/Semantics/lib/utils/clean_text.py) to automatically HTML-unescape all text, strip `<!-- image -->` placeholders, and strip stray triple-backtick fences (` ``` `).
+- Exposed and exported the new cleaning functions in [__init__.py](file:///e:/Projects/cnd/Semantics/lib/utils/__init__.py).
+- Modified [clean_existing_corpus.py](file:///e:/Projects/cnd/Semantics/scripts/clean_existing_corpus.py) to integrate inline reference removal, unescaping, placeholder stripping, and standalone index/bibliography checking in its cleaning loop.
+- Added comprehensive unit tests in [test_clean_text.py](file:///e:/Projects/cnd/Semantics/tests/test_clean_text.py) to verify unescaping, placeholder stripping, inline reference slicing, and standalone index/bibliography classification.
+- Ran the cleaning script on the built corpus `domain_dapt_corpus.jsonl`, achieving a 22.13% token reduction (~1.09 million tokens) and verifying that no HTML entities, image placeholders, inline references, or standalone indexes/bibliographies remain in the final corpus.
+
+---
+
+## Status: Completed (DAPT Logging, Retrieval Probe Bugfix, and Performance Optimizations)
+
+- Fixed the missing evaluation scores in logs and stdout by setting up the parent loggers `"dapt"` and `"lib"` with output handlers in [logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py). Sub-loggers under `"dapt.*"` (like `"dapt.eval_runner"`, `"dapt.gates"`, etc.) and `"lib.*"` now properly propagate up and are captured.
+- Removed the newline `\n` stopping criterion from `generate_responses_batch` in [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py). This prevents the base model from stopping immediately at step 1 when it naturally prefixes its explanation with a newline/paragraph break, resolving the issue where retrieval precision was erroneously calculated as zero.
+- Suppressed `bert_score` warning spam about empty candidate/reference sentences by using a warnings filter inside `compute_bertscore_batch` in [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py).
+- Refactored `generate_responses_batch` in [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py#L141-L197) to use Hugging Face built-in batch tokenization, with a `try-except` fallback block to handle mock tokenizers in tests.
+- Optimized `compute_lexical_f1_batch` in [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py#L288-L314) by pre-tokenizing references upfront outside the candidate evaluation loop.
+- Reduced default `RET_PREC_MAX_NEW_TOKENS` from `100` to `50` in [.env.common](file:///e:/Projects/cnd/Semantics/.env.common) and [.env.example](file:///e:/Projects/cnd/Semantics/.env.example) to cut generation latency in half.
+- Optimized `score_choices_by_logprob` in [qa_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/qa_probe.py) by splitting conditional and unconditional sequences into separate forward passes, preventing short choice-only sequences from being padded to the length of long prompts and reducing computations by ~50%.
+- Added `SAVE_OPTIMIZER_STATE=False` config parameter to [.env.common](file:///e:/Projects/cnd/Semantics/.env.common), [.env.example](file:///e:/Projects/cnd/Semantics/.env.example), and [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py#L332-L336) and updated [checkpoint.py](file:///e:/Projects/cnd/Semantics/lib/utils/checkpoint.py) and [training_helpers.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/training_helpers.py) to skip saving the heavy (~1GB) AdamW optimizer state in intermediate evaluation checkpoints. This eliminates disk writing blocks and makes checkpoint saving almost instantaneous.
+- Optimized perplexity evaluation speed by reducing `PERPLEXITY_EVAL_TOKENS` from `10,000,000` to `200,000` in [.env.common](file:///e:/Projects/cnd/Semantics/.env.common) and [.env.example](file:///e:/Projects/cnd/Semantics/.env.example), decreasing the perplexity evaluation bottleneck from 140s to ~14s on CPU and under 2s on GPU.
+- Optimized tensor replication speed in [checkpoint.py](file:///e:/Projects/cnd/Semantics/lib/utils/checkpoint.py#L20-L30) by removing redundant `.clone()` operations, using `to("cpu", non_blocking=True)`, and skipping deep recursion for flat state dictionaries.
+- Verified that all 71 unit and integration tests compile and run successfully.
+
+---
+
+## Status: Completed (Graceful Empty Candidate Filtering in Retrieval Probe)
+
+- Resolved the console warning spam `Warning: Empty candidate sentence detected; setting raw BERTscores to 0.` by pre-filtering candidate responses in `compute_bertscore_batch` inside [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py). Empty/whitespace candidates are assigned a score of `0.0` directly without being passed to the SciBERT model.
+- Added unit test `test_compute_bertscore_batch_handles_empty_candidates` to [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py).
+- Verified that all 71 unit and integration tests compile and run successfully.
+
+---
+
+## Status: Completed (Google Colab BertTokenizer AttributeError Fix)
+
+- Resolved `AttributeError: BertTokenizer has no attribute build_inputs_with_special_tokens` that occurred on Google Colab with newer `transformers` versions by dynamically monkeypatching the missing method onto the tokenizer instance inside `_patched_tokenizer_context` in [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py).
+- Added unit test `test_patched_tokenizer_context_monkeypatches_special_tokens` to [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py).
+- Verified that all 70 unit and integration tests compile and run successfully.
+
+---
+
+## Status: Completed (Retrieval Probe Refinements & Caching)
+
+- Refactored [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py) stop words to only encode `"\n"`, avoiding multi-token split issues with `"\n\n"`.
+- Implemented global cache `_SCORER_CACHE` and helper `get_bertscorer` in [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py) to prevent reloading the SciBERT model checkpoint from disk across evaluations.
+- Enforced hard fail by raising `RuntimeError` immediately when BERTScore fails (with `use_bertscore=True`), avoiding silent propagation of dummy `0.5` scores to the training convergence gates.
+- Hoisted batch size shape mismatch and mock check assertions outside of the per-prompt loops in `generate_responses_batch`.
+- Decoupled circular/local imports by moving `clean_for_match` from [terminology_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/terminology_probe.py) into a new shared utility file [utils.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/utils.py).
+- Added type-safety check for mock tokenizers with `MagicMock.model_max_length` in unit tests when intercepting `from_pretrained` calls.
+- Verified that all 69 unit and integration tests compile and run successfully.
+
+---
+
+## Status: Completed (Per-Probe Configuration Refactoring)
+
+- Refactored [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) to declare individual configurations for max sequence length and batch sizes for each evaluation probe (perplexity, QA, terminology, and retrieval).
+- Refactored [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py), [qa_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/qa_probe.py), [terminology_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/terminology_probe.py), and [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py) to pass down and respect these individual config limits during evaluation.
+- Exposed and documented all new variables in [.env.common](file:///e:/Projects/cnd/Semantics/.env.common) and [.env.example](file:///e:/Projects/cnd/Semantics/.env.example).
+- Verified that all 69 unit and integration tests compile and run successfully.
+
+---
+
+## Status: Completed (Retrieval Probe Improvements)
+
+- Refactored [retrieval_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/retrieval_probe.py) to resolve silent fallback behavior on BERTScore errors, replaced the global monkeypatch with a scoped context manager, and eliminated duplicate text generation/evaluation.
+- Removed tokenizer pre-truncation, allowing SciBERT's tokenizer to natively handle boundaries.
+- Reused [clean_for_match](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/terminology_probe.py#L236) in `compute_lexical_f1_batch` for punctuation-robust token cleaning.
+- Enforced strict batch size mismatch validations and added double-newline stop criteria to prevent rambling.
+- Added unit test `test_retrieval_probe_lexical_f1_and_delegation` to [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py).
+- Verified that all 69 unit and integration tests compile and run successfully.
+
+---
+
 ## Status: Completed (Grouped and Restructured .env Files)
 
 - Reordered and grouped all environment variables across [.env.common](file:///e:/Projects/cnd/Semantics/.env.common), [.env.example](file:///e:/Projects/cnd/Semantics/.env.example), [.env.cpu](file:///e:/Projects/cnd/Semantics/.env.cpu), and [.env.gpu](file:///e:/Projects/cnd/Semantics/.env.gpu) to align exactly with the dataclass structures in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py).

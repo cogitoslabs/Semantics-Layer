@@ -25,7 +25,7 @@ def evaluate_perplexity(
     tokenizer.model_max_length = 100_000_000
 
     try:
-        with torch.no_grad():
+        with torch.inference_mode():
             for item in dataset:
                 text = item.get("text", "")
                 if not text.strip():
@@ -79,7 +79,7 @@ def evaluate_qa_accuracy(model: Any, tokenizer: Any, probe_questions: List[Dict[
     total = 0
     options = ["A", "B", "C", "D"]
     
-    with torch.no_grad():
+    with torch.inference_mode():
         for q in probe_questions:
             prompt = f"Question: {q['question']}\nAnswer:"
             inputs = tokenizer(prompt, return_tensors="pt")

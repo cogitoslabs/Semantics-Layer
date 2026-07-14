@@ -15,7 +15,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Prominent elevated areas or ridges on the brain \u2019 s surface ( \u201c gyrus \u201d is the singular) . ___",
+    "prompt": "Prominent elevated areas or ridges on the brain ’ s surface ( “ gyrus ” is the singular) . ___",
     "target_term": "Gyri",
     "category": "cognitive_psychology"
   },
@@ -50,23 +50,8 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A technique in which magnetic pulses briefly disrupt the functioning of a given brain area . It is often claimed that it creates a short - lived \u201c lesion \u201d . More accurately , TMS causes interference when the brain area to which it is applied is involved in task processing as well as activity produced by the applied stimulation . ___",
-    "target_term": "(TMS)",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "The administration of transcranial magnetic stimulation several times in rapid succession . ___",
-    "target_term": "(rTMS)",
-    "category": "cognitive_psychology"
-  },
-  {
     "prompt": "Structural alterations within the brain caused by disease or injury . ___",
     "target_term": "Lesions",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "Recording the brain \u2019 s electrical potentials through a series of scalp electrodes . ___",
-    "target_term": "(EEG)",
     "category": "cognitive_psychology"
   },
   {
@@ -80,18 +65,8 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A comprehensive framework for understanding human cognition in the form of a computer programs . ___",
-    "target_term": "architecture:",
-    "category": "cognitive_psychology"
-  },
-  {
     "prompt": "Models in computational cognitive science consisting of interconnected networks of simple units; the networks exhibit learning through experience and specific items of knowledge are distributed across numerous units . ___",
     "target_term": "models",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "- a production system that operates by matching the contents of working memory against the IF-parts of the rules and executing the THEN-parts; ___",
-    "target_term": "information;",
     "category": "cognitive_psychology"
   },
   {
@@ -125,7 +100,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An illusion in which misperception of one \u2019 s own bodily size causes the perceived size of objects to be misjudged . ___",
+    "prompt": "An illusion in which misperception of one ’ s own bodily size causes the perceived size of objects to be misjudged . ___",
     "target_term": "effect",
     "category": "cognitive_psychology"
   },
@@ -175,7 +150,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Neurons that respond to actions whether performed by oneself or someone else; it is claimed these neurons assist in imitating and understanding others \u2019 actions . ___",
+    "prompt": "Neurons that respond to actions whether performed by oneself or someone else; it is claimed these neurons assist in imitating and understanding others ’ actions . ___",
     "target_term": "system",
     "category": "cognitive_psychology"
   },
@@ -205,7 +180,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Suppose we present participants with two streams of lights (as was done by Eimer and Schr\u00f6ger (1998)) , with one stream of lights being presented to the left and the other to the right . At the same time , we also present participants with two streams of sounds (one to each side) . In one condition , participants detect deviant visual events (e . g . , longer than usual stimuli) presented to one side only . In the other condition , participants detect deviant auditory events in only one stream . ___",
+    "prompt": "Suppose we present participants with two streams of lights (as was done by Eimer and Schröger (1998)) , with one stream of lights being presented to the left and the other to the right . At the same time , we also present participants with two streams of sounds (one to each side) . In one condition , participants detect deviant visual events (e . g . , longer than usual stimuli) presented to one side only . In the other condition , participants detect deviant auditory events in only one stream . ___",
     "target_term": "attention",
     "category": "cognitive_psychology"
   },
@@ -250,12 +225,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "- pressing keys on a keypad in a clockwise fashion: this uses the visuo-spatial sketchpad; ___",
-    "target_term": "executive;",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "Rapid repetition of a simple sound (e . g . , \u201c the the the \u201d ) , w hich uses the articulatory control process of the phonological loop . ___",
+    "prompt": "Rapid repetition of a simple sound (e . g . , “ the the the ” ) , w hich uses the articulatory control process of the phonological loop . ___",
     "target_term": "suppression",
     "category": "cognitive_psychology"
   },
@@ -310,11 +280,6 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Eysenck (1979) pointed out that what we remember does not depend only on the informational overlap or match between information available at retrieval and stored information ___ The extent to which the retrieval information allows us to discriminate between the correct memory trace and incorrect ones is also important ___ These ideas are discussed more fully below ___",
-    "target_term": ".",
-    "category": "cognitive_psychology"
-  },
-  {
     "prompt": "A condition caused by brain damage in which there is severe impairment of long-term memory . ___",
     "target_term": "Amnesia",
     "category": "cognitive_psychology"
@@ -330,7 +295,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An exceptional ability to remember the events of one \u2019 s own life . ___",
+    "prompt": "An exceptional ability to remember the events of one ’ s own life . ___",
     "target_term": "syndrome",
     "category": "cognitive_psychology"
   },
@@ -370,16 +335,6 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "- 2 The professor read the newspaper during his break ___",
-    "target_term": ".",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "Our discussion of common ground here should be considered in conjunction with our coverage of the extent to which speakers typically use the common ground in Chapter 11 . It is important to note that use of common ground is not static . A major goal of conversation is to exchange information so that the common ground between those involved is increased and extended (Brown-Schmidt &amp; Heller , 2014) . ___",
-    "target_term": "|----|",
-    "category": "cognitive_psychology"
-  },
-  {
     "prompt": "A word (especially pronoun) whose referent is a previously mentioned noun or noun phrase . ___",
     "target_term": "Anaphor",
     "category": "cognitive_psychology"
@@ -390,7 +345,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The process of translating a word \u2019 s meaning into its sound representation during speech production . ___",
+    "prompt": "The process of translating a word ’ s meaning into its sound representation during speech production . ___",
     "target_term": "Lexicalisation",
     "category": "cognitive_psychology"
   },
@@ -440,11 +395,6 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "McCaffrey (2012) argued that crucial obscure features are ignored because people focus on the typical functions of objects based on their shape , size , material of which they made and so on ___ This functional fixedness can be reduced by the generic-parts technique: (1) function-free descriptions of each part of an object are produced; (2) people decide whether each description implies a use ___",
-    "target_term": ".",
-    "category": "cognitive_psychology"
-  },
-  {
     "prompt": "The tendency to use a familiar problem-solving strategy that has proved successful in the past even when it is not appropriate . ___",
     "target_term": "set",
     "category": "cognitive_psychology"
@@ -470,11 +420,6 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "- Form a subgoal to reduce the difference between the current and goal states ___",
-    "target_term": ".",
-    "category": "cognitive_psychology"
-  },
-  {
     "prompt": "A simple heuristic used by problem solvers in which they focus on making moves that will apparently put them closer to the goal . ___",
     "target_term": "climbing",
     "category": "cognitive_psychology"
@@ -492,21 +437,6 @@
   {
     "prompt": "This form of ___ involves the learner being provided with informative feedback and having the chance to correct his/her errors .",
     "target_term": "practice",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "- 1 The task is at an appropriate level of difficulty (not too easy or hard) . ___",
-    "target_term": "aspects:",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "- 3 The learner has adequate chances to repeat the task ___",
-    "target_term": ".",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "What exactly happens as a result of prolonged deliberate practice? According to Ericsson and Kintsch (1995) , experts can reduce the negative effects of having limited working memory capacity ___ They put forward the notion of long-term working memory ___ The crucial notion is that \" fast \u2026 transfer to LTM [long-term memory] becomes possible with expertise via knowledge structures , w hich enables LTM to be used during working memory tasks , thus giving the appearance of expanding individuals ' WM capacity \" (Guida et al ___ , 2013 , p ___ 1) ___",
-    "target_term": ".",
     "category": "cognitive_psychology"
   },
   {
@@ -545,7 +475,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Using one \u2019 s emotional responses to influence rapid judgements or decisions . ___",
+    "prompt": "Using one ’ s emotional responses to influence rapid judgements or decisions . ___",
     "target_term": "heuristic",
     "category": "cognitive_psychology"
   },
@@ -580,18 +510,8 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Alexander Graham Bell . Mondadori/Getty Images . ___",
-    "target_term": "SCIENTISTS",
-    "category": "cognitive_psychology"
-  },
-  {
     "prompt": "The tendency on the Wason selection task to select cards matching the items explicitly mentioned in the rule . ___",
     "target_term": "bias",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "The conclusion follows logically from the prem ises ___ Thus , it is valid regardless of your views about the obedience of children ___",
-    "target_term": ".",
     "category": "cognitive_psychology"
   },
   {
@@ -620,7 +540,7 @@
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Support for the \u201c do - it - yourself principle \u201d was obtained by Eich and Metcalfe (1989) . At learning , participants were assigned to read (e . g . , river - valley) or generate (e . g . , river - v \\_\\_\\_\\_ ) conditions . In the generate condition , they completed the second word in each pair during learning and so engaged in effortful processing . The mood - state - dependent effect was four times greater in the generate condition . ___",
+    "prompt": "Support for the “ do - it - yourself principle ” was obtained by Eich and Metcalfe (1989) . At learning , participants were assigned to read (e . g . , river - valley) or generate (e . g . , river - v \\_\\_\\_\\_ ) conditions . In the generate condition , they completed the second word in each pair during learning and so engaged in effortful processing . The mood - state - dependent effect was four times greater in the generate condition . ___",
     "target_term": "memory",
     "category": "cognitive_psychology"
   },
@@ -637,11 +557,6 @@
   {
     "prompt": "Judgements based on practical and pragmatic considerations when resolving moral dilemmas . ___",
     "target_term": "judgements",
-    "category": "cognitive_psychology"
-  },
-  {
-    "prompt": "- Attentional bias: selective attention to threat -related stimuli presented at the same time as neutral stimuli; this can involve rapid attentional engagement with threat stimuli and/or slow attentional disengagement . ___",
-    "target_term": "follows:",
     "category": "cognitive_psychology"
   },
   {

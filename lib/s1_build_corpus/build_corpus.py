@@ -32,7 +32,7 @@ class CorpusBuilder:
     ):
         self.name = "Docling"
         self.storage = storage
-        self.output_path = Path(cfg.output_path)
+        self.output_path = Path(cfg.extracted_output_path)
         self.gpu_ids = cfg.gpu_ids
         self.workers_per_gpu = cfg.workers_per_gpu
         self.total_workers = cfg.total_workers

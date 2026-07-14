@@ -18,7 +18,7 @@ class HallucinationDetector:
         
         # Load vocab cloze set terms
         self.vocab: Set[str] = set()
-        vocab_path = Path(cfg.data.vocab_cloze_path)
+        vocab_path = Path(cfg.data.cloze_set_path)
         if vocab_path.exists():
             try:
                 with open(vocab_path, "r", encoding="utf-8") as f:

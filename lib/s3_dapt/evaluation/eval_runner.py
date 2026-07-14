@@ -14,8 +14,8 @@ from typing import Any, Dict
 from lib.utils import DAPTConfig
 from lib.s3_dapt.probes.qa_probe         import eval_qa_accuracy
 from lib.s3_dapt.probes.perplexity_probe import eval_perplexity
-from lib.s3_dapt.probes.terminology_probe import eval_terminology_coverage
-from lib.s3_dapt.probes.retrieval_probe  import eval_retrieval_precision
+from lib.s3_dapt.probes.cloze_probe import eval_cloze_coverage
+from lib.s3_dapt.probes.concept_probe  import eval_concept_precision, clear_scorer_cache
 from lib.utils.logger import get_logger, MetricsWriter
 
 logger = get_logger("dapt.eval_runner")
@@ -44,46 +44,50 @@ def run_all_probes(
         f"Pass: {state['tokens_processed']/cfg.corpus.total_corpus_tokens:.3f}x | "
         f"Slow probes={run_slow_probes} (SciBERT={use_bertscore})\n"
         f"  Active probes: PPL={cfg.probes.run_perplexity}, QA={cfg.probes.run_qa}, "
-        f"Term={cfg.probes.run_terminology}, Ret={cfg.probes.run_retrieval}\n"
+        f"Cloze={cfg.probes.run_cloze}, Concept={cfg.probes.run_concept}\n"
         f"{'='*62}"
     )
 
-    # ── Probe B: Perplexity (cheapest — run first) ────────────────────────────
+    # ── Probe 1 - Perplexity probe ────────────────────────────────────────────
     if cfg.probes.run_perplexity:
-        logger.info("  Running Probe 1: Perplexity...")
+        logger.info("  Running Probe 1 - Perplexity probe...")
         t0 = time.time()
+        perplexity_max_seq_len = cfg.probes.perplexity_max_seq_len or cfg.model.max_seq_len
+        perplexity_batch_size = cfg.probes.perplexity_batch_size or cfg.optimizer.eval_batch_size
         ppl_result = eval_perplexity(
             model=model,
             tokenizer=tokenizer,
             ppl_corpus_path=cfg.data.ppl_corpus_path,
             max_tokens=cfg.probes.perplexity_eval_tokens,
-            seq_len=cfg.model.max_seq_len,
-            batch_size=cfg.optimizer.eval_batch_size,
+            seq_len=perplexity_max_seq_len,
+            batch_size=perplexity_batch_size,
             device=device,
         )
         ppl_elapsed = time.time() - t0
     else:
-        logger.info("  Skipping Probe 1: Perplexity (disabled)...")
+        logger.info("  Skipping Probe 1 - Perplexity probe (disabled)...")
         ppl_result = {
             "perplexity": 0.0,
             "avg_nll_nats": 0.0,
         }
         ppl_elapsed = 0.0
 
-    # ── Probe A: QA Accuracy ──────────────────────────────────────────────────
+    # ── Probe 2 - QA probe ────────────────────────────────────────────────────
     if cfg.probes.run_qa:
-        logger.info("  Running Probe 2: QA Accuracy...")
+        logger.info("  Running Probe 2 - QA probe...")
         t0 = time.time()
+        qa_batch_size = cfg.probes.qa_batch_size or cfg.optimizer.eval_batch_size
         qa_result = eval_qa_accuracy(
             model=model,
             tokenizer=tokenizer,
             qa_probe_path=cfg.data.qa_probe_path,
             device=device,
-            batch_size=cfg.optimizer.eval_batch_size,
+            batch_size=qa_batch_size,
+            max_length=cfg.probes.qa_max_seq_len,
         )
         qa_elapsed = time.time() - t0
     else:
-        logger.info("  Skipping Probe 2: QA Accuracy (disabled)...")
+        logger.info("  Skipping Probe 2 - QA probe (disabled)...")
         qa_result = {
             "accuracy": 0.0,
             "correct": 0,
@@ -92,61 +96,64 @@ def run_all_probes(
         }
         qa_elapsed = 0.0
 
-    # ── Probe C: Terminology Coverage ─────────────────────────────────────────
-    if cfg.probes.run_terminology:
+    # ── Probe 3 - Cloze probe ─────────────────────────────────────────────────
+    if cfg.probes.run_cloze:
         if run_slow_probes:
-            logger.info("  Running Probe 3: Terminology Coverage...")
+            logger.info("  Running Probe 3 - Cloze probe...")
             t0 = time.time()
-            term_result = eval_terminology_coverage(
+            term_result = eval_cloze_coverage(
                 model=model,
                 tokenizer=tokenizer,
-                vocab_cloze_path=cfg.data.vocab_cloze_path,
-                top_k=cfg.probes.term_cov_top_k,
-                max_new_tokens=cfg.probes.term_cov_max_new_tokens,
+                vocab_cloze_path=cfg.data.cloze_set_path,
+                top_k=cfg.probes.cloze_top_k,
+                max_new_tokens=cfg.probes.cloze_max_new_tokens,
                 device=device,
-                generation_batch_size=cfg.probes.term_cov_gen_batch_size,
+                generation_batch_size=cfg.probes.cloze_gen_batch_size,
+                max_length=cfg.probes.cloze_max_seq_len,
             )
             term_elapsed = time.time() - t0
         else:
-            logger.info("  Skipping Probe 3: Terminology Coverage (carrying forward last metric)...")
+            logger.info("  Skipping Probe 3 - Cloze probe (carrying forward last metric)...")
             term_result = {
-                "coverage": state["term_cov_history"][-1] if state.get("term_cov_history") else 0.0,
-                "per_category": state["eval_history"][-1].get("per_category_term", {}) if state.get("eval_history") else {},
+                "coverage": state["cloze_cov_history"][-1] if state.get("cloze_cov_history") else 0.0,
+                "per_category": state["eval_history"][-1].get("per_category_cloze", {}) if state.get("eval_history") else {},
             }
             term_elapsed = 0.0
     else:
-        logger.info("  Skipping Probe 3: Terminology Coverage (disabled)...")
+        logger.info("  Skipping Probe 3 - Cloze probe (disabled)...")
         term_result = {
             "coverage": 0.0,
             "per_category": {},
         }
         term_elapsed = 0.0
 
-    # ── Probe D: Retrieval Precision ──────────────────────────────────────────
-    if cfg.probes.run_retrieval:
+    # ── Probe 4 - Concept Probe ───────────────────────────────────────────────
+    if cfg.probes.run_concept:
         if run_slow_probes:
-            logger.info("  Running Probe 4: Retrieval Precision...")
+            logger.info("  Running Probe 4 - Concept Probe...")
             t0 = time.time()
-            ret_result = eval_retrieval_precision(
+            ret_result = eval_concept_precision(
                 model=model,
                 tokenizer=tokenizer,
-                retrieval_prompts_path=cfg.data.retrieval_prompts_path,
-                retrieval_references_path=cfg.data.retrieval_references_path,
+                retrieval_prompts_path=cfg.data.concept_prompts_path,
+                retrieval_references_path=cfg.data.concept_references_path,
                 bertscore_model=cfg.probes.bertscore_model,
-                max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
+                max_new_tokens=cfg.probes.concept_max_new_tokens,
                 device=device,
                 use_bertscore=use_bertscore,
-                generation_batch_size=cfg.probes.ret_prec_gen_batch_size,
+                generation_batch_size=cfg.probes.concept_gen_batch_size,
+                bertscore_batch_size=cfg.probes.concept_bertscore_batch_size,
+                max_length=cfg.probes.concept_max_seq_len,
             )
             ret_elapsed = time.time() - t0
         else:
-            logger.info("  Skipping Probe 4: Retrieval Precision (carrying forward last metric)...")
+            logger.info("  Skipping Probe 4 - Concept Probe (carrying forward last metric)...")
             ret_result = {
-                "precision": state["ret_prec_history"][-1] if state.get("ret_prec_history") else 0.0,
+                "precision": state["concept_prec_history"][-1] if state.get("concept_prec_history") else 0.0,
             }
             ret_elapsed = 0.0
     else:
-        logger.info("  Skipping Probe 4: Retrieval Precision (disabled)...")
+        logger.info("  Skipping Probe 4 - Concept Probe (disabled)...")
         ret_result = {
             "precision": 0.0,
         }
@@ -173,16 +180,16 @@ def run_all_probes(
             "qa_accuracy"       : qa_result["accuracy"],
             "qa_correct"        : qa_result["correct"],
             "qa_total"          : qa_result["total"],
-            "term_coverage"     : term_result["coverage"],
-            "retrieval_precision": ret_result["precision"],
+            "cloze_coverage"    : term_result["coverage"],
+            "concept_precision" : ret_result["precision"],
         },
         "per_cluster_qa"   : qa_result.get("per_cluster_accuracy", {}),
-        "per_category_term": term_result.get("per_category", {}),
+        "per_category_cloze": term_result.get("per_category", {}),
         "probe_elapsed_sec": {
             "perplexity"  : round(ppl_elapsed, 1),
             "qa"          : round(qa_elapsed, 1),
-            "terminology" : round(term_elapsed, 1),
-            "retrieval"   : round(ret_elapsed, 1),
+            "cloze"       : round(term_elapsed, 1),
+            "concept"     : round(ret_elapsed, 1),
             "total"       : round(total_elapsed, 1),
         },
     }
@@ -192,10 +199,10 @@ def run_all_probes(
         state["perplexity_history"].append(ppl_result["perplexity"])
     if cfg.probes.run_qa:
         state["qa_acc_history"].append(qa_result["accuracy"])
-    if cfg.probes.run_terminology:
-        state["term_cov_history"].append(term_result["coverage"])
-    if cfg.probes.run_retrieval:
-        state["ret_prec_history"].append(ret_result["precision"])
+    if cfg.probes.run_cloze:
+        state["cloze_cov_history"].append(term_result["coverage"])
+    if cfg.probes.run_concept:
+        state["concept_prec_history"].append(ret_result["precision"])
 
     # ── Write to JSONL ────────────────────────────────────────────────────────
     metrics_writer.write(metrics)
@@ -209,10 +216,10 @@ def run_all_probes(
                 log_data["eval/perplexity"] = float(ppl_result["perplexity"])
             if cfg.probes.run_qa:
                 log_data["eval/qa_accuracy"] = float(qa_result["accuracy"])
-            if cfg.probes.run_terminology:
-                log_data["eval/terminology_coverage"] = float(term_result["coverage"])
-            if cfg.probes.run_retrieval:
-                log_data["eval/retrieval_precision"] = float(ret_result["precision"])
+            if cfg.probes.run_cloze:
+                log_data["eval/cloze_coverage"] = float(term_result["coverage"])
+            if cfg.probes.run_concept:
+                log_data["eval/concept_precision"] = float(ret_result["precision"])
             log_data.update({
                 "eval/eval_count": int(state["eval_count"]),
                 "eval/tokens_processed": int(state["tokens_processed"]),
@@ -225,8 +232,8 @@ def run_all_probes(
         f"\n  Eval #{state['eval_count']} summary:\n"
         f"    PPL={ppl_result['perplexity']:.3f}  "
         f"QA={qa_result['accuracy']:.3f}  "
-        f"Term={term_result['coverage']:.3f}  "
-        f"Ret={ret_result['precision']:.3f}  "
+        f"Cloze={term_result['coverage']:.3f}  "
+        f"Concept={ret_result['precision']:.3f}  "
         f"(elapsed: {total_elapsed:.0f}s)\n"
     )
 
@@ -235,10 +242,10 @@ def run_all_probes(
         failed_runs = {}
         if cfg.probes.run_qa and "failures" in qa_result:
             failed_runs["qa"] = qa_result["failures"]
-        if cfg.probes.run_terminology and "failures" in term_result:
-            failed_runs["terminology"] = term_result["failures"]
-        if cfg.probes.run_retrieval and "failures" in ret_result:
-            failed_runs["retrieval"] = ret_result["failures"]
+        if cfg.probes.run_cloze and "failures" in term_result:
+            failed_runs["cloze"] = term_result["failures"]
+        if cfg.probes.run_concept and "failures" in ret_result:
+            failed_runs["concept"] = ret_result["failures"]
 
         failures_json_path = cfg.logging.log_dir / "failed_evals.json"
         try:
@@ -250,6 +257,9 @@ def run_all_probes(
             logger.info(f"Failed evaluations automatically saved to {failures_json_path}")
         except Exception as e:
             logger.error(f"Failed to write failed evaluations JSON file: {e}")
+
+    # Clear cached scorers to reclaim VRAM
+    clear_scorer_cache()
 
     return metrics
 
@@ -269,8 +279,8 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from lib.s3_dapt.probes.qa_probe import get_failed_qa_samples
-    from lib.s3_dapt.probes.terminology_probe import get_failed_terminology_samples
-    from lib.s3_dapt.probes.retrieval_probe import get_failed_retrieval_samples
+    from lib.s3_dapt.probes.cloze_probe import get_failed_cloze_samples
+    from lib.s3_dapt.probes.concept_probe import get_failed_concept_samples
 
     model_dir = cfg.model.checkpoint_dir
     if not model_dir.exists():
@@ -307,12 +317,14 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
     if cfg.probes.run_qa:
         logger.info("Running QA probe to collect failed samples...")
         try:
+            qa_batch_size = cfg.probes.qa_batch_size or cfg.optimizer.eval_batch_size
             qa_failures = get_failed_qa_samples(
                 model=model,
                 tokenizer=tokenizer,
                 qa_probe_path=cfg.data.qa_probe_path,
                 device=str(device),
-                batch_size=cfg.optimizer.eval_batch_size,
+                batch_size=qa_batch_size,
+                max_length=cfg.probes.qa_max_seq_len,
             )
             failed_runs["qa"] = qa_failures
             logger.info(f"QA Probe: {len(qa_failures)} failures found.")
@@ -326,59 +338,62 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
         except Exception as e:
             logger.error(f"Error during QA probe failure logging: {e}")
 
-    # 2. Terminology Probe Failures
-    if cfg.probes.run_terminology:
-        logger.info("Running Terminology probe to collect failed samples...")
+    # 2. Cloze Probe Failures
+    if cfg.probes.run_cloze:
+        logger.info("Running Cloze probe to collect failed samples...")
         try:
-            term_failures = get_failed_terminology_samples(
+            term_failures = get_failed_cloze_samples(
                 model=model,
                 tokenizer=tokenizer,
-                vocab_cloze_path=cfg.data.vocab_cloze_path,
-                top_k=cfg.probes.term_cov_top_k,
-                max_new_tokens=cfg.probes.term_cov_max_new_tokens,
+                vocab_cloze_path=cfg.data.cloze_set_path,
+                top_k=cfg.probes.cloze_top_k,
+                max_new_tokens=cfg.probes.cloze_max_new_tokens,
                 device=str(device),
-                generation_batch_size=cfg.probes.term_cov_gen_batch_size
+                generation_batch_size=cfg.probes.cloze_gen_batch_size,
+                max_length=cfg.probes.cloze_max_seq_len,
             )
-            failed_runs["terminology"] = term_failures
-            logger.info(f"Terminology Probe: {len(term_failures)} failures found.")
+            failed_runs["cloze"] = term_failures
+            logger.info(f"Cloze Probe: {len(term_failures)} failures found.")
             for idx, failure in enumerate(term_failures):
                 logger.warning(
-                    f"Terminology Failure #{idx+1} [Category: {failure['category']}]:\n"
+                    f"Cloze Failure #{idx+1} [Category: {failure['category']}]:\n"
                     f"  Prompt: {failure['prompt']}\n"
                     f"  Target Term: {failure['target_term']}\n"
                     f"  Completions: {failure['generated_completions']}"
                 )
         except Exception as e:
-            logger.error(f"Error during Terminology probe failure logging: {e}")
+            logger.error(f"Error during Cloze probe failure logging: {e}")
 
-    # 3. Retrieval Probe Failures
-    if cfg.probes.run_retrieval:
-        logger.info("Running Retrieval probe to collect failed samples...")
+    # 3. Concept Probe Failures
+    if cfg.probes.run_concept:
+        logger.info("Running Concept probe to collect failed samples...")
         try:
             # We pass use_bertscore=True because it's the final high-fidelity evaluation
-            ret_failures = get_failed_retrieval_samples(
+            ret_failures = get_failed_concept_samples(
                 model=model,
                 tokenizer=tokenizer,
-                retrieval_prompts_path=cfg.data.retrieval_prompts_path,
-                retrieval_references_path=cfg.data.retrieval_references_path,
+                retrieval_prompts_path=cfg.data.concept_prompts_path,
+                retrieval_references_path=cfg.data.concept_references_path,
                 bertscore_model=cfg.probes.bertscore_model,
-                max_new_tokens=cfg.probes.ret_prec_max_new_tokens,
+                max_new_tokens=cfg.probes.concept_max_new_tokens,
                 device=str(device),
                 use_bertscore=True,
-                generation_batch_size=cfg.probes.ret_prec_gen_batch_size,
-                failure_threshold=cfg.gates.ret_prec_threshold
+                generation_batch_size=cfg.probes.concept_gen_batch_size,
+                bertscore_batch_size=cfg.probes.concept_bertscore_batch_size,
+                max_length=cfg.probes.concept_max_seq_len,
+                failure_threshold=cfg.gates.concept_threshold
             )
-            failed_runs["retrieval"] = ret_failures
-            logger.info(f"Retrieval Probe: {len(ret_failures)} failures found.")
+            failed_runs["concept"] = ret_failures
+            logger.info(f"Concept Probe: {len(ret_failures)} failures found.")
             for idx, failure in enumerate(ret_failures):
                 logger.warning(
-                    f"Retrieval Failure #{idx+1} [F1 Score: {failure['score']:.4f}]:\n"
+                    f"Concept Failure #{idx+1} [F1 Score: {failure['score']:.4f}]:\n"
                     f"  Prompt: {failure['prompt']}\n"
                     f"  Reference: {failure['reference']}\n"
                     f"  Generated: {failure['generated']}"
                 )
         except Exception as e:
-            logger.error(f"Error during Retrieval probe failure logging: {e}")
+            logger.error(f"Error during Concept probe failure logging: {e}")
 
     # Save to file
     failures_json_path = cfg.logging.log_dir / "failed_evals.json"

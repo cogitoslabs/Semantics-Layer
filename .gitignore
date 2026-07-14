@@ -30,7 +30,8 @@ data/clustering/embeddings.npy
 runpod/project_backup.zip
 
 # Large PDFs
-data/raw/Principles of Neural Science.pdf
+data/raw/*.pdf
+data/rawrepo/*.pdf
 
 
 

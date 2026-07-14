@@ -1,5 +1,5 @@
 """
-probes/perplexity_probe.py — Probe B: Held-Out Perplexity
+probes/perplexity_probe.py — Probe 1 - Perplexity probe
 """
 
 import contextlib
@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Iterator
 
+import os
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -24,17 +26,15 @@ def token_batch_iter(
     Yields non-overlapping sliding-window batches from a flat token list.
     Each batch has input_ids and labels (labels = input_ids shifted by 1).
     """
-    total = len(token_ids)
-    stride = seq_len
+    chunk_size = seq_len + 1
+    total_seqs = len(token_ids) // chunk_size
 
-    for start in range(0, total - seq_len, stride * batch_size):
+    for i in range(0, total_seqs, batch_size):
         batch_inputs = []
-        for b in range(batch_size):
-            seg_start = start + b * stride
-            seg_end   = seg_start + seq_len + 1
-            if seg_end > total:
-                break
-            batch_inputs.append(token_ids[seg_start:seg_end])
+        for j in range(i, min(i + batch_size, total_seqs)):
+            start_idx = j * chunk_size
+            seq = token_ids[start_idx : start_idx + chunk_size]
+            batch_inputs.append(seq)
 
         if not batch_inputs:
             break
@@ -55,27 +55,15 @@ def load_ppl_corpus(
     seq_len: int,
 ) -> List[int]:
     """
-    Load and tokenize the held-out perplexity corpus.
+    Load the pre-tokenized held-out perplexity corpus.
     """
-    logger.info(f"Loading PPL corpus from: {ppl_corpus_path} (max {max_tokens/1e6:.1f}M tokens)")
+    logger.info(f"Loading pre-tokenized PPL corpus from: {ppl_corpus_path} (max {max_tokens/1e6:.1f}M tokens)")
 
-    token_ids = []
-    # Temporarily set model_max_length to prevent warnings on large lines/documents
-    orig_max_len = getattr(tokenizer, "model_max_length", None)
-    tokenizer.model_max_length = 100_000_000
+    if not os.path.exists(ppl_corpus_path):
+        raise FileNotFoundError(f"Pre-tokenized perplexity corpus not found at: {ppl_corpus_path}")
 
-    try:
-        with open(ppl_corpus_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                tokens = tokenizer.encode(line, add_special_tokens=False)
-                token_ids.extend(tokens)
-                if len(token_ids) >= max_tokens:
-                    break
-    finally:
-        if orig_max_len is not None:
-            tokenizer.model_max_length = orig_max_len
+    # Load from NumPy array directly
+    token_ids = np.load(ppl_corpus_path).tolist()
 
     if len(token_ids) > max_tokens:
         logger.info(
@@ -86,8 +74,11 @@ def load_ppl_corpus(
     usable = (len(token_ids) // (seq_len + 1)) * (seq_len + 1)
     token_ids = token_ids[:usable]
 
-    logger.info(f"PPL corpus ready: {len(token_ids)/1e6:.2f}M tokens, {usable // seq_len} sequences")
+    logger.info(f"PPL corpus ready: {len(token_ids)/1e3:.2f}K tokens, {usable // seq_len} sequences")
     return token_ids
+
+
+_tensor_cache: Dict[str, torch.Tensor] = {}
 
 
 def eval_perplexity(
@@ -101,13 +92,25 @@ def eval_perplexity(
     _token_cache: Dict[str, List[int]] = {},
 ) -> Dict[str, Any]:
     """
-    Run Probe B and return perplexity on the held-out corpus.
+    Run Probe 1 - Perplexity probe and return perplexity on the held-out corpus.
     """
     cache_key = str(ppl_corpus_path)
     if cache_key not in _token_cache:
         _token_cache[cache_key] = load_ppl_corpus(ppl_corpus_path, tokenizer, max_tokens, seq_len)
 
     token_ids = _token_cache[cache_key]
+
+    # Build a 2D CPU tensor once per corpus, then copy to target device and cache it
+    cache_key_dev = f"{cache_key}_{device}"
+    if cache_key_dev not in _tensor_cache:
+        if cache_key not in _tensor_cache:
+            n_seqs = len(token_ids) // (seq_len + 1)
+            usable = n_seqs * (seq_len + 1)
+            _tensor_cache[cache_key] = torch.tensor(
+                token_ids[:usable], dtype=torch.long
+            ).view(n_seqs, seq_len + 1)
+        _tensor_cache[cache_key_dev] = _tensor_cache[cache_key].to(device)
+    seqs_2d = _tensor_cache[cache_key_dev]  # shape: (N, seq_len+1)
 
     model.eval()
     total_nll   = 0.0
@@ -123,19 +126,21 @@ def eval_perplexity(
 
     autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=model_dtype) if is_cuda and hasattr(torch, "amp") else contextlib.nullcontext()
 
-    with torch.no_grad():
+    n_seqs = seqs_2d.shape[0]
+    with torch.inference_mode():
         with autocast_ctx:
-            for batch in token_batch_iter(token_ids, seq_len=seq_len, batch_size=batch_size):
-                input_ids = batch["input_ids"].to(device)
-                labels    = batch["labels"].to(device)
+            for start in range(0, n_seqs - batch_size + 1, batch_size):
+                chunk = seqs_2d[start : start + batch_size]  # (B, seq_len+1)
+                input_ids = chunk[:, :-1]
+                labels    = chunk[:, 1:]
 
                 outputs = model(input_ids=input_ids)
                 logits  = outputs.logits
 
                 B, T, V = logits.shape
                 loss = F.cross_entropy(
-                    logits.view(B * T, V),
-                    labels.view(B * T),
+                    logits.reshape(B * T, V),
+                    labels.reshape(B * T),
                     reduction="sum",
                 )
                 total_nll    += loss.item()
@@ -149,7 +154,7 @@ def eval_perplexity(
     avg_nll = total_nll / total_tokens if total_tokens > 0 else float("inf")
     ppl     = math.exp(avg_nll)
 
-    logger.info(f"Probe B — Perplexity: {ppl:.4f}  (NLL: {avg_nll:.4f} nats, tokens: {total_tokens})")
+    logger.info(f"Probe 1 - Perplexity probe: {ppl:.4f}  (NLL: {avg_nll:.4f} nats, tokens: {total_tokens})")
 
     return {
         "perplexity"   : ppl,

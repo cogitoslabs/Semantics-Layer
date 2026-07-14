@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
-from lib.utils import clean_corpus_text
+from lib.utils import clean_corpus_text, remove_inline_references, is_standalone_index_or_bibliography
 from lib.s1_build_corpus.worker import MIN_CONTENT_LENGTH
 
 
@@ -45,14 +45,23 @@ def main():
                     
                     doc = json.loads(line)
                     text = doc.get("text", "")
+                    source_file = doc.get("source_file", "")
                     orig_token_count = doc.get("token_count", 0)
                     orig_total_tokens += orig_token_count
                     
-                    # Clean the text
+                    # 1. Truncate inline references for target textbooks
+                    text = remove_inline_references(text, source_file)
+                    
+                    # 2. Clean text (handles HTML unescape, strip image, strip fences, metadata and page number lines)
                     cleaned_text = clean_corpus_text(text)
                     
+                    # 3. Check for standalone index or bibliography chunks
+                    if is_standalone_index_or_bibliography(cleaned_text, source_file):
+                        skipped_docs += 1
+                        continue
+                        
                     # If content is too short after cleaning, skip it
-                    if not cleaned_text or len(cleaned_text.strip()) < MIN_CONTENT_LENGTH:
+                    if not cleaned_text.strip() or len(cleaned_text.strip()) < MIN_CONTENT_LENGTH:
                         skipped_docs += 1
                         continue
                         
@@ -71,6 +80,17 @@ def main():
             corpus_path.unlink()
         temp_path.rename(corpus_path)
         
+        # Clean the perplexity held-out corpus in-place if it exists
+        ppl_path = ROOT_DIR / "evals" / "dapt" / "ppl_held_out.txt"
+        if ppl_path.exists():
+            print(f"Cleaning perplexity held-out corpus at: {ppl_path}")
+            with open(ppl_path, "r", encoding="utf-8") as f:
+                ppl_content = f.read()
+            cleaned_ppl = clean_corpus_text(ppl_content)
+            with open(ppl_path, "w", encoding="utf-8") as f:
+                f.write(cleaned_ppl)
+            print("Perplexity held-out corpus cleaned successfully!")
+            
         print("\n" + "=" * 50)
         print("Corpus Cleaning Completed Successfully!")
         print("=" * 50)

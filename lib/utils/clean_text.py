@@ -60,6 +60,94 @@ METADATA_PATTERNS = [
 PAGE_NUM_LINE_PATTERN = re.compile(r'^\s*([ivxldcmIVXLDCM]+|\d+|\w\s+\w)\s*$')
 
 
+import html
+
+# Index line pattern: comma followed by page number list at the end of the line
+INDEX_LINE_PAT = re.compile(
+    r',\s*(?:[ivxldcm]+|\d{1,4}[ftb]?)(?:\s*[-–]\s*(?:[ivxldcm]+|\d{1,4}[ftb]?))?'
+    r'(?:\s*,\s*(?:[ivxldcm]+|\d{1,4}[ftb]?)(?:\s*[-–]\s*(?:[ivxldcm]+|\d{1,4}[ftb]?))?)*\s*(?:\||\.?)?$',
+    re.I
+)
+
+# Year pattern: e.g. 1999 or 2011
+YEAR_PAT = re.compile(r'\b(19|20)\d{2}\b')
+
+# Bibliography keywords
+BIB_KEYWORDS = re.compile(r'\b(press|journal|pp\.|ed\.|eds\.|vol\.|university|publisher|proceedings|symposium|monograph|encyclopedia|in:)\b', re.I)
+
+# Author name prefix pattern: e.g., "Sanes, J. R." or "Sanes JR"
+AUTHOR_PREFIX_PAT = re.compile(r'^(?:[-\s*•]*)\s*[A-Z][a-zA-Z\s]+,\s+[A-Z](?:\.[A-Z])*(?:\s*,\s*|and\s+)?', re.I)
+
+# Inline reference headings pattern
+INLINE_REF_HEADINGS = re.compile(
+    r'^#+\s+(?:References|Selected Readings?|Suggested Readings?|Further Readings?|Bibliography)\b.*$',
+    re.I | re.M
+)
+
+def is_target_references_book(source_file: str) -> bool:
+    if not source_file:
+        return False
+    lower_name = source_file.lower()
+    return any(name in lower_name for name in [
+        "principles of neural science",
+        "neuroscience exploring",
+        "fundamentals of cognitive neuroscience"
+    ])
+
+def remove_inline_references(text: str, source_file: str) -> str:
+    if not text:
+        return ""
+    if is_target_references_book(source_file):
+        match = INLINE_REF_HEADINGS.search(text)
+        if match:
+            # Keep only narrative before the heading
+            return text[:match.start()].strip()
+    return text
+
+def is_standalone_index_or_bibliography(text: str, source_file: str) -> bool:
+    if not text:
+        return True
+        
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    if not lines:
+        return True
+        
+    # Check if first few lines have clear Index or Bibliography headings
+    first_few = [l for l in lines[:5]]
+    is_index_heading = any(re.search(r'^#+\s+(index|subject index|author index|i\s+n\s+d\s+e\s+x)', l, re.I) for l in first_few)
+    is_bib_heading = any(re.search(r'^#+\s+(bibliography|references|selected reading|further reading|suggested reading)', l, re.I) for l in first_few)
+    
+    # Page numbers lines pattern (lines that are just page numbers or roman numerals)
+    page_num_lines = sum(1 for l in lines if re.match(r'^\s*([ivxldcm]+|\d+|\w\s+\w)\s*$', l, re.I))
+    
+    index_matches = sum(1 for l in lines if INDEX_LINE_PAT.search(l))
+    year_matches = sum(1 for l in lines if YEAR_PAT.search(l))
+    bib_key_matches = sum(1 for l in lines if BIB_KEYWORDS.search(l))
+    author_matches = sum(1 for l in lines if AUTHOR_PREFIX_PAT.match(l))
+    
+    n_lines = len(lines)
+    index_ratio = index_matches / n_lines
+    year_ratio = year_matches / n_lines
+    bib_key_ratio = bib_key_matches / n_lines
+    author_ratio = author_matches / n_lines
+    page_num_ratio = page_num_lines / n_lines
+    
+    if is_index_heading:
+        return True
+    if is_bib_heading and n_lines < 15: # if it has the heading but is short, it's probably standalone
+        return True
+        
+    # If a high percentage of lines are index lines
+    if index_ratio > 0.45 or (index_ratio > 0.3 and page_num_ratio > 0.15):
+        return True
+        
+    # If a high percentage of lines contain citations
+    # Bibliography chunks often have high year ratio and bib keyword ratio
+    if (year_ratio > 0.4 and bib_key_ratio > 0.3) or (author_ratio > 0.3 and year_ratio > 0.4):
+        return True
+        
+    return False
+
 def clean_corpus_text(text: str) -> str:
     """
     Clean page layout noise, print proof timestamps, InDesign metadata,
@@ -68,19 +156,28 @@ def clean_corpus_text(text: str) -> str:
     if not text:
         return ""
         
+    # 1. HTML unescape
+    text = html.unescape(text)
+    
+    # 2. Strip <!-- image --> placeholders
+    text = re.sub(r'<!--\s*image\s*-->', '', text, flags=re.I)
+    
+    # 3. Strip stray triple backtick fences
+    text = re.sub(r'^\s*```\w*\s*$', '', text, flags=re.M)
+    
     lines = text.split('\n')
     cleaned_lines = []
     
     for line in lines:
         stripped = line.strip()
-        # 1. Skip lines matching metadata patterns
+        # 4. Skip lines matching metadata patterns
         if any(pat.search(stripped) for pat in METADATA_PATTERNS):
             continue
-        # 2. Skip lines that are just page numbers or roman numerals
+        # 5. Skip lines that are just page numbers or roman numerals
         if PAGE_NUM_LINE_PATTERN.match(stripped):
             continue
             
-        # 3. Apply ligature and split word repairs
+        # 6. Apply ligature and split word repairs
         cleaned_line = line
         for pat, repl in LIGATURE_RULES:
             cleaned_line = pat.sub(repl, cleaned_line)

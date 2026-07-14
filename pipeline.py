@@ -2,7 +2,7 @@ import sys
 import time
 import argparse
 
-from lib.s1_build_corpus import run_corpus_builder
+from lib.s1_build_corpus import run_corpus_builder, run_replay_corpus, run_merge_corpus
 from lib.s2_pretokenize import run_pretokenization
 from lib.s3_dapt import run_dapt_pipeline
 from lib.s3_dapt.evaluation.eval_runner import run_inference_and_log_failures
@@ -38,6 +38,10 @@ if __name__ == "__main__":
     if args.step == "s1" or args.step == "all":
         print("Initializing corpus building pipeline using Docling parser")
         run_corpus_builder(cfg)
+        print("Fetching general web corpus replay data...")
+        run_replay_corpus(cfg)
+        print("Merging extracted and replay corpora...")
+        run_merge_corpus(cfg)
     if args.step == "s2" or args.step == "all":
         print("Initializing offline pre-tokenization step")
         run_pretokenization(cfg)

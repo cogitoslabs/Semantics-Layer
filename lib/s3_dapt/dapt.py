@@ -1,4 +1,6 @@
+from scipy._lib.array_api_compat.common import device
 import os
+import sys
 import gc
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,38 +46,36 @@ def run_dapt_pipeline(cfg: DAPTConfig) -> None:
                     pass
 
 
-def _run_dapt_pipeline_impl(
-    cfg: DAPTConfig,
-    resources: Optional[Dict[str, Any]] = None
-) -> None:
-
-    output_dir = str(cfg.model.checkpoint_dir)
-
-    # Set up logger
-    import sys
+def _init_logging_and_device(cfg: DAPTConfig) -> torch.device:
     setup_logger(
-        f"{__name__}.{sys._getframe().f_code.co_name}",
+        f"lib.s3_dapt.dapt._run_dapt_pipeline_impl",
         cfg.logging,
     )
     global logger
-    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
+    logger = get_logger(f"lib.s3_dapt.dapt._run_dapt_pipeline_impl")
+
+    # Dynamically detect corpus tokens from the pre-tokenized training array if it exists
+    bin_path = cfg.data.pretokenized_bin_path
+    if bin_path and bin_path.exists():
+        try:
+            tokens_len = len(np.load(bin_path, mmap_mode='r'))
+            cfg.corpus.total_corpus_tokens = tokens_len
+            logger.info(f"Dynamically set total_corpus_tokens to {tokens_len:,} based on pretokenized binary size.")
+        except Exception as e:
+            logger.warning(f"Could not load pretokenized bin size dynamically: {e}")
 
     logger.info(cfg.summary())
 
-    # Device config
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
+    return device
 
-    # Set up training environment (seeds, wandb init)
-    setup_training_environment(cfg, device)
 
-    # Load model & tokenizer
-    model, tokenizer = load_model_and_tokenizer(cfg, device)
-
-    # Check that all required evaluation files exist
-    verify_eval_files(cfg)
-
-    # 3. Load pre-tokenized training dataset using mmap
+def _load_dataloader(
+    cfg: DAPTConfig,
+    device: torch.device,
+    resources: Optional[Dict[str, Any]]
+) -> DataLoader:
     logger.info(f"Loading memory-mapped training tokens from {cfg.data.pretokenized_bin_path}")
     if not cfg.data.pretokenized_bin_path.exists():
         raise FileNotFoundError(
@@ -83,7 +83,6 @@ def _run_dapt_pipeline_impl(
             "Please run step 1.5 (pre-tokenization) first."
         )
     
-    # Load using mmap_mode='r' to map file on disk
     mmapped_tokens = np.load(cfg.data.pretokenized_bin_path, mmap_mode='r')
     if resources is not None:
         resources["mmapped_tokens"] = mmapped_tokens
@@ -91,9 +90,13 @@ def _run_dapt_pipeline_impl(
     dataset = MemmapDataset(mmapped_tokens, block_size=cfg.model.max_seq_len)
     logger.info(f"Loaded {len(dataset):,} training blocks of size {cfg.model.max_seq_len}.")
 
-    num_workers = 4 if device.type == "cuda" else 0
+    in_colab = "google.colab" in sys.modules
+    num_cpus = os.cpu_count() or 1
+    # Colab's Drive-backed mmap + forked workers causes contention; local runs benefit from workers
+    num_workers = 0 if (device.type != "cuda" or in_colab) else max(1, num_cpus - 2)
 
-    train_dataloader = DataLoader(
+
+    return DataLoader(
         dataset,
         batch_size=cfg.optimizer.train_batch_size,
         shuffle=True,
@@ -102,28 +105,8 @@ def _run_dapt_pipeline_impl(
         drop_last=True,
     )
 
-    # Build Optimizer & Scheduler
-    optimizer, scheduler = init_optimizer_scheduler(cfg, model, len(train_dataloader))
 
-    # Initialize State
-    state = {
-        "tokens_processed" : 0,
-        "last_eval_at"     : 0,
-        "eval_count"       : 0,
-        "perplexity_history" : [],
-        "qa_acc_history"     : [],
-        "term_cov_history"   : [],
-        "ret_prec_history"   : [],
-        "eval_history"       : [],
-        "convergence_met"  : False,
-        "last_checkpoint"  : None,
-        "steps_completed"  : 0,
-    }
-
-    metrics_writer = MetricsWriter(cfg.logging.metrics_log_file)
-    last_checkpoint_path_ref = [None]
-
-    # Mixed precision / autocast context setup
+def _setup_mixed_precision(device: torch.device) -> Tuple[Any, Any]:
     use_cuda = (device.type == "cuda")
     scaler = None
     if use_cuda:
@@ -136,174 +119,293 @@ def _run_dapt_pipeline_impl(
             def __enter__(self): pass
             def __exit__(self, exc_type, exc_val, exc_tb): pass
         autocast_ctx = DummyCtx()
+    return scaler, autocast_ctx
 
-    def count_tokens(b) -> int:
-        if "attention_mask" in b:
-            return int(b["attention_mask"].sum().item())
-        return int(b["input_ids"].numel())
 
-    # 4. Run baseline evaluation on the unmodified base model
-    logger.info("Running baseline evaluation on the base model...")
-    state["eval_count"] += 1
-    state["last_eval_at"] = 0
-    state["last_slow_eval_at"] = 0
-    metrics = run_all_probes(
-        model=model,
-        tokenizer=tokenizer,
-        cfg=cfg,
-        state=state,
-        metrics_writer=metrics_writer,
-        device=str(device),
-        run_slow_probes=True,
-        use_bertscore=True,
-    )
-    state["eval_history"].append(metrics)
+def _count_tokens(batch: Dict[str, torch.Tensor]) -> int:
+    if "attention_mask" in batch:
+        return int(batch["attention_mask"].sum().item())
+    return int(batch["input_ids"].numel())
 
-    # Free up memory used by baseline evaluation (SciBERT / BERTScore, generation cache)
+
+def clear_gpu_cache() -> None:
+    """Clear Python garbage collector and PyTorch CUDA cache to recover memory."""
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # 5. Training loop
-    model.train()
-    logger.info("Starting pretraining loop...")
-    optimizer.zero_grad()
-    step = 0
-    for epoch in range(cfg.corpus.max_corpus_passes):
-        logger.info(f"\n{'#'*60}\n  Corpus pass {epoch + 1}/{cfg.corpus.max_corpus_passes}\n{'#'*60}")
 
-        for batch in train_dataloader:
-            # Check hard cap
-            if state["tokens_processed"] >= cfg.corpus.hard_stop_tokens:
-                logger.warning("Hard cap token count reached inside epoch loop. Breaking.")
-                break
-
-            # Forward & Backward pass
-            input_ids = batch["input_ids"].to(device)
-            labels = batch["labels"].to(device)
-            attention_mask = batch.get("attention_mask", None)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
-
-            with autocast_ctx:
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    labels=labels,
-                )
-                loss = outputs.loss / cfg.optimizer.gradient_accumulation_steps
-
-            if scaler is not None:
-                scaler.scale(loss).backward()
-            else:
-                loss.backward()
-
-            # Increment tokens processed
-            batch_tokens = count_tokens(batch)
-            state["tokens_processed"] += batch_tokens
-
-            # Step optimizer & scheduler after accumulating gradients
-            if (step + 1) % cfg.optimizer.gradient_accumulation_steps == 0:
-                if scaler is not None:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optimizer.max_grad_norm)
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optimizer.max_grad_norm)
-                    optimizer.step()
-
-                scheduler.step()
-                optimizer.zero_grad()
-
-            step += 1
-            state["steps_completed"] = step
-
-            # Log to WandB at step intervals
-            if cfg.wandb.enabled and state["steps_completed"] % cfg.wandb.log_interval_steps == 0:
-                try:
-                    import wandb
-                    current_lr = optimizer.param_groups[0].get("lr")
-                    if current_lr is None:
-                        current_lr = 0.0
-                    wandb.log({
-                        "train/loss": float(loss.item() * cfg.optimizer.gradient_accumulation_steps),
-                        "train/learning_rate": float(current_lr),
-                        "train/tokens_processed": int(state["tokens_processed"]),
-                        "train/step": int(state["steps_completed"]),
-                    })
-                except Exception as e:
-                    logger.warning(f"Error logging to wandb during training: {e}")
-
-            # Check evaluation interval
-            tokens_since_eval = state["tokens_processed"] - state["last_eval_at"]
-            if tokens_since_eval < cfg.corpus.eval_interval_tokens:
-                continue
-
-            decision, gate_details = handle_evaluation_cycle(
+def _run_baseline_eval(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    cfg: DAPTConfig,
+    state: Dict[str, Any],
+    metrics_writer: MetricsWriter,
+    device: torch.device,
+) -> None:
+    logger.info("Running baseline evaluation on the base model...")
+    state["eval_count"] += 1
+    state["last_eval_at"] = 0
+    state["last_slow_eval_at"] = 0
+    try:
+        metrics = run_all_probes(
+            model=model,
+            tokenizer=tokenizer,
+            cfg=cfg,
+            state=state,
+            metrics_writer=metrics_writer,
+            device=str(device),
+            run_slow_probes=True,
+            use_bertscore=True,
+        )
+    except (getattr(torch.cuda, "OutOfMemoryError", RuntimeError), RuntimeError) as e:
+        if "out of memory" in str(e).lower():
+            logger.warning("CUDA Out of Memory in baseline evaluation. Clearing cache and retrying...")
+            e = None
+            clear_gpu_cache()
+            metrics = run_all_probes(
                 model=model,
                 tokenizer=tokenizer,
                 cfg=cfg,
                 state=state,
-                optimizer=optimizer,
                 metrics_writer=metrics_writer,
-                device=device,
-                last_checkpoint_path_ref=last_checkpoint_path_ref,
+                device=str(device),
+                run_slow_probes=True,
+                use_bertscore=True,
             )
+        else:
+            raise e
+            
+    state["eval_history"].append(metrics)
 
-            if decision == DAPTDecision.CONVERGED:
-                logger.info("✅  DAPT CONVERGED. Selecting best checkpoint for Phase 0.5 hand-off.")
-                state["convergence_met"] = True
-                run_final_eval(model, tokenizer, cfg, state, metrics_writer, device)
-                
-                os.makedirs(output_dir, exist_ok=True)
-                model.save_pretrained(output_dir)
-                tokenizer.save_pretrained(output_dir)
-                logger.info(f"Converged model saved to: {output_dir}")
-                if cfg.wandb.enabled:
-                    try:
-                        import wandb
-                        wandb.finish()
-                    except Exception:
-                        pass
-                return
 
-            elif decision == DAPTDecision.HARD_CAP:
-                handle_hard_cap(
-                    state=state,
-                    gate_details=gate_details,
-                    last_checkpoint_path  = last_checkpoint_path_ref[0],
-                    risk_report_path      = cfg.logging.risk_report_path,
-                    qa_acc_threshold      = cfg.gates.qa_acc_threshold,
-                    qa_low_threshold      = cfg.gates.qa_low_threshold,
-                    ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
-                    term_cov_threshold        = cfg.gates.term_cov_threshold,
-                    ret_prec_threshold        = cfg.gates.ret_prec_threshold,
-                    total_corpus_tokens   = cfg.corpus.total_corpus_tokens,
-                )
-                
-                os.makedirs(output_dir, exist_ok=True)
-                model.save_pretrained(output_dir)
-                tokenizer.save_pretrained(output_dir)
-                logger.warning(f"Model saved to output_dir after hard cap: {output_dir}. Non-convergence risk report generated.")
-                if cfg.wandb.enabled:
-                    try:
-                        import wandb
-                        wandb.finish()
-                    except Exception:
-                        pass
-                return
+def _train_step_impl(
+    batch: Dict[str, torch.Tensor],
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    scaler: Optional[Any],
+    autocast_ctx: Any,
+    device: torch.device,
+    cfg: DAPTConfig,
+    step: int,
+    state: Dict[str, Any],
+    non_blocking: bool = True,
+) -> float:
+    input_ids = batch["input_ids"].to(device, non_blocking=non_blocking)
+    labels = batch["labels"].to(device, non_blocking=non_blocking)
+    attention_mask = batch.get("attention_mask", None)
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(device, non_blocking=non_blocking)
 
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            model.train()
+    with autocast_ctx:
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
+        loss = outputs.loss / cfg.optimizer.gradient_accumulation_steps
 
-        # End of epoch
-        logger.info(f"Completed corpus pass {epoch + 1}. Total tokens: {state['tokens_processed']/1e9:.2f}B")
+    if scaler is not None:
+        scaler.scale(loss).backward()
+    else:
+        loss.backward()
 
-    # 5. Final check if not converged by end of passes
+    batch_tokens = _count_tokens(batch)
+    state["tokens_processed"] += batch_tokens
+
+    if (step + 1) % cfg.optimizer.gradient_accumulation_steps == 0:
+        if scaler is not None:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optimizer.max_grad_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optimizer.max_grad_norm)
+            optimizer.step()
+
+        scheduler.step()
+        optimizer.zero_grad()
+
+    return float(loss.item() * cfg.optimizer.gradient_accumulation_steps)
+
+
+def _train_step(
+    batch: Dict[str, torch.Tensor],
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    scaler: Optional[Any],
+    autocast_ctx: Any,
+    device: torch.device,
+    cfg: DAPTConfig,
+    step: int,
+    state: Dict[str, Any],
+) -> float:
+    try:
+        return _train_step_impl(
+            batch=batch,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            autocast_ctx=autocast_ctx,
+            device=device,
+            cfg=cfg,
+            step=step,
+            state=state,
+            non_blocking=True,
+        )
+    except (getattr(torch.cuda, "OutOfMemoryError", RuntimeError), RuntimeError) as e:
+        if "out of memory" in str(e).lower():
+            logger.warning("CUDA Out of Memory in training step. Clearing cache and retrying...")
+            e = None
+            clear_gpu_cache()
+            return _train_step_impl(
+                batch=batch,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                autocast_ctx=autocast_ctx,
+                device=device,
+                cfg=cfg,
+                step=step,
+                state=state,
+                non_blocking=False,
+            )
+        raise e
+
+
+def _log_wandb_training(
+    cfg: DAPTConfig,
+    loss_val: float,
+    optimizer: torch.optim.Optimizer,
+    state: Dict[str, Any],
+) -> None:
+    if not cfg.wandb.enabled:
+        return
+    if state["steps_completed"] % cfg.wandb.log_interval_steps != 0:
+        return
+    try:
+        import wandb
+        current_lr = optimizer.param_groups[0].get("lr")
+        if current_lr is None:
+            current_lr = 0.0
+        wandb.log({
+            "train/loss": loss_val,
+            "train/learning_rate": float(current_lr),
+            "train/tokens_processed": int(state["tokens_processed"]),
+            "train/step": int(state["steps_completed"]),
+        })
+    except Exception as e:
+        logger.warning(f"Error logging to wandb during training: {e}")
+
+
+def _finish_wandb(cfg: DAPTConfig) -> None:
+    if cfg.wandb.enabled:
+        try:
+            import wandb
+            wandb.finish()
+        except Exception:
+            pass
+
+
+def _print_probe_history(state: Dict[str, Any]) -> None:
+    ppl_history = state.get("perplexity_history", [])
+    qa_history = state.get("qa_acc_history", [])
+    cloze_history = state.get("cloze_cov_history", [])
+    concept_history = state.get("concept_prec_history", [])
+
+    ppl_vals = ", ".join(f"{p:.3f}" for p in ppl_history) if ppl_history else "n/a"
+    qa_vals = ", ".join(f"{q:.4f}" for q in qa_history) if qa_history else "n/a"
+    cloze_vals = ", ".join(f"{c:.4f}" for c in cloze_history) if cloze_history else "n/a"
+    concept_vals = ", ".join(f"{c:.4f}" for c in concept_history) if concept_history else "n/a"
+
+    logger.info(
+        f"\n"
+        f"============================================================\n"
+        f"  DAPT Probe History Summary\n"
+        f"============================================================\n"
+        f"  Perplexity probe - {ppl_vals}\n"
+        f"  QA probe - {qa_vals}\n"
+        f"  Cloze probe - {cloze_vals}\n"
+        f"  Concept probe - {concept_vals}\n"
+        f"============================================================\n"
+    )
+
+
+def _handle_decision_action(
+    decision: DAPTDecision,
+    gate_details: Dict[str, Any],
+    model: torch.nn.Module,
+    tokenizer: Any,
+    cfg: DAPTConfig,
+    state: Dict[str, Any],
+    metrics_writer: MetricsWriter,
+    device: torch.device,
+    last_checkpoint_path_ref: List[Optional[Path]],
+    output_dir: str,
+) -> bool:
+    """Handles converged or hard cap decisions. Returns True if pipeline should terminate."""
+    if decision == DAPTDecision.CONVERGED:
+        logger.info("✅  DAPT CONVERGED. Selecting best checkpoint for Phase 0.5 hand-off.")
+        state["convergence_met"] = True
+        run_final_eval(model, tokenizer, cfg, state, metrics_writer, device)
+        
+        os.makedirs(output_dir, exist_ok=True)
+        model.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+        logger.info(f"Converged model saved to: {output_dir}")
+        _print_probe_history(state)
+        _finish_wandb(cfg)
+        return True
+
+    elif decision == DAPTDecision.HARD_CAP:
+        handle_hard_cap(
+            state=state,
+            gate_details=gate_details,
+            last_checkpoint_path  = last_checkpoint_path_ref[0],
+            risk_report_path      = cfg.logging.risk_report_path,
+            qa_acc_threshold      = cfg.gates.qa_acc_threshold,
+            qa_low_threshold      = cfg.gates.qa_low_threshold,
+            ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
+            cloze_threshold       = cfg.gates.cloze_threshold,
+            concept_threshold     = cfg.gates.concept_threshold,
+            total_corpus_tokens   = cfg.corpus.total_corpus_tokens,
+            run_qa                = cfg.probes.run_qa,
+            run_perplexity        = cfg.probes.run_perplexity,
+            run_cloze             = cfg.probes.run_cloze,
+            run_concept           = cfg.probes.run_concept,
+        )
+        
+        os.makedirs(output_dir, exist_ok=True)
+        model.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+        logger.warning(f"Model saved to output_dir after hard cap: {output_dir}. Non-convergence risk report generated.")
+        _print_probe_history(state)
+        _finish_wandb(cfg)
+        return True
+
+    return False
+
+
+def _handle_final_check(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    cfg: DAPTConfig,
+    state: Dict[str, Any],
+    optimizer: torch.optim.Optimizer,
+    metrics_writer: MetricsWriter,
+    device: torch.device,
+    last_checkpoint_path_ref: List[Optional[Path]],
+    output_dir: str,
+    last_decision: Optional[DAPTDecision],
+    last_gate_details: Optional[Dict[str, Any]],
+) -> None:
     logger.warning("Training loop exhausted without a convergence decision. Running final gate check.")
+    decision = last_decision
+    gate_details = last_gate_details
     if state["tokens_processed"] > state["last_eval_at"]:
         decision, gate_details = handle_evaluation_cycle(
             model=model,
@@ -333,15 +435,177 @@ def _run_dapt_pipeline_impl(
             qa_acc_threshold      = cfg.gates.qa_acc_threshold,
             qa_low_threshold      = cfg.gates.qa_low_threshold,
             ppl_improvement_threshold = cfg.gates.ppl_improvement_threshold,
-            term_cov_threshold        = cfg.gates.term_cov_threshold,
-            ret_prec_threshold        = cfg.gates.ret_prec_threshold,
+            cloze_threshold       = cfg.gates.cloze_threshold,
+            concept_threshold     = cfg.gates.concept_threshold,
             total_corpus_tokens   = cfg.corpus.total_corpus_tokens,
+            run_qa                = cfg.probes.run_qa,
+            run_perplexity        = cfg.probes.run_perplexity,
+            run_cloze             = cfg.probes.run_cloze,
+            run_concept           = cfg.probes.run_concept,
         )
         logger.warning("DAPT completed without convergence. Non-convergence risk report generated.")
 
-    if cfg.wandb.enabled:
-        try:
-            import wandb
-            wandb.finish()
-        except Exception:
-            pass
+    _print_probe_history(state)
+    _finish_wandb(cfg)
+
+
+def _run_dapt_pipeline_impl(
+    cfg: DAPTConfig,
+    resources: Optional[Dict[str, Any]] = None
+) -> None:
+
+    output_dir = str(cfg.model.checkpoint_dir)
+    device = _init_logging_and_device(cfg)
+
+    # Set up training environment (seeds, wandb init)
+    setup_training_environment(cfg, device)
+
+    # Load model & tokenizer
+    model, tokenizer = load_model_and_tokenizer(cfg, device)
+
+    # Disable KV cache during training to prevent generating unused past_key_values
+    if hasattr(model, "config"):
+        model.config.use_cache = False
+
+    # Fuse kernels for faster training; no numerical change
+    if cfg.model.torch_compile and device.type == "cuda" and hasattr(torch, "compile"):
+        logger.info("Applying torch.compile to model...")
+        model = torch.compile(model)
+
+    # Check that all required evaluation files exist
+    verify_eval_files(cfg)
+
+    # 3. Load pre-tokenized training dataset using mmap
+    train_dataloader = _load_dataloader(cfg, device, resources)
+
+    # Build Optimizer & Scheduler
+    optimizer, scheduler = init_optimizer_scheduler(cfg, model, len(train_dataloader))
+
+    # Initialize State
+    state = {
+        "tokens_processed" : 0,
+        "last_eval_at"     : 0,
+        "eval_count"       : 0,
+        "perplexity_history" : [],
+        "qa_acc_history"     : [],
+        "cloze_cov_history"  : [],
+        "concept_prec_history": [],
+        "eval_history"       : [],
+        "convergence_met"  : False,
+        "last_checkpoint"  : None,
+        "steps_completed"  : 0,
+    }
+
+    metrics_writer = MetricsWriter(cfg.logging.metrics_log_file)
+    last_checkpoint_path_ref = [None]
+
+    # Mixed precision / autocast context setup
+    scaler, autocast_ctx = _setup_mixed_precision(device)
+
+    # 4. Run baseline evaluation on the unmodified base model
+    _run_baseline_eval(model, tokenizer, cfg, state, metrics_writer, device)
+
+    # 5. Training loop
+    model.train()
+    logger.info("Starting pretraining loop...")
+    optimizer.zero_grad()
+    step = 0
+    decision = None
+    gate_details = None
+
+    for epoch in range(cfg.corpus.max_corpus_passes):
+        logger.info(f"\n{'#'*60}\n  Corpus pass {epoch + 1}/{cfg.corpus.max_corpus_passes}\n{'#'*60}")
+
+        for batch in train_dataloader:
+            # Check hard cap
+            if state["tokens_processed"] >= cfg.corpus.hard_stop_tokens:
+                logger.warning("Hard cap token count reached inside epoch loop. Breaking.")
+                break
+
+            # Execute a single training step
+            loss_val = _train_step(
+                batch=batch,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                autocast_ctx=autocast_ctx,
+                device=device,
+                cfg=cfg,
+                step=step,
+                state=state,
+            )
+
+            step += 1
+            state["steps_completed"] = step
+
+            # Log to WandB at step intervals
+            _log_wandb_training(cfg, loss_val, optimizer, state)
+
+            # Check evaluation interval
+            tokens_since_eval = state["tokens_processed"] - state["last_eval_at"]
+            if tokens_since_eval < cfg.corpus.eval_interval_tokens:
+                continue
+
+            try:
+                decision, gate_details = handle_evaluation_cycle(
+                    model=model,
+                    tokenizer=tokenizer,
+                    cfg=cfg,
+                    state=state,
+                    optimizer=optimizer,
+                    metrics_writer=metrics_writer,
+                    device=device,
+                    last_checkpoint_path_ref=last_checkpoint_path_ref,
+                )
+            except (getattr(torch.cuda, "OutOfMemoryError", RuntimeError), RuntimeError) as e:
+                if "out of memory" in str(e).lower():
+                    logger.warning("CUDA Out of Memory in evaluation cycle. Clearing cache and retrying...")
+                    e = None
+                    clear_gpu_cache()
+                    decision, gate_details = handle_evaluation_cycle(
+                        model=model,
+                        tokenizer=tokenizer,
+                        cfg=cfg,
+                        state=state,
+                        optimizer=optimizer,
+                        metrics_writer=metrics_writer,
+                        device=device,
+                        last_checkpoint_path_ref=last_checkpoint_path_ref,
+                    )
+                else:
+                    raise e
+
+            if _handle_decision_action(
+                decision=decision,
+                gate_details=gate_details,
+                model=model,
+                tokenizer=tokenizer,
+                cfg=cfg,
+                state=state,
+                metrics_writer=metrics_writer,
+                device=device,
+                last_checkpoint_path_ref=last_checkpoint_path_ref,
+                output_dir=output_dir,
+            ):
+                return
+
+            model.train()
+
+        # End of epoch
+        logger.info(f"Completed corpus pass {epoch + 1}. Total tokens: {state['tokens_processed']/1e9:.2f}B")
+
+    # 5. Final check if not converged by end of passes
+    _handle_final_check(
+        model=model,
+        tokenizer=tokenizer,
+        cfg=cfg,
+        state=state,
+        optimizer=optimizer,
+        metrics_writer=metrics_writer,
+        device=device,
+        last_checkpoint_path_ref=last_checkpoint_path_ref,
+        output_dir=output_dir,
+        last_decision=decision,
+        last_gate_details=gate_details,
+    )
