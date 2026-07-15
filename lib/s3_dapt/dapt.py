@@ -593,7 +593,7 @@ def _run_dapt_pipeline_impl(
             model.train()
 
         # End of epoch
-        logger.info(f"Completed corpus pass {epoch + 1}. Total tokens: {state['tokens_processed']/1e9:.2f}B")
+        logger.info(f"Completed corpus pass {epoch + 1}. Total tokens: {state['tokens_processed']/1e3:.2f}K")
 
     # 5. Final check if not converged by end of passes
     _handle_final_check(

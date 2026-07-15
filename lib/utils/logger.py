@@ -166,7 +166,7 @@ def format_gate_status(
         f"\n{'-'*62}\n"
         f"  Gate Status @ Eval #{eval_id:>3}\n"
         f"{'-'*62}\n"
-        f"  Tokens processed : {tokens_processed/1e9:.2f}B\n"
+        f"  Tokens processed : {tokens_processed/1e3:.2f}K\n"
         f"  Corpus pass      : {tokens_processed/total_corpus_tokens:.3f}x\n"
         f"\n"
         f"  PRIMARY GATES (both required for convergence)\n"

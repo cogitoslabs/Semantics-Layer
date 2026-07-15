@@ -3,6 +3,8 @@
 ## Communication
 
 - Be concise and direct
+- Always look for better way of doing things
+- Question my assumptions and decisions if you have a different perspective
 - Explain non-obvious decisions briefly
 - Ask before large refactors or architectural changes
 - Don't add features not in the project spec

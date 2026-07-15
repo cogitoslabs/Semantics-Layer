@@ -14,6 +14,7 @@
 4. Optimize for deployed scientific competence, not teacher imitation.
 5. Separate development, validation, and release evaluation.
 6. Prioritize reliability, calibration, and hallucination resistance.
+7. Match the adaptation method (full-parameter vs. parameter-efficient) to available compute and the magnitude of domain shift — do not default to the most expensive method when a cheaper one meets the same gate.
 
 ---
 
@@ -51,32 +52,32 @@
 
 ## Cross-Cutting: Artifact Versioning & Checkpoint Protocol
 
-Before entering Phase 0, establish a versioning and artifact tracking protocol. With a seven-phase pipeline that includes multiple rollback points, reproducibility and recovery depend on disciplined checkpointing.
+Before entering Phase 1, establish a versioning and artifact tracking protocol. With a seven-phase pipeline that includes multiple rollback points, reproducibility and recovery depend on disciplined checkpointing.
 
 **Minimum artifact log per phase:**
 
 | Phase | Artifacts to Preserve |
 |---|---|
-| 0 | Deduplicated corpus manifest (doc count, token count, hash), DAPT checkpoint at convergence, probe evaluation results |
-| 1 | Cluster assignments (doc-to-cluster mapping), three-way split indices |
-| 2 | Per-cluster teacher election scores, harmonized trace corpus, trace volume per cluster |
-| 3 | SFT checkpoint at early stopping, per-track training metrics |
-| 4 | Distillation checkpoint, per-cluster KL divergence log |
-| 5 | Rollout corpus, retokenization threshold distribution (mean, σ), GOLD checkpoint |
-| 6 | Pre- and post-QAT JSD drift measurements per cluster, exported quantized binary |
-| 7 | Full evaluation results against sealed test set |
+| 1 | Deduplicated corpus manifest (doc count, token count, hash), DAPT method used (full-parameter or LoRA) with full config (rank/alpha/target modules if LoRA), DAPT checkpoint at convergence (merged, if LoRA), probe evaluation results |
+| 2 | Cluster assignments (doc-to-cluster mapping), three-way split indices |
+| 3 | Per-cluster teacher election scores, harmonized trace corpus, trace volume per cluster |
+| 4 | SFT checkpoint at early stopping, per-track training metrics |
+| 5 | Distillation checkpoint, per-cluster KL divergence log |
+| 6 | Rollout corpus, retokenization threshold distribution (mean, σ), GOLD checkpoint |
+| 7 | Pre- and post-QAT JSD drift measurements per cluster, exported quantized binary |
+| 8 | Full evaluation results against sealed test set |
 
-**Rollback protocol:** Phase 7 can return to Phase 5; Phase 0 failure can require full corpus rebuild. Each phase transition must record: input artifact hashes, hyperparameters used, and pass/fail status of all gate conditions. Do not overwrite phase checkpoints. Use versioned directories (e.g., `phase0/v1/`, `phase0/v2/`) when remediation reruns a phase.
+**Rollback protocol:** Phase 8 can return to Phase 6; Phase 1 failure can require full corpus rebuild. Each phase transition must record: input artifact hashes, hyperparameters used, and pass/fail status of all gate conditions. Do not overwrite phase checkpoints. Use versioned directories (e.g., `phase0/v1/`, `phase0/v2/`) when remediation reruns a phase.
 
 ---
 
-## Phase 0: Neuroscience Domain Adaptive Pretraining (DAPT)
+## Phase 1: Neuroscience Domain Adaptive Pretraining (DAPT)
 
 ### Objective
 
 Build a neuroscience knowledge substrate before attempting reasoning distillation. A student lacking domain knowledge cannot fully absorb teacher reasoning traces regardless of distillation quality.
 
-### Step 0.1: Corpus Construction
+### Step 1.1: Corpus Construction
 
 Aggregate:
 
@@ -95,7 +96,7 @@ Aggregate:
 
 > **Deduplication (new):** PubMed, PMC, and bioRxiv share significant abstract-level overlap. Before logging the final token count, apply document-level deduplication using MinHash LSH (Jaccard threshold ≈ 0.85 recommended as a starting point). Without deduplication, the model risks overfitting on repeated abstracts while appearing to meet the corpus size target. Record the pre- and post-deduplication token counts in the phase artifact log.
 
-### Step 0.2: Domain Adaptive Pretraining
+### Step 1.2: Domain Adaptive Pretraining
 
 Continue next-token prediction on the deduplicated neuroscience corpus.
 
@@ -104,6 +105,50 @@ L_DAPT = CE(P_next, P_target)
 ```
 
 No teacher traces. No chain-of-thought. Pure neuroscience language modeling.
+
+This step now has two supported implementations. **Both share the objective, corpus, evaluation cadence, and gate conditions below** — they differ only in which parameters are updated. Select one per Step 1.2c before starting the training run; do not switch mid-run.
+
+#### Step 1.2a: Full-Parameter DAPT (default for compute-unconstrained runs)
+
+Update all model weights.
+
+- **Best when:** the base model is at the small end of the target range (1B), full training infrastructure (multi-GPU) is available, and maximum achievable domain-representation shift is prioritized over training cost.
+- **Cost profile:** comparable to pretraining itself — full optimizer state (Adam moments) for every parameter, full gradient checkpointing footprint.
+- **Forgetting risk:** moderate — monitor general-English probes alongside neuroscience probes if the deployed assistant must retain non-domain conversational competence.
+
+#### Step 1.2b: LoRA-Based DAPT (alternative — recommended default for 3B–4B tiers)
+
+Freeze the base model. Attach trainable low-rank adapters and run the identical causal-LM objective over the identical corpus.
+
+- **Adapter configuration (starting point, tune per corpus/model pair):**
+
+| Parameter | Recommended Value | Notes |
+|---|---|---|
+| Rank (`r`) | 32–64 | Higher than typical instruction-tuning LoRA (`r=8–16`) — DAPT needs to absorb corpus-wide distributional shift, not narrow task behavior |
+| Alpha | 2× rank | Standard scaling convention |
+| Dropout | 0.05 | Regularizes against the smaller effective parameter count |
+| Target modules | `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj` | Attention + MLP projections; omitting MLP projections measurably weakens knowledge absorption in ablations on similar corpora |
+| Learning rate | 10–100× the full-DAPT LR | Adapters need a proportionally larger step size to converge in a comparable token budget |
+
+- **Best when:** the 3B–4B tier is targeted, GPU budget is constrained to single-device training, or multiple domain-adapter variants need to be trained and compared cheaply before committing to a full run.
+- **Cost profile:** single-GPU feasible (pair with 4-bit base-model loading / QLoRA-style loading for the largest tier if VRAM is constrained). Optimizer state is tracked only for adapter parameters — typically <1% of total parameters.
+- **Forgetting risk:** low — base weights never move, so general capability is preserved by construction. This is a meaningful advantage given Phase 4's Track C requires the model to retain broad parametric reasoning ability alongside the new neuroscience substrate.
+- **Known limitation:** if the deduplicated corpus reveals a large amount of genuinely novel terminology/tokenization not well covered by the base tokenizer, a low-rank adapter has limited capacity to fix this at the representational level. Check terminology coverage (secondary indicator, below) after an initial short run before committing to a full LoRA-DAPT training budget — persistently low coverage despite reasonable token volume is a signal to fall back to Step 1.2a.
+- **Hand-off requirement:** merge adapters into the base weights (`merge_and_unload()`-equivalent) before Step 1.3 and Phase 2. Downstream phases assume a standard dense checkpoint; carrying an unmerged adapter wrapper into distillation and QAT phases is unsupported and untested in this pipeline.
+
+#### Step 1.2c: Method Selection Criteria
+
+| Condition | Recommended Path |
+|---|---|
+| Multi-GPU training infrastructure available, 1B target tier | Full-Parameter DAPT (0.2a) |
+| Single-GPU constraint, 3B–4B target tier | LoRA-Based DAPT (0.2b) |
+| Need to compare multiple candidate corpora/domains cheaply before a committed run | LoRA-Based DAPT (0.2b), promote winning configuration to a full run if budget allows |
+| Corpus is expected to introduce substantial novel tokenization/vocabulary (rare for standard neuroscience terminology, but possible for highly specialized sub-corpora) | Full-Parameter DAPT (0.2a) |
+| Maximum achievable domain shift is the priority and compute is not a binding constraint | Full-Parameter DAPT (0.2a) |
+
+Record the selected method and full adapter/optimizer configuration in the Phase 1 artifact log (see Cross-Cutting section) — this is a reproducibility-critical decision, not an implementation detail.
+
+#### Evaluation & Convergence Gate (applies to both methods)
 
 Evaluate every 500M tokens processed. Stop when all primary gate conditions are met:
 
@@ -120,10 +165,11 @@ Evaluate every 500M tokens processed. Stop when all primary gate conditions are 
 If the primary gate is not cleared by the cap, do not assume later phases will compensate. Remediation options in order of preference:
 
 1. Audit and improve corpus quality (remove low-signal boilerplate, add higher-density review articles)
-2. Increase base model size to the next tier (e.g., 1B → 3B)
-3. Proceed with an explicit risk flag documenting which metrics fell short and by how much
+2. If running LoRA-based DAPT (0.2b), increase adapter rank before switching methods — a rank increase is far cheaper than a full-parameter rerun and frequently closes the gap
+3. Increase base model size to the next tier (e.g., 1B → 3B), or switch from LoRA-based to full-parameter DAPT (0.2a) at the current tier
+4. Proceed with an explicit risk flag documenting which metrics fell short and by how much
 
-### Step 0.3: Retrieval-Augmented Distillation Preparation
+### Step 1.3: Retrieval-Augmented Distillation Preparation
 
 Teach the model to reason from retrieved evidence rather than solely from parametric memory. This is the primary architectural defense against hallucination in a scientific domain.
 
@@ -162,7 +208,7 @@ Final Context Window
 **Handling retrieval failure:** Not every question will return high-quality context. Before passing retrieved documents to the teacher:
 
 - Score each retrieved chunk with a relevance threshold (cosine similarity ≥ 0.65 recommended as a starting point)
-- If fewer than 2 chunks pass the threshold, treat the sample as a no-retrieval case and route it to the question-only trace path in Phase 3.1
+- If fewer than 2 chunks pass the threshold, treat the sample as a no-retrieval case and route it to the question-only trace path in Phase 4.1
 - Log no-retrieval rates per micro-cluster — persistent high no-retrieval in a cluster indicates an indexing gap that should be filled before proceeding
 
 #### Grounded Teacher Trace Generation
@@ -189,9 +235,9 @@ Question + Retrieved Context → Teacher Reasoning + Answer
 
 ---
 
-## Phase 1: Corpus Engineering & Micro-Clustering
+## Phase 2: Corpus Engineering & Micro-Clustering
 
-### Step 1.1: Latent Domain Discovery
+### Step 2.1: Latent Domain Discovery
 
 Generate embeddings with `all-mpnet-base-v2`. Apply HDBSCAN to produce hundreds of neuroscience micro-clusters. Examples:
 
@@ -203,9 +249,9 @@ Generate embeddings with `all-mpnet-base-v2`. Apply HDBSCAN to produce hundreds 
 - Optogenetics
 - Hippocampal Circuitry
 
-> **Cluster size imbalance (new):** High-document-count clusters (e.g., Neurodegeneration, Synaptic Plasticity) will naturally dominate raw trace counts. Without explicit reweighting, rare but important clusters (e.g., Optogenetics, Computational Neuroscience) will be understaffed. Apply per-cluster trace count caps during trace generation in Phase 2 to enforce a minimum floor for small clusters. A reasonable starting policy: no cluster should contribute fewer than 2% of total traces or more than 15%, with the remainder distributed proportionally. Adjust based on validation set per-cluster performance.
+> **Cluster size imbalance (new):** High-document-count clusters (e.g., Neurodegeneration, Synaptic Plasticity) will naturally dominate raw trace counts. Without explicit reweighting, rare but important clusters (e.g., Optogenetics, Computational Neuroscience) will be understaffed. Apply per-cluster trace count caps during trace generation in Phase 3 to enforce a minimum floor for small clusters. A reasonable starting policy: no cluster should contribute fewer than 2% of total traces or more than 15%, with the remainder distributed proportionally. Adjust based on validation set per-cluster performance.
 
-### Step 1.2: Three-Way Data Split
+### Step 2.2: Three-Way Data Split
 
 For every cluster:
 
@@ -213,15 +259,15 @@ For every cluster:
 |---|---|---|
 | Development | Training, reweighting, feature distillation | 70% |
 | Validation | Phase-transition decisions, QAT validation | 20% |
-| Final Sealed | Release gate only — opened once at Step 7.1 | 10% |
+| Final Sealed | Release gate only — opened once at Step 8.1 | 10% |
 
 The validation set is used for all phase-transition decisions (DAPT convergence, SFT early stopping, QAT drift measurement). The sealed set is never touched until final release evaluation.
 
 ---
 
-## Phase 2: Teacher Election & Trace Harmonization
+## Phase 3: Teacher Election & Trace Harmonization
 
-### Step 2.1: Teacher Benchmarking
+### Step 3.1: Teacher Benchmarking
 
 Benchmark every teacher on every cluster across:
 
@@ -232,7 +278,7 @@ Benchmark every teacher on every cluster across:
 
 > **Reasoning quality measurement (new):** Reasoning quality is listed as a benchmark dimension but requires an explicit measurement protocol. At trace volumes of 300K–2M, human evaluation is not scalable. Use an **LLM-as-judge approach**: prompt a capable frontier model (separate from the teachers being evaluated) with a rubric covering step validity, logical coherence, and absence of circular reasoning. Calibrate the LLM judge against a spot-check human evaluation on 200–500 traces per cluster before using it at scale. Log inter-rater agreement between the LLM judge and human labels.
 
-### Step 2.2: Multi-Metric Teacher Election
+### Step 3.2: Multi-Metric Teacher Election
 
 Do not elect teachers on accuracy alone. Compute a composite score:
 
@@ -253,15 +299,15 @@ On weight selection: The weights below are a starting point, not universal defau
 
 Tune these weights against the validation set. If a teacher elected by the default weights produces traces with hallucination rates >5% on a cluster, override to the conservative profile for that cluster regardless of overall score.
 
-### Step 2.3: Trace Generation
+### Step 3.3: Trace Generation
 
 Target: 500K–2M traces. Practical minimum: 300K.
 
 Compute guidance: Returns diminish beyond 500K when per-cluster trace counts exceed 5,000 for all clusters. At that point, additional compute is better invested in extended DAPT tokens or additional GOLD refinement steps. Use trace volume as a floor guarantee, not an optimization target.
 
-Apply per-cluster trace count caps per Step 1.1 guidance to avoid cluster imbalance.
+Apply per-cluster trace count caps per Step 2.1 guidance to avoid cluster imbalance.
 
-### Step 2.4: Trace Harmonization
+### Step 3.4: Trace Harmonization
 
 Normalize across all teacher outputs:
 
@@ -271,15 +317,15 @@ Normalize across all teacher outputs:
 
 > **Truncation vs. filtering (new):** Do not truncate traces that exceed the 2,500-token ceiling. A trace cut mid-reasoning teaches the student to produce incomplete chains, which is worse than a slightly verbose one. Instead, **filter out** traces that exceed the ceiling. If a cluster has low trace volume and filtering would leave it understaffed, flag those traces for human review — a human editor can trim them to a complete reasoning endpoint rather than a token boundary.
 
-### Step 2.5: Primary Teacher Election
+### Step 3.5: Primary Teacher Election
 
-Select the single best-performing teacher by composite score (Step 2.2) averaged across all clusters. This teacher is used exclusively in Phase 5 to maintain gradient signal consistency during on-policy refinement.
+Select the single best-performing teacher by composite score (Step 3.2) averaged across all clusters. This teacher is used exclusively in Phase 6 to maintain gradient signal consistency during on-policy refinement.
 
 ---
 
-## Phase 3: Cold-Start SFT
+## Phase 4: Cold-Start SFT
 
-### Step 3.1: Balanced Trace Construction with Consistent Input Format
+### Step 4.1: Balanced Trace Construction with Consistent Input Format
 
 Split the trace corpus into three tracks:
 
@@ -301,24 +347,24 @@ Teacher generates factually grounded explanation with retrieval support.
 ```
 
 **Track C — No-retrieval, question-only (20%):**  
-Covers questions where retrieval returned insufficient context (from Step 0.3 routing). Trains the model to reason from parametric knowledge when retrieval is unavailable.
+Covers questions where retrieval returned insufficient context (from Step 1.3 routing). Trains the model to reason from parametric knowledge when retrieval is unavailable.
 
 ```
 [NO CONTEXT AVAILABLE]
 [QUESTION]: {question}
 ```
 
-> **Track C allocation (new):** 20% may be insufficient given the target deployment scenario. On a phone or laptop, retrieval latency may cause users to bypass RAG entirely, or the local index may be stale or absent. If parametric-only performance is a first-class requirement for deployment, consider increasing Track C to 30–35% and adding a dedicated parametric-only evaluation track in Phase 7. Determine this based on expected deployment patterns before committing to the split.
+> **Track C allocation (new):** 20% may be insufficient given the target deployment scenario. On a phone or laptop, retrieval latency may cause users to bypass RAG entirely, or the local index may be stale or absent. If parametric-only performance is a first-class requirement for deployment, consider increasing Track C to 30–35% and adding a dedicated parametric-only evaluation track in Phase 8. Determine this based on expected deployment patterns before committing to the split.
 
 **Format consistency:** All three tracks use the same structural template with explicit field markers. The model always sees the same input skeleton — only the field contents vary. This prevents inference-time confusion between a missing context field and a deliberate no-retrieval signal.
 
-### Step 3.2: Supervised Fine-Tuning
+### Step 4.2: Supervised Fine-Tuning
 
 ```
 L_SFT = CE(teacher, student)
 ```
 
-### Step 3.3: Performance-Based Early Stopping
+### Step 4.3: Performance-Based Early Stopping
 
 Evaluate on the validation set every 0.25 epochs. Stop when all primary metrics plateau (less than 1% relative improvement over two consecutive evaluations):
 
@@ -336,13 +382,13 @@ Evaluate on the validation set every 0.25 epochs. Stop when all primary metrics 
 
 ---
 
-## Phase 4: Multi-Teacher Logit Distillation
+## Phase 5: Multi-Teacher Logit Distillation
 
 ### Design Goal
 
 Transfer predictive distributions rather than hidden states. Logit distillation provides the majority of capability gains while avoiding cross-architecture alignment complexity.
 
-### Step 4.1: Teacher Logit Extraction
+### Step 5.1: Teacher Logit Extraction
 
 Obtain `P_T` from the cluster-elected teacher for each training sample.
 
@@ -350,11 +396,11 @@ Obtain `P_T` from the cluster-elected teacher for each training sample.
 P_T = Softmax(z_T)
 ```
 
-### Step 4.2: Dynamic Domain Weighting
+### Step 5.2: Dynamic Domain Weighting
 
 Calculate cluster difficulty via KL divergence tracking.
 
-### Step 4.3: Cosine Temperature Annealing
+### Step 5.3: Cosine Temperature Annealing
 
 ```
 τ(t) = τ_min + ½(τ_max − τ_min)(1 + cos(πt/T))
@@ -366,13 +412,13 @@ Calculate cluster difficulty via KL divergence tracking.
 
 If a hard cluster is not converging in the final 20% of training, lower τ_min to 0.1.
 
-### Step 4.4: Distillation Loss
+### Step 5.4: Distillation Loss
 
 ```
 L_D = α · KL(P_T || P_S)
 ```
 
-### Step 4.5: Optional Lightweight Feature Distillation
+### Step 5.5: Optional Lightweight Feature Distillation
 
 Enable only if ablations on the validation set show >1.5% improvement. If enabled, restrict to:
 
@@ -385,13 +431,13 @@ Do not include by default: attention map matching, deep layer alignment, or cros
 
 ---
 
-## Phase 5: On-Policy GOLD Refinement
+## Phase 6: On-Policy GOLD Refinement
 
 ### Objective
 
 Remove exposure bias by training on student-generated trajectories evaluated against the primary teacher.
 
-### Step 5.1: Student Rollouts
+### Step 6.1: Student Rollouts
 
 ```
 ┌──► Re-tokenize via Teacher Vocab ──────────┐
@@ -402,13 +448,13 @@ Remove exposure bias by training on student-generated trajectories evaluated aga
 
 Generate trajectories. Run ablations at 1K, 3K, and 5K tokens. Select the longest length at which training loss remains stable (no entropy spikes in the final 20% of sequences).
 
-### Step 5.2: Retokenization Threshold Calibration
+### Step 6.2: Retokenization Threshold Calibration
 
 Decode student tokens to text and re-tokenize through the primary teacher's native tokenizer. Discard samples exceeding the calibrated anisotropy threshold.
 
 **Calibration procedure:**
 
-1. Generate 2,000–5,000 clean neuroscience completions from the post-Phase 4 student.
+1. Generate 2,000–5,000 clean neuroscience completions from the post-Phase 5 student.
 2. Compute `teacher_tokens / student_tokens` for each.
 3. Plot the distribution — clean samples cluster tightly (typically 0.85–1.20 for related model families).
 4. Set threshold at mean + 2.5σ of the clean-sample distribution.
@@ -418,7 +464,7 @@ Do not use a fixed universal constant. Legitimate rare neuroscience terminology 
 
 > **Distribution shift handling (new):** The protocol specifies recomputing the threshold every 10K rollout steps, but does not specify what to do if the distribution shifts substantially between recalculations — e.g., if the mean shifts by more than 1σ. Recommended protocol: if the mean shifts by >1σ relative to the previous calibration, treat it as a signal of significant student distribution change, re-anchor the threshold by regenerating a fresh clean-sample batch (500–1,000 completions is sufficient for re-anchoring), and log the shift event. Persistent upward drift in the mean may indicate the student is diverging and warrants investigation before continuing rollout training.
 
-### Step 5.3: Teacher Evaluation with Top-P Truncation
+### Step 6.3: Teacher Evaluation with Top-P Truncation
 
 Apply Top-P (p = p_0) truncation to the teacher's distribution before logprob merging:
 
@@ -426,15 +472,15 @@ Apply Top-P (p = p_0) truncation to the teacher's distribution before logprob me
 P_merge(t_n) = P(token_1) · P(token_2 | token_1, ...)
 ```
 
-### Step 5.4: GOLD Loss
+### Step 6.4: GOLD Loss
 
 ```
 L_D = JSD(P_student || P_teacher_merge)
 ```
 
-### Step 5.5: Regression Monitoring
+### Step 6.5: Regression Monitoring
 
-Track throughout rollout training. Investigate any regression >2% relative from Phase 4 endpoint:
+Track throughout rollout training. Investigate any regression >2% relative from Phase 5 endpoint:
 
 - Answer accuracy
 - Reasoning quality
@@ -443,13 +489,13 @@ Track throughout rollout training. Investigate any regression >2% relative from 
 
 ---
 
-## Phase 6: Quantization-Aware Validation
+## Phase 7: Quantization-Aware Validation
 
-### Step 6.1: Baseline Quantization
+### Step 7.1: Baseline Quantization
 
 Apply AWQ or GPTQ. Target: int4.
 
-### Step 6.2: Drift Measurement
+### Step 7.2: Drift Measurement
 
 ```
 JSD(float32, int4)
@@ -457,19 +503,19 @@ JSD(float32, int4)
 
 Measured on the validation set (not the sealed final set). Threshold: 0.05 nats average.
 
-- Below threshold → proceed to Step 6.5
-- Above threshold → trigger Step 6.3
+- Below threshold → proceed to Step 7.5
+- Above threshold → trigger Step 7.3
 
-### Step 6.3: Quantization-Aware Fine-Tuning
+### Step 7.3: Quantization-Aware Fine-Tuning
 
 Run 2,000–5,000 QAT steps using the validation set. Simulate int4 noise during the forward pass with gradients in high precision.
 
 **Two-round cap:**
 
-- After round 1: re-measure JSD drift. If below threshold, proceed to Step 6.5.
+- After round 1: re-measure JSD drift. If below threshold, proceed to Step 7.5.
 - After round 2: re-measure. If still above threshold, stop QAT and diagnose.
 
-### Step 6.4: Failure Diagnosis
+### Step 7.4: Failure Diagnosis
 
 **Cluster-specific drift** (drift concentrated in 1–3 clusters):
 - Augment validation set coverage for affected clusters
@@ -482,7 +528,7 @@ The base SLM is likely too small for stable int4 compression at target accuracy.
 2. Switch to int8 quantization
 3. Accept the accuracy trade-off, document it explicitly in release notes, and define a post-deployment monitoring threshold
 
-### Step 6.5: Platform-Specific Export
+### Step 7.5: Platform-Specific Export
 
 | Target Platform | Recommended Format | Notes |
 |---|---|---|
@@ -492,17 +538,17 @@ The base SLM is likely too small for stable int4 compression at target accuracy.
 
 ---
 
-## Phase 7: Scientific Reliability Evaluation
+## Phase 8: Scientific Reliability Evaluation
 
 ### Objective
 
 Evaluate deployed scientific competence across knowledge accuracy, hallucination resistance, and calibration. This is the formal release gate — not a monitoring exercise.
 
-### Step 7.1: Final Sealed Benchmark
+### Step 8.1: Final Sealed Benchmark
 
-Break the seal on the final test set from Step 1.2. Evaluate the quantized, exported binary only. Float32 checkpoints are not release candidates.
+Break the seal on the final test set from Step 2.2. Evaluate the quantized, exported binary only. Float32 checkpoints are not release candidates.
 
-### Step 7.2: Adversarial Neuroscience Testing
+### Step 8.2: Adversarial Neuroscience Testing
 
 Test the model's ability to detect and reject scientific nonsense. The model must refuse to validate or elaborate on the following categories:
 
@@ -520,7 +566,7 @@ Test the model's ability to detect and reject scientific nonsense. The model mus
 **Acceptable model responses:** explicit correction, expression of uncertainty, or refusal to elaborate.  
 **Failure mode:** elaborating on false premises as if they were valid.
 
-### Step 7.3: Hallucination Stress Test
+### Step 8.3: Hallucination Stress Test
 
 Measure across the sealed benchmark:
 
@@ -528,7 +574,7 @@ Measure across the sealed benchmark:
 - Rate of fabricated citations
 - Rate of invented terminology
 
-### Step 7.4: Confidence Calibration with Acceptance Thresholds
+### Step 8.4: Confidence Calibration with Acceptance Thresholds
 
 Evaluate using:
 
@@ -559,11 +605,11 @@ S = (1/n) Σ_{t=1}^{n} (f_t − o_t)²
 
 - **Pass:** proceed to release
 - **Conditional:** release with documented uncertainty limitations; flag for post-deployment calibration monitoring
-- **Fail:** block release; investigate confidence head or return to Phase 5 for calibration-targeted refinement
+- **Fail:** block release; investigate confidence head or return to Phase 6 for calibration-targeted refinement
 
-> **Parametric-only evaluation track (new):** If Track C allocation was increased in Phase 3 to reflect deployment scenarios where retrieval is unavailable, add a dedicated parametric-only evaluation partition to the sealed benchmark. This ensures the release gate measures real-world performance when the model operates without index access, not just retrieval-augmented performance.
+> **Parametric-only evaluation track (new):** If Track C allocation was increased in Phase 4 to reflect deployment scenarios where retrieval is unavailable, add a dedicated parametric-only evaluation partition to the sealed benchmark. This ensures the release gate measures real-world performance when the model operates without index access, not just retrieval-augmented performance.
 
-### Step 7.5: Full Deployment Metrics
+### Step 8.5: Full Deployment Metrics
 
 | Metric | Category |
 |---|---|
