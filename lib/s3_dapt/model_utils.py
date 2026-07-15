@@ -21,4 +21,36 @@ def load_model_and_tokenizer(cfg: DAPTConfig, device: torch.device):
         attn_implementation=attn_implementation
     )
     model.to(device)
+
+    if getattr(cfg.model, "peft_dapt", False):
+        try:
+            from peft import LoraConfig, get_peft_model, TaskType
+        except ImportError:
+            raise ImportError(
+                "peft library is not installed, but PEFT_DAPT=True is requested. "
+                "Please run `uv add peft`."
+            )
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            inference_mode=False,
+            r=cfg.model.lora_r,
+            lora_alpha=cfg.model.lora_alpha,
+            lora_dropout=cfg.model.lora_dropout,
+            bias="none",
+            target_modules=cfg.model.lora_target_modules,
+        )
+        model = get_peft_model(model, peft_config)
+        
+        try:
+            from lib.utils.logger import get_logger
+            logger = get_logger(__name__)
+            trainable_params, all_params = model.get_nb_trainable_parameters()
+            logger.info(
+                f"PEFT-DAPT enabled. Trainable params: {trainable_params:,} / {all_params:,} "
+                f"({100 * trainable_params / all_params:.4f}%)"
+            )
+        except Exception:
+            pass
+        model.to(device)
+
     return model, tokenizer

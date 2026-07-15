@@ -92,11 +92,14 @@ def init_optimizer_scheduler(cfg: DAPTConfig, model: torch.nn.Module, train_data
         is_cpu = (param.device.type == "cpu")
         break
     
+    # Filter for trainable parameters only (essential for PEFT memory savings)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    
     if is_cpu:
         from transformers import Adafactor
         logger.info("Using Adafactor optimizer for CPU training.")
         optimizer = Adafactor(
-            model.parameters(),
+            trainable_params,
             scale_parameter=True,
             relative_step=True,
             warmup_init=True,
@@ -113,7 +116,7 @@ def init_optimizer_scheduler(cfg: DAPTConfig, model: torch.nn.Module, train_data
     else:
         logger.info("Using AdamW optimizer for GPU training.")
         optimizer = AdamW(
-            model.parameters(),
+            trainable_params,
             lr=cfg.optimizer.learning_rate,
             weight_decay=cfg.optimizer.weight_decay,
         )

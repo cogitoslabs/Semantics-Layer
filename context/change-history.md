@@ -1,5 +1,19 @@
 # Change History
 
+## Status: Completed (PEFT-DAPT Support)
+
+- Implemented Parameter-Efficient Continued Pretraining (PEFT-DAPT) using LoRA (Low-Rank Adaptation) adapters.
+- Configured `.env.common` and `.env.example` with default LoRA hyperparameters (`LORA_R=16`, `LORA_ALPHA=32`, `LORA_DROPOUT=0.05`, `LORA_TARGET_MODULES=q_proj,v_proj,k_proj,o_proj`).
+- Updated `ModelConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) to parse PEFT configurations and added validation constraints in `PipelineConfig.validate()`.
+- Wrapped base Causal LM models with `peft` LoRA configuration in [model_utils.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/model_utils.py).
+- Optimized optimizer initialization in [training_helpers.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/training_helpers.py) by filtering parameters to only include those requiring gradients, yielding significant VRAM savings.
+- Supported non-strict checkpoint loading for `PeftModel` in [checkpoint.py](file:///e:/Projects/cnd/Semantics/lib/utils/checkpoint.py) (since base model weights are frozen and only adapter weights are stored).
+- Updated final inference failure logging in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) to correctly load the base model first and then wrap it with the adapter weights.
+- Added comprehensive unit tests for PEFT model wrapping and loading in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py).
+- Verified that all 18 test suite checks pass successfully.
+
+---
+
 ## Status: Completed (Local Model Path Resolution)
 
 - Implemented local model directory path resolution in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) (`resolve_local_model_path`).

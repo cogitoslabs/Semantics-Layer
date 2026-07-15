@@ -864,6 +864,102 @@ def test_compute_bertscore_batch_handles_empty_candidates():
         assert scores == [0.0, pytest.approx(0.9), 0.0, pytest.approx(0.85)]
 
 
+def test_load_model_and_tokenizer_peft(mock_model, mock_tokenizer):
+    from lib.s3_dapt.model_utils import load_model_and_tokenizer
+    
+    cfg = PipelineConfig()
+    cfg.model.base_model_name = "dummy-model"
+    cfg.model.peft_dapt = True
+    cfg.model.lora_r = 16
+    cfg.model.lora_alpha = 32
+    cfg.model.lora_dropout = 0.05
+    cfg.model.lora_target_modules = ["q_proj", "v_proj", "k_proj", "o_proj"]
+    
+    with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
+         patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
+         patch("peft.get_peft_model") as mock_get_peft_model:
+         
+        mock_from_token.return_value = mock_tokenizer
+        mock_from_model.return_value = mock_model
+        
+        # We want mock_get_peft_model to return a mock wrapped model
+        mock_peft_model = MagicMock()
+        mock_peft_model.get_nb_trainable_parameters.return_value = (100, 1000)
+        mock_get_peft_model.return_value = mock_peft_model
+        
+        model, tokenizer = load_model_and_tokenizer(cfg, torch.device("cpu"))
+        
+        assert model == mock_peft_model
+        assert tokenizer == mock_tokenizer
+        assert mock_get_peft_model.called
+        
+        # Verify LoraConfig arguments passed to get_peft_model
+        call_args = mock_get_peft_model.call_args[0]
+        # First arg is the base model
+        assert call_args[0] == mock_model
+        
+        # Second arg is the LoraConfig
+        lora_cfg = call_args[1]
+        assert lora_cfg.r == 16
+        assert lora_cfg.lora_alpha == 32
+        assert lora_cfg.lora_dropout == 0.05
+        assert set(lora_cfg.target_modules) == set(["q_proj", "v_proj", "k_proj", "o_proj"])
+        assert lora_cfg.bias == "none"
+
+
+def test_run_inference_and_log_failures_peft(mock_model, mock_tokenizer):
+    from lib.s3_dapt.evaluation.eval_runner import run_inference_and_log_failures
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        log_dir = Path(tmpdir) / "logs"
+        log_dir.mkdir()
+        checkpoint_dir = Path(tmpdir) / "checkpoints"
+        checkpoint_dir.mkdir()
+        
+        cfg = PipelineConfig()
+        cfg.model.base_model_name = "dummy-model"
+        cfg.model.checkpoint_dir = checkpoint_dir
+        cfg.logging.log_dir = log_dir
+        cfg.model.peft_dapt = True
+        
+        # Setup mock files
+        qa_probe_path = Path(tmpdir) / "probe_qa.jsonl"
+        with open(qa_probe_path, "w") as f:
+            f.write(json.dumps({"question": "Q1", "choices": ["A", "B"], "answer_idx": 0}) + "\n")
+        cfg.data.qa_probe_path = qa_probe_path
+        
+        cfg.probes.run_qa = True
+        cfg.probes.run_cloze = False
+        cfg.probes.run_concept = False
+        
+        with patch("transformers.AutoModelForCausalLM.from_pretrained") as mock_base_load, \
+             patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer_load, \
+             patch("peft.PeftModel.from_pretrained") as mock_peft_load, \
+             patch("lib.s3_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa:
+             
+            mock_base_load.return_value = mock_model
+            mock_tokenizer_load.return_value = mock_tokenizer
+            
+            # Setup mock PeftModel
+            mock_peft_model = MagicMock()
+            mock_peft_load.return_value = mock_peft_model
+            
+            mock_get_failed_qa.return_value = []
+            
+            run_inference_and_log_failures(cfg)
+            
+            # Verify base model load was called with the base model name
+            mock_base_load.assert_called_once_with(
+                "dummy-model",
+                torch_dtype=torch.float32,
+                attn_implementation="eager"
+            )
+            
+            # Verify PeftModel.from_pretrained was called with base model and checkpoint dir
+            mock_peft_load.assert_called_once_with(mock_model, str(checkpoint_dir))
+
+
+
 
 
 

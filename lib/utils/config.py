@@ -426,6 +426,13 @@ class ModelConfig:
     save_optimizer_state: bool     = field(default_factory=lambda: _get("SAVE_OPTIMIZER_STATE", False, bool))
     torch_compile: bool            = field(default_factory=lambda: _get("TORCH_COMPILE", True, bool))
 
+    # PEFT-DAPT Configuration
+    peft_dapt: bool                = field(default_factory=lambda: _get("PEFT_DAPT", False, bool))
+    lora_r: int                    = field(default_factory=lambda: _get("LORA_R", 16, int))
+    lora_alpha: int                = field(default_factory=lambda: _get("LORA_ALPHA", 32, int))
+    lora_dropout: float            = field(default_factory=lambda: _get("LORA_DROPOUT", 0.05, float))
+    lora_target_modules: List[str] = field(default_factory=lambda: [m.strip() for m in _get("LORA_TARGET_MODULES", "q_proj,v_proj,k_proj,o_proj").split(",") if m.strip()])
+
     def __post_init__(self):
         self.base_model_name = resolve_local_model_path(self.base_model_name)
 
@@ -644,6 +651,17 @@ class PipelineConfig:
             errors.append(f"DOCLING_NUM_THREADS must be >= 1, got {self.build.docling_num_threads}")
         if self.wandb.log_interval_steps < 1:
             errors.append(f"WANDB_LOG_INTERVAL_STEPS must be >= 1, got {self.wandb.log_interval_steps}")
+
+        # PEFT Validation
+        if self.model.peft_dapt:
+            if self.model.lora_r < 1:
+                errors.append(f"LORA_R must be >= 1, got {self.model.lora_r}")
+            if self.model.lora_alpha < 1:
+                errors.append(f"LORA_ALPHA must be >= 1, got {self.model.lora_alpha}")
+            if not (0.0 <= self.model.lora_dropout < 1.0):
+                errors.append(f"LORA_DROPOUT must be in [0,1), got {self.model.lora_dropout}")
+            if not self.model.lora_target_modules:
+                errors.append("LORA_TARGET_MODULES cannot be empty when PEFT_DAPT is enabled")
 
         # RAD Prep Validation
         if self.rad.teacher_backend not in ("hf_local", "api", "bedrock"):

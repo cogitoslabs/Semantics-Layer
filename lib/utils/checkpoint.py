@@ -135,7 +135,16 @@ def load_checkpoint(
     logger.info(f"Loading checkpoint: {ckpt_path}")
     try:
         payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(payload["model_state_dict"])
+        
+        is_peft = False
+        try:
+            from peft import PeftModel
+            if isinstance(model, PeftModel):
+                is_peft = True
+        except ImportError:
+            pass
+
+        model.load_state_dict(payload["model_state_dict"], strict=not is_peft)
         if optimizer is not None and "optimizer_state_dict" in payload:
             optimizer.load_state_dict(payload["optimizer_state_dict"])
         return payload.get("training_state", {})

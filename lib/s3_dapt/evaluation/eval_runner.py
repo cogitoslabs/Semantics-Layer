@@ -298,11 +298,20 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
         attn_implementation = "eager"
 
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            str(model_dir),
-            torch_dtype=torch_dtype,
-            attn_implementation=attn_implementation
-        )
+        if getattr(cfg.model, "peft_dapt", False):
+            from peft import PeftModel
+            base_model = AutoModelForCausalLM.from_pretrained(
+                cfg.model.base_model_name,
+                torch_dtype=torch_dtype,
+                attn_implementation=attn_implementation
+            )
+            model = PeftModel.from_pretrained(base_model, str(model_dir))
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                str(model_dir),
+                torch_dtype=torch_dtype,
+                attn_implementation=attn_implementation
+            )
         model.to(device)
         tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
         if tokenizer.pad_token is None:
