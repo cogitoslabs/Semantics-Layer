@@ -47,10 +47,10 @@ class LocalHFBackend(TeacherModelBackend):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
             # Load in bfloat16/float16 if GPU is available to speed up and reduce footprint
-            torch_dtype = torch.bfloat16 if cfg.model.model_dtype == "bfloat16" else torch.float16
+            dtype = torch.bfloat16 if cfg.model.model_dtype == "bfloat16" else torch.float16
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 device_map="auto"
             )
         else:

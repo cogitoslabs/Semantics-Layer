@@ -19,25 +19,19 @@ class FunctionProfiler:
             '<lambda>', '<module>'
         }
 
-    def _is_mine(self, frame):
-        path = frame.f_code.co_filename
-        noise = ['site-packages', '<frozen', 'importlib', 'torch/',
-                 'wandb/', 'pydantic', 'requests', 'transformers/']
-        if any(n in path for n in noise):
-            return False
-        if self.filter:
-            return self.filter in path
-        return True
+    def __enter__(self):
+        sys.settrace(self.trace)
+        return self
 
-    def _trace(self, frame, event, arg):
-        if not self._is_mine(frame):
-            return self._trace
+    def trace(self, frame, event, arg):
+        if not self.is_mine(frame):
+            return self.trace
 
         func = frame.f_code.co_name
 
         # Skip noise names entirely
         if func in self._skip_names:
-            return self._trace
+            return self.trace
 
         path = frame.f_code.co_filename.split('/')[-1]
 
@@ -60,16 +54,47 @@ class FunctionProfiler:
                 node = self.stack.pop()
                 node['elapsed'] = time.perf_counter() - node['start']
 
-        return self._trace
+        return self.trace
 
-    def __enter__(self):
-        sys.settrace(self._trace)
-        return self
+    def is_mine(self, frame):
+        path = frame.f_code.co_filename
+        noise = ['site-packages', '<frozen', 'importlib', 'torch/',
+                 'wandb/', 'pydantic', 'requests', 'transformers/']
+        if any(n in path for n in noise):
+            return False
+        if self.filter:
+            return self.filter in path
+        return True
 
     def __exit__(self, *args):
         sys.settrace(None)
 
-    def _aggregate(self, nodes):
+    def print_tree(self, nodes=None, indent=0, parent_time=None, file=None):
+        if nodes is None:
+            nodes = self.aggregate(self.roots)
+            print(f"\n{'Function':<48} {'Calls':>6}  {'Total':>10}  {'Avg':>10}  {'% parent':>9}  Source", file=file)
+            print("─" * 100, file=file)
+            parent_time = sum(n['elapsed'] for n in nodes if n['elapsed'])
+
+        for node in sorted(nodes, key=lambda x: x['elapsed'], reverse=True):
+            t     = node['elapsed']
+            calls = node['calls']
+            pct   = (100 * t / parent_time) if parent_time else 0
+
+            # Skip trivial nodes
+            if parent_time and pct < self.min_pct:
+                continue
+
+            avg    = t / calls if calls else 0
+            prefix = "  " * indent + ("└─ " if indent else "")
+            label  = prefix + node['name']
+            avg_str = f"{avg*1000:8.1f}ms" if calls > 1 else "          "
+
+            print(f"{label:<48}  {calls:>6}  {t*1000:>8.1f}ms  {avg_str}  {pct:>7.1f}%  [{node['file']}]", file=file)
+
+            self.print_tree(node['children'], indent + 1, parent_time=t, file=file)
+
+    def aggregate(self, nodes):
         """
         Collapse repeated calls to the same function into one summary node.
         e.g. 130x generate_response → one row showing total + avg + count.
@@ -100,32 +125,7 @@ class FunctionProfiler:
         result = []
         for key in order:
             agg = seen[key]
-            agg['children'] = self._aggregate(agg['children'])
+            agg['children'] = self.aggregate(agg['children'])
             result.append(agg)
 
         return result
-
-    def print_tree(self, nodes=None, indent=0, parent_time=None, file=None):
-        if nodes is None:
-            nodes = self._aggregate(self.roots)
-            print(f"\n{'Function':<48} {'Calls':>6}  {'Total':>10}  {'Avg':>10}  {'% parent':>9}  Source", file=file)
-            print("─" * 100, file=file)
-            parent_time = sum(n['elapsed'] for n in nodes if n['elapsed'])
-
-        for node in sorted(nodes, key=lambda x: x['elapsed'], reverse=True):
-            t     = node['elapsed']
-            calls = node['calls']
-            pct   = (100 * t / parent_time) if parent_time else 0
-
-            # Skip trivial nodes
-            if parent_time and pct < self.min_pct:
-                continue
-
-            avg    = t / calls if calls else 0
-            prefix = "  " * indent + ("└─ " if indent else "")
-            label  = prefix + node['name']
-            avg_str = f"{avg*1000:8.1f}ms" if calls > 1 else "          "
-
-            print(f"{label:<48}  {calls:>6}  {t*1000:>8.1f}ms  {avg_str}  {pct:>7.1f}%  [{node['file']}]", file=file)
-
-            self.print_tree(node['children'], indent + 1, parent_time=t, file=file)

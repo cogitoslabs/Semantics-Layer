@@ -34,6 +34,13 @@ class LocalStorageAdapter(StorageAdapter):
                 yield path.name, str(path), False
 
 
+def make_temp_file(suffix: str) -> str:
+    """Creates a named temp file with specific suffix and returns its path. Caller is responsible for deletion."""
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp.close()
+    return tmp.name
+
+
 class S3StorageAdapter(StorageAdapter):
     def __init__(self, bucket: str, prefix: str = ""):
         self.bucket = bucket
@@ -48,16 +55,9 @@ class S3StorageAdapter(StorageAdapter):
                 suffix = Path(key).suffix.lower()
                 if suffix in (".pdf", ".txt", ".html"):
                     filename = Path(key).name
-                    tmp_path = _make_temp_file(suffix)
+                    tmp_path = make_temp_file(suffix)
                     self.s3.download_file(self.bucket, key, tmp_path)
                     yield filename, tmp_path, True
-
-
-def _make_temp_file(suffix: str) -> str:
-    """Creates a named temp file with specific suffix and returns its path. Caller is responsible for deletion."""
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    tmp.close()
-    return tmp.name
 
 
 def get_adapter(
@@ -79,4 +79,3 @@ def get_adapter(
     raise ValueError(
         f"Unknown STORAGE_TARGET '{target}'. Expected: local or s3."
     )
-

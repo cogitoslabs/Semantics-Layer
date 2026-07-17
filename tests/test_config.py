@@ -103,3 +103,27 @@ def test_config_dataclass_post_init_resolution():
                 del os.environ["BASE_MODEL_NAME"]
             if "BERTSCORE_MODEL" in os.environ:
                 del os.environ["BERTSCORE_MODEL"]
+
+
+def test_gradient_checkpointing_config():
+    # 1. Test default value is False
+    model_cfg = ModelConfig()
+    assert model_cfg.gradient_checkpointing is False
+
+    # 2. Test environment variable override
+    os.environ["GRADIENT_CHECKPOINTING"] = "True"
+    try:
+        model_cfg_override = ModelConfig()
+        assert model_cfg_override.gradient_checkpointing is True
+    finally:
+        del os.environ["GRADIENT_CHECKPOINTING"]
+
+
+def test_pipeline_config_summary():
+    cfg = PipelineConfig()
+    summary_text = cfg.summary()
+    assert "PEFT DAPT" in summary_text
+    assert "Train batch size" in summary_text
+    assert "Eval batch size" in summary_text
+    assert "Grad checkpoint" in summary_text
+

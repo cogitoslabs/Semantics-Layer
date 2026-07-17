@@ -139,7 +139,7 @@ if os.environ.get("DOCLING_NUM_THREADS", "").strip().upper() == "AUTO":
     os.environ["DOCLING_NUM_THREADS"] = str(resolved_threads)
 
 
-def _get(key: str, default, cast=str):
+def get(key: str, default, cast=str):
     raw = os.environ.get(key, None)
     if raw is None:
         if default is None:
@@ -165,27 +165,27 @@ def _get(key: str, default, cast=str):
         raise ValueError(f"[config] Cannot parse env var {key}={raw!r} as {cast.__name__}: {e}")
 
 
-def _get_with_fallback(key: str, fallback_key: str, default, cast=str):
+def get_with_fallback(key: str, fallback_key: str, default, cast=str):
     if key in os.environ:
-        return _get(key, default, cast)
-    return _get(fallback_key, default, cast)
+        return get(key, default, cast)
+    return get(fallback_key, default, cast)
 
 
 @dataclass
 class CorpusBuildConfig:
-    available_gpus: str       = field(default_factory=lambda: _get("AVAILABLE_GPUS", "0"))
-    workers_per_gpu: int | str = field(default_factory=lambda: _get("WORKERS_PER_GPU", 1, int))
-    chunk_size: int | str      = field(default_factory=lambda: _get("CHUNK_SIZE", 10, int))
-    output_path: Path         = field(default_factory=lambda: Path(_get("OUTPUT_PATH", "./data/dapt/domain_dapt_corpus.jsonl")))
-    extracted_output_path: Path = field(default_factory=lambda: Path(_get("EXTRACTED_OUTPUT_PATH", "./data/dapt/in/domain_dapt_corpus_extracted.jsonl")))
-    maxtasksperchild: int | str | None = field(default_factory=lambda: _get("MAX_TASKS_PER_CHILD", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
-    docling_use_ocr: bool      = field(default_factory=lambda: _get("DOCLING_USE_OCR", False, bool))
-    docling_use_table_structure: bool = field(default_factory=lambda: _get("DOCLING_USE_TABLE_STRUCTURE", False, bool))
-    docling_use_code_enrichment: bool = field(default_factory=lambda: _get("DOCLING_USE_CODE_ENRICHMENT", False, bool))
-    docling_use_formula_enrichment: bool = field(default_factory=lambda: _get("DOCLING_USE_FORMULA_ENRICHMENT", False, bool))
-    docling_use_picture_classification: bool = field(default_factory=lambda: _get("DOCLING_USE_PICTURE_CLASSIFICATION", False, bool))
-    docling_use_picture_description: bool = field(default_factory=lambda: _get("DOCLING_USE_PICTURE_DESCRIPTION", False, bool))
-    docling_num_threads: int | str = field(default_factory=lambda: _get("DOCLING_NUM_THREADS", 4, int))
+    available_gpus: str       = field(default_factory=lambda: get("AVAILABLE_GPUS", "0"))
+    workers_per_gpu: int | str = field(default_factory=lambda: get("WORKERS_PER_GPU", 1, int))
+    chunk_size: int | str      = field(default_factory=lambda: get("CHUNK_SIZE", 10, int))
+    output_path: Path         = field(default_factory=lambda: Path(get("OUTPUT_PATH", "./data/dapt/domain_dapt_corpus.jsonl")))
+    extracted_output_path: Path = field(default_factory=lambda: Path(get("EXTRACTED_OUTPUT_PATH", "./data/dapt/in/domain_dapt_corpus_extracted.jsonl")))
+    maxtasksperchild: int | str | None = field(default_factory=lambda: get("MAX_TASKS_PER_CHILD", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+    docling_use_ocr: bool      = field(default_factory=lambda: get("DOCLING_USE_OCR", False, bool))
+    docling_use_table_structure: bool = field(default_factory=lambda: get("DOCLING_USE_TABLE_STRUCTURE", False, bool))
+    docling_use_code_enrichment: bool = field(default_factory=lambda: get("DOCLING_USE_CODE_ENRICHMENT", False, bool))
+    docling_use_formula_enrichment: bool = field(default_factory=lambda: get("DOCLING_USE_FORMULA_ENRICHMENT", False, bool))
+    docling_use_picture_classification: bool = field(default_factory=lambda: get("DOCLING_USE_PICTURE_CLASSIFICATION", False, bool))
+    docling_use_picture_description: bool = field(default_factory=lambda: get("DOCLING_USE_PICTURE_DESCRIPTION", False, bool))
+    docling_num_threads: int | str = field(default_factory=lambda: get("DOCLING_NUM_THREADS", 4, int))
 
     # Dynamic fields resolved at runtime
     gpu_ids: List[int] = field(default_factory=list, init=False)
@@ -195,7 +195,7 @@ class CorpusBuildConfig:
     def __post_init__(self):
         self.resolve_auto()
 
-    def _log_auto(self, msg: str, logger) -> None:
+    def log_auto(self, msg: str, logger) -> None:
         print(msg)
         self.resolution_logs.append(msg)
         logger.info(msg)
@@ -246,10 +246,10 @@ class CorpusBuildConfig:
         if str(resolved_available_gpus).strip().upper() == "AUTO":
             if system_gpus:
                 self.gpu_ids = [gpu[0] for gpu in system_gpus]
-                self._log_auto(f"[AUTO] Detected GPUs: {self.gpu_ids}", logger)
+                self.log_auto(f"[AUTO] Detected GPUs: {self.gpu_ids}", logger)
             else:
                 self.gpu_ids = [-1]  # CPU fallback
-                self._log_auto("[AUTO] No GPUs detected. Falling back to CPU mode.", logger)
+                self.log_auto("[AUTO] No GPUs detected. Falling back to CPU mode.", logger)
         else:
             self.gpu_ids = [int(g.strip()) for g in str(resolved_available_gpus).split(",") if g.strip()]
 
@@ -262,7 +262,7 @@ class CorpusBuildConfig:
                 max_workers_by_cpu = max(1, cpu_count // 2)
                 max_workers_by_ram = max(1, int(ram_gb // 4))
                 self.workers_per_gpu = min(max_workers_by_cpu, max_workers_by_ram)
-                self._log_auto(
+                self.log_auto(
                     f"[AUTO] CPU Mode workers resolved: {self.workers_per_gpu} "
                     f"(CPU Cores: {cpu_count}, RAM: {ram_gb:.1f} GB)",
                     logger
@@ -277,14 +277,14 @@ class CorpusBuildConfig:
                 total_gpu_workers = gpu_workers * len(self.gpu_ids)
                 if total_gpu_workers > max_total_workers:
                     self.workers_per_gpu = max(1, max_total_workers // len(self.gpu_ids))
-                    self._log_auto(
+                    self.log_auto(
                         f"[AUTO] Scaled down workers_per_gpu to {self.workers_per_gpu} to respect CPU/RAM bounds "
                         f"(Cores: {cpu_count}, RAM: {ram_gb:.1f} GB, Min VRAM: {min_vram:.1f} GB)",
                         logger
                     )
                 else:
                     self.workers_per_gpu = gpu_workers
-                    self._log_auto(
+                    self.log_auto(
                         f"[AUTO] GPU workers per device resolved: {self.workers_per_gpu} "
                         f"(Min VRAM: {min_vram:.1f} GB)",
                         logger
@@ -302,14 +302,14 @@ class CorpusBuildConfig:
                 self.chunk_size = 10
             else:
                 self.chunk_size = 6
-            self._log_auto(f"[AUTO] Chunk size resolved to {self.chunk_size} pages for {self.total_workers} workers", logger)
+            self.log_auto(f"[AUTO] Chunk size resolved to {self.chunk_size} pages for {self.total_workers} workers", logger)
         else:
             self.chunk_size = int(resolved_chunk_size)
 
         # 5. Resolve Max Tasks Per Child
         if resolved_maxtasksperchild is not None and str(resolved_maxtasksperchild).strip().upper() == "AUTO":
             self.maxtasksperchild = max(3, min(20, int(ram_gb / self.total_workers)))
-            self._log_auto(f"[AUTO] max_tasks_per_child resolved to {self.maxtasksperchild} based on system RAM and workers", logger)
+            self.log_auto(f"[AUTO] max_tasks_per_child resolved to {self.maxtasksperchild} based on system RAM and workers", logger)
         else:
             self.maxtasksperchild = resolved_maxtasksperchild
 
@@ -317,7 +317,7 @@ class CorpusBuildConfig:
         if DOCLING_NUM_THREADS_WAS_AUTO:
             self.docling_num_threads = max(1, cpu_count // self.total_workers)
             os.environ["DOCLING_NUM_THREADS"] = str(self.docling_num_threads)
-            self._log_auto(f"[AUTO] docling_num_threads resolved to {self.docling_num_threads} (CPU Cores: {cpu_count}, Total Workers: {self.total_workers})", logger)
+            self.log_auto(f"[AUTO] docling_num_threads resolved to {self.docling_num_threads} (CPU Cores: {cpu_count}, Total Workers: {self.total_workers})", logger)
         else:
             self.docling_num_threads = int(resolved_docling_num_threads)
             os.environ["DOCLING_NUM_THREADS"] = str(self.docling_num_threads)
@@ -326,10 +326,10 @@ class CorpusBuildConfig:
 
 @dataclass
 class CorpusConfig:
-    total_corpus_tokens: int   = field(default_factory=lambda: _get("TOTAL_CORPUS_TOKENS", 30_000_000_000, int))
-    max_corpus_passes: int     = field(default_factory=lambda: _get("MAX_CORPUS_PASSES", 3, int))
-    eval_interval_tokens: int  = field(default_factory=lambda: _get("EVAL_INTERVAL_TOKENS", 500_000_000, int))
-    slow_eval_interval_tokens: int = field(default_factory=lambda: _get("SLOW_EVAL_INTERVAL_TOKENS", 250_000_000, int))
+    total_corpus_tokens: int   = field(default_factory=lambda: get("TOTAL_CORPUS_TOKENS", 30_000_000_000, int))
+    max_corpus_passes: int     = field(default_factory=lambda: get("MAX_CORPUS_PASSES", 3, int))
+    eval_interval_tokens: int  = field(default_factory=lambda: get("EVAL_INTERVAL_TOKENS", 500_000_000, int))
+    slow_eval_interval_tokens: int = field(default_factory=lambda: get("SLOW_EVAL_INTERVAL_TOKENS", 250_000_000, int))
 
     @property
     def hard_stop_tokens(self) -> int:
@@ -339,51 +339,51 @@ class CorpusConfig:
 @dataclass
 class GateConfig:
     # Primary Gate A
-    qa_acc_threshold: float        = field(default_factory=lambda: _get("QA_ACC_THRESHOLD", 0.55, float))
+    qa_acc_threshold: float        = field(default_factory=lambda: get("QA_ACC_THRESHOLD", 0.55, float))
 
     # Primary Gate B
-    ppl_improvement_threshold: float = field(default_factory=lambda: _get("PPL_IMPROVEMENT_THRESHOLD", 2.0, float))
-    ppl_plateau_window: int          = field(default_factory=lambda: _get("PPL_PLATEAU_WINDOW", 2, int))
+    ppl_improvement_threshold: float = field(default_factory=lambda: get("PPL_IMPROVEMENT_THRESHOLD", 2.0, float))
+    ppl_plateau_window: int          = field(default_factory=lambda: get("PPL_PLATEAU_WINDOW", 2, int))
 
     # Secondary Gate
-    cloze_threshold: float         = field(default_factory=lambda: _get_with_fallback("CLOZE_THRESHOLD", "TERM_COV_THRESHOLD", 0.30, float))
-    concept_threshold: float       = field(default_factory=lambda: _get_with_fallback("CONCEPT_THRESHOLD", "RET_PREC_THRESHOLD", 0.50, float))
+    cloze_threshold: float         = field(default_factory=lambda: get_with_fallback("CLOZE_THRESHOLD", "TERM_COV_THRESHOLD", 0.30, float))
+    concept_threshold: float       = field(default_factory=lambda: get_with_fallback("CONCEPT_THRESHOLD", "RET_PREC_THRESHOLD", 0.50, float))
 
     # Remediation routing
-    qa_low_threshold: float        = field(default_factory=lambda: _get("QA_LOW_THRESHOLD", 0.40, float))
+    qa_low_threshold: float        = field(default_factory=lambda: get("QA_LOW_THRESHOLD", 0.40, float))
 
 
 @dataclass
 class ProbeConfig:
     # Probe Activation Toggles
-    run_perplexity: bool           = field(default_factory=lambda: _get("RUN_PERPLEXITY_PROBE", True, bool))
-    run_qa: bool                  = field(default_factory=lambda: _get("RUN_QA_PROBE", True, bool))
-    run_cloze: bool               = field(default_factory=lambda: _get_with_fallback("RUN_CLOZE_PROBE", "RUN_TERMINOLOGY_PROBE", True, bool))
-    run_concept: bool             = field(default_factory=lambda: _get_with_fallback("RUN_CONCEPT_PROBE", "RUN_RETRIEVAL_PROBE", True, bool))
+    run_perplexity: bool           = field(default_factory=lambda: get("RUN_PERPLEXITY_PROBE", True, bool))
+    run_qa: bool                  = field(default_factory=lambda: get("RUN_QA_PROBE", True, bool))
+    run_cloze: bool               = field(default_factory=lambda: get_with_fallback("RUN_CLOZE_PROBE", "RUN_TERMINOLOGY_PROBE", True, bool))
+    run_concept: bool             = field(default_factory=lambda: get_with_fallback("RUN_CONCEPT_PROBE", "RUN_RETRIEVAL_PROBE", True, bool))
 
     # Perplexity probe
-    perplexity_max_seq_len: int | None = field(default_factory=lambda: _get("PERPLEXITY_MAX_SEQ_LEN", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
-    perplexity_batch_size: int | None  = field(default_factory=lambda: _get("PERPLEXITY_BATCH_SIZE", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+    perplexity_max_seq_len: int | None = field(default_factory=lambda: get("PERPLEXITY_MAX_SEQ_LEN", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+    perplexity_batch_size: int | None  = field(default_factory=lambda: get("PERPLEXITY_BATCH_SIZE", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
 
     # QA probe
-    qa_max_seq_len: int                   = field(default_factory=lambda: _get("QA_MAX_SEQ_LEN", 512, int))
-    qa_batch_size: int | None             = field(default_factory=lambda: _get("QA_BATCH_SIZE", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
+    qa_max_seq_len: int                   = field(default_factory=lambda: get("QA_MAX_SEQ_LEN", 512, int))
+    qa_batch_size: int | None             = field(default_factory=lambda: get("QA_BATCH_SIZE", None, lambda x: int(x) if x and str(x).lower() not in ("none", "null", "") else None))
 
     # Terminology cloze
-    cloze_top_k: int            = field(default_factory=lambda: _get_with_fallback("CLOZE_TOP_K", "TERM_COV_TOP_K", 5, int))
-    cloze_max_new_tokens: int   = field(default_factory=lambda: _get_with_fallback("CLOZE_MAX_NEW_TOKENS", "TERM_COV_MAX_NEW_TOKENS", 3, int))
-    cloze_gen_batch_size: int   = field(default_factory=lambda: _get_with_fallback("CLOZE_GEN_BATCH_SIZE", "TERM_COV_GEN_BATCH_SIZE", 16, int))
-    cloze_max_seq_len: int      = field(default_factory=lambda: _get_with_fallback("CLOZE_MAX_SEQ_LEN", "TERM_COV_MAX_SEQ_LEN", 256, int))
+    cloze_top_k: int            = field(default_factory=lambda: get_with_fallback("CLOZE_TOP_K", "TERM_COV_TOP_K", 5, int))
+    cloze_max_new_tokens: int   = field(default_factory=lambda: get_with_fallback("CLOZE_MAX_NEW_TOKENS", "TERM_COV_MAX_NEW_TOKENS", 3, int))
+    cloze_gen_batch_size: int   = field(default_factory=lambda: get_with_fallback("CLOZE_GEN_BATCH_SIZE", "TERM_COV_GEN_BATCH_SIZE", 16, int))
+    cloze_max_seq_len: int      = field(default_factory=lambda: get_with_fallback("CLOZE_MAX_SEQ_LEN", "TERM_COV_MAX_SEQ_LEN", 256, int))
 
     # Anatomical retrieval
-    bertscore_model: str           = field(default_factory=lambda: _get("BERTSCORE_MODEL", "allenai/scibert_scivocab_uncased", str))
-    concept_max_new_tokens: int   = field(default_factory=lambda: _get_with_fallback("CONCEPT_MAX_NEW_TOKENS", "RET_PREC_MAX_NEW_TOKENS", 100, int))
-    concept_gen_batch_size: int   = field(default_factory=lambda: _get_with_fallback("CONCEPT_GEN_BATCH_SIZE", "RET_PREC_GEN_BATCH_SIZE", 16, int))
-    concept_max_seq_len: int      = field(default_factory=lambda: _get_with_fallback("CONCEPT_MAX_SEQ_LEN", "RET_PREC_MAX_SEQ_LEN", 256, int))
-    concept_bertscore_batch_size: int = field(default_factory=lambda: _get_with_fallback("CONCEPT_BERTSCORE_BATCH_SIZE", "RET_PREC_BERTSCORE_BATCH_SIZE", 32, int))
+    bertscore_model: str           = field(default_factory=lambda: get("BERTSCORE_MODEL", "allenai/scibert_scivocab_uncased", str))
+    concept_max_new_tokens: int   = field(default_factory=lambda: get_with_fallback("CONCEPT_MAX_NEW_TOKENS", "RET_PREC_MAX_NEW_TOKENS", 100, int))
+    concept_gen_batch_size: int   = field(default_factory=lambda: get_with_fallback("CONCEPT_GEN_BATCH_SIZE", "RET_PREC_GEN_BATCH_SIZE", 16, int))
+    concept_max_seq_len: int      = field(default_factory=lambda: get_with_fallback("CONCEPT_MAX_SEQ_LEN", "RET_PREC_MAX_SEQ_LEN", 256, int))
+    concept_bertscore_batch_size: int = field(default_factory=lambda: get_with_fallback("CONCEPT_BERTSCORE_BATCH_SIZE", "RET_PREC_BERTSCORE_BATCH_SIZE", 32, int))
 
     # PPL eval corpus size
-    perplexity_eval_tokens: int    = field(default_factory=lambda: _get("PERPLEXITY_EVAL_TOKENS", 10_000_000, int))
+    perplexity_eval_tokens: int    = field(default_factory=lambda: get("PERPLEXITY_EVAL_TOKENS", 10_000_000, int))
 
     def __post_init__(self):
         self.bertscore_model = resolve_local_model_path(self.bertscore_model)
@@ -416,22 +416,23 @@ class DataConfig:
 
 @dataclass
 class ModelConfig:
-    base_model_name: str           = field(default_factory=lambda: _get("BASE_MODEL_NAME", "HuggingFaceTB/SmolLM2-135M"))
-    model_dtype: str               = field(default_factory=lambda: _get("MODEL_DTYPE", "bfloat16"))
-    max_seq_len: int               = field(default_factory=lambda: _get("MAX_SEQ_LEN", 512, int))
+    base_model_name: str           = field(default_factory=lambda: get("BASE_MODEL_NAME", "HuggingFaceTB/SmolLM2-135M"))
+    model_dtype: str               = field(default_factory=lambda: get("MODEL_DTYPE", "bfloat16"))
+    max_seq_len: int               = field(default_factory=lambda: get("MAX_SEQ_LEN", 512, int))
 
-    checkpoint_dir: Path           = field(default_factory=lambda: Path(_get("CHECKPOINT_DIR", "models/checkpoints")))
-    best_checkpoint_manifest: Path = field(default_factory=lambda: Path(_get("BEST_CHECKPOINT_MANIFEST", "logs/best_checkpoint.json")))
-    checkpoint_keep_last: int      = field(default_factory=lambda: _get("CHECKPOINT_KEEP_LAST", 5, int))
-    save_optimizer_state: bool     = field(default_factory=lambda: _get("SAVE_OPTIMIZER_STATE", False, bool))
-    torch_compile: bool            = field(default_factory=lambda: _get("TORCH_COMPILE", True, bool))
+    checkpoint_dir: Path           = field(default_factory=lambda: Path(get("CHECKPOINT_DIR", "models/checkpoints")))
+    best_checkpoint_manifest: Path = field(default_factory=lambda: Path(get("BEST_CHECKPOINT_MANIFEST", "logs/best_checkpoint.json")))
+    checkpoint_keep_last: int      = field(default_factory=lambda: get("CHECKPOINT_KEEP_LAST", 5, int))
+    save_optimizer_state: bool     = field(default_factory=lambda: get("SAVE_OPTIMIZER_STATE", False, bool))
+    torch_compile: bool            = field(default_factory=lambda: get("TORCH_COMPILE", True, bool))
 
     # PEFT-DAPT Configuration
-    peft_dapt: bool                = field(default_factory=lambda: _get("PEFT_DAPT", False, bool))
-    lora_r: int                    = field(default_factory=lambda: _get("LORA_R", 16, int))
-    lora_alpha: int                = field(default_factory=lambda: _get("LORA_ALPHA", 32, int))
-    lora_dropout: float            = field(default_factory=lambda: _get("LORA_DROPOUT", 0.05, float))
-    lora_target_modules: List[str] = field(default_factory=lambda: [m.strip() for m in _get("LORA_TARGET_MODULES", "q_proj,v_proj,k_proj,o_proj").split(",") if m.strip()])
+    peft_dapt: bool                = field(default_factory=lambda: get("PEFT_DAPT", False, bool))
+    lora_r: int                    = field(default_factory=lambda: get("LORA_R", 16, int))
+    lora_alpha: int                = field(default_factory=lambda: get("LORA_ALPHA", 32, int))
+    lora_dropout: float            = field(default_factory=lambda: get("LORA_DROPOUT", 0.05, float))
+    lora_target_modules: List[str] = field(default_factory=lambda: [m.strip() for m in get("LORA_TARGET_MODULES", "q_proj,v_proj,k_proj,o_proj").split(",") if m.strip()])
+    gradient_checkpointing: bool   = field(default_factory=lambda: get("GRADIENT_CHECKPOINTING", False, bool))
 
     def __post_init__(self):
         self.base_model_name = resolve_local_model_path(self.base_model_name)
@@ -439,46 +440,46 @@ class ModelConfig:
 
 @dataclass
 class OptimizerConfig:
-    learning_rate: float           = field(default_factory=lambda: _get("DAPT_LR", 5e-5, float))
-    weight_decay: float            = field(default_factory=lambda: _get("WEIGHT_DECAY", 0.01, float))
-    warmup_steps: int              = field(default_factory=lambda: _get("WARMUP_STEPS", 1000, int))
-    max_grad_norm: float           = field(default_factory=lambda: _get("MAX_GRAD_NORM", 1.0, float))
-    train_batch_size: int          = field(default_factory=lambda: _get("TRAIN_BATCH_SIZE", 2, int))
-    eval_batch_size: int           = field(default_factory=lambda: _get("EVAL_BATCH_SIZE", 4, int))
-    gradient_accumulation_steps: int = field(default_factory=lambda: _get("GRADIENT_ACCUMULATION_STEPS", 1, int))
+    learning_rate: float           = field(default_factory=lambda: get("DAPT_LR", 5e-5, float))
+    weight_decay: float            = field(default_factory=lambda: get("WEIGHT_DECAY", 0.01, float))
+    warmup_steps: int              = field(default_factory=lambda: get("WARMUP_STEPS", 1000, int))
+    max_grad_norm: float           = field(default_factory=lambda: get("MAX_GRAD_NORM", 1.0, float))
+    train_batch_size: int          = field(default_factory=lambda: get("TRAIN_BATCH_SIZE", 2, int))
+    eval_batch_size: int           = field(default_factory=lambda: get("EVAL_BATCH_SIZE", 4, int))
+    gradient_accumulation_steps: int = field(default_factory=lambda: get("GRADIENT_ACCUMULATION_STEPS", 1, int))
 
 
 @dataclass
 class StorageConfig:
-    storage_target: str       = field(default_factory=lambda: _get("STORAGE_TARGET", "local"))
-    local_directory_path: str = field(default_factory=lambda: _get("LOCAL_DIRECTORY_PATH", "."))
-    aws_bucket_name: Optional[str] = field(default_factory=lambda: _get("AWS_BUCKET_NAME", None))
-    aws_prefix: str           = field(default_factory=lambda: _get("AWS_PREFIX", ""))
+    storage_target: str       = field(default_factory=lambda: get("STORAGE_TARGET", "local"))
+    local_directory_path: str = field(default_factory=lambda: get("LOCAL_DIRECTORY_PATH", "."))
+    aws_bucket_name: Optional[str] = field(default_factory=lambda: get("AWS_BUCKET_NAME", None))
+    aws_prefix: str           = field(default_factory=lambda: get("AWS_PREFIX", ""))
 
 
 @dataclass
 class LoggingConfig:
-    log_dir: Path                  = field(default_factory=lambda: Path(_get("LOG_DIR", "logs")))
-    metrics_log_file: Path         = field(default_factory=lambda: Path(_get("METRICS_LOG_FILE", "logs/dapt_eval_metrics.jsonl")))
-    risk_report_path: Path         = field(default_factory=lambda: Path(_get("RISK_REPORT_PATH", "logs/dapt_hard_cap_risk_report.json")))
-    log_level: str                 = field(default_factory=lambda: _get("LOG_LEVEL", "INFO"))
-    log_file: str                  = field(default_factory=lambda: _get("LOG_FILE", "pipeline.log"))
+    log_dir: Path                  = field(default_factory=lambda: Path(get("LOG_DIR", "logs")))
+    metrics_log_file: Path         = field(default_factory=lambda: Path(get("METRICS_LOG_FILE", "logs/dapt_eval_metrics.jsonl")))
+    risk_report_path: Path         = field(default_factory=lambda: Path(get("RISK_REPORT_PATH", "logs/dapt_hard_cap_risk_report.json")))
+    log_level: str                 = field(default_factory=lambda: get("LOG_LEVEL", "INFO"))
+    log_file: str                  = field(default_factory=lambda: get("LOG_FILE", "pipeline.log"))
 
 
 @dataclass
 class MiscConfig:
-    seed: int                      = field(default_factory=lambda: _get("SEED", 42, int))
+    seed: int                      = field(default_factory=lambda: get("SEED", 42, int))
 
 
 @dataclass
 class WandbConfig:
-    enabled: bool                  = field(default_factory=lambda: _get("WANDB_ENABLED", False, bool))
-    mode: str                      = field(default_factory=lambda: _get("WANDB_MODE", "online", str))
-    api_key: Optional[str]         = field(default_factory=lambda: _get("WANDB_API_KEY", None, str))
-    project: str                   = field(default_factory=lambda: _get("WANDB_PROJECT", "semantics-dapt", str))
-    entity: Optional[str]          = field(default_factory=lambda: _get("WANDB_ENTITY", None, str))
-    run_name: Optional[str]        = field(default_factory=lambda: _get("WANDB_RUN_NAME", None, str))
-    log_interval_steps: int        = field(default_factory=lambda: _get("WANDB_LOG_INTERVAL_STEPS", 10, int))
+    enabled: bool                  = field(default_factory=lambda: get("WANDB_ENABLED", False, bool))
+    mode: str                      = field(default_factory=lambda: get("WANDB_MODE", "online", str))
+    api_key: Optional[str]         = field(default_factory=lambda: get("WANDB_API_KEY", None, str))
+    project: str                   = field(default_factory=lambda: get("WANDB_PROJECT", "semantics-dapt", str))
+    entity: Optional[str]          = field(default_factory=lambda: get("WANDB_ENTITY", None, str))
+    run_name: Optional[str]        = field(default_factory=lambda: get("WANDB_RUN_NAME", None, str))
+    log_interval_steps: int        = field(default_factory=lambda: get("WANDB_LOG_INTERVAL_STEPS", 10, int))
 
     def __post_init__(self):
         if not self.run_name:
@@ -492,106 +493,106 @@ class WandbConfig:
 @dataclass
 class RADPrepConfig:
     # Corpus paths
-    retrieval_corpus_path: Path    = field(default_factory=lambda: Path(_get("RAD_CORPUS_PATH", "data/rad_prep/retrieval_corpus.jsonl")))
-    chunks_path: Path              = field(default_factory=lambda: Path(_get("RAD_CHUNKS_PATH", "data/rad_prep/chunks.jsonl")))
-    index_dir: Path                = field(default_factory=lambda: Path(_get("RAD_INDEX_DIR", "data/rad_prep/index")))
-    traces_dir: Path               = field(default_factory=lambda: Path(_get("RAD_TRACES_DIR", "data/rad_prep/traces")))
-    qa_samples_path: Path          = field(default_factory=lambda: Path(_get("RAD_QA_SAMPLES_PATH", "evals/dapt/probe_qa.jsonl")))
+    retrieval_corpus_path: Path    = field(default_factory=lambda: Path(get("RAD_CORPUS_PATH", "data/rad_prep/retrieval_corpus.jsonl")))
+    chunks_path: Path              = field(default_factory=lambda: Path(get("RAD_CHUNKS_PATH", "data/rad_prep/chunks.jsonl")))
+    index_dir: Path                = field(default_factory=lambda: Path(get("RAD_INDEX_DIR", "data/rad_prep/index")))
+    traces_dir: Path               = field(default_factory=lambda: Path(get("RAD_TRACES_DIR", "data/rad_prep/traces")))
+    qa_samples_path: Path          = field(default_factory=lambda: Path(get("RAD_QA_SAMPLES_PATH", "evals/dapt/probe_qa.jsonl")))
 
     # Retrieval settings
-    embedding_model: str           = field(default_factory=lambda: _get("RAD_EMBEDDING_MODEL", "biolinkbert"))
-    retrieval_mode: str            = field(default_factory=lambda: _get("RAD_RETRIEVAL_MODE", "hybrid"))  # dense|sparse|hybrid
-    top_k: int                     = field(default_factory=lambda: _get("RAD_TOP_K", 7, int))
-    relevance_threshold: float     = field(default_factory=lambda: _get("RAD_RELEVANCE_THRESHOLD", 0.65, float))
-    embed_batch_size: int          = field(default_factory=lambda: _get("RAD_EMBED_BATCH_SIZE", 64, int))
+    embedding_model: str           = field(default_factory=lambda: get("RAD_EMBEDDING_MODEL", "biolinkbert"))
+    retrieval_mode: str            = field(default_factory=lambda: get("RAD_RETRIEVAL_MODE", "hybrid"))  # dense|sparse|hybrid
+    top_k: int                     = field(default_factory=lambda: get("RAD_TOP_K", 7, int))
+    relevance_threshold: float     = field(default_factory=lambda: get("RAD_RELEVANCE_THRESHOLD", 0.65, float))
+    embed_batch_size: int          = field(default_factory=lambda: get("RAD_EMBED_BATCH_SIZE", 64, int))
 
     # Chunking
-    long_form_chunk_tokens: int    = field(default_factory=lambda: _get("RAD_LONG_FORM_CHUNK_TOKENS", 512, int))
-    long_form_overlap_tokens: int  = field(default_factory=lambda: _get("RAD_LONG_FORM_OVERLAP_TOKENS", 64, int))
-    abstract_chunk_tokens: int     = field(default_factory=lambda: _get("RAD_ABSTRACT_CHUNK_TOKENS", 256, int))
-    abstract_overlap_tokens: int   = field(default_factory=lambda: _get("RAD_ABSTRACT_OVERLAP_TOKENS", 32, int))
+    long_form_chunk_tokens: int    = field(default_factory=lambda: get("RAD_LONG_FORM_CHUNK_TOKENS", 512, int))
+    long_form_overlap_tokens: int  = field(default_factory=lambda: get("RAD_LONG_FORM_OVERLAP_TOKENS", 64, int))
+    abstract_chunk_tokens: int     = field(default_factory=lambda: get("RAD_ABSTRACT_CHUNK_TOKENS", 256, int))
+    abstract_overlap_tokens: int   = field(default_factory=lambda: get("RAD_ABSTRACT_OVERLAP_TOKENS", 32, int))
 
     # Teacher
-    teacher_backend: str           = field(default_factory=lambda: _get("RAD_TEACHER_BACKEND", "hf_local"))
-    teacher_model_name: str        = field(default_factory=lambda: _get("RAD_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B"))
-    teacher_api_url: Optional[str] = field(default_factory=lambda: _get("RAD_TEACHER_API_URL", None))
-    teacher_api_key: Optional[str] = field(default_factory=lambda: _get("RAD_TEACHER_API_KEY", None))
-    teacher_max_new_tokens: int    = field(default_factory=lambda: _get("RAD_TEACHER_MAX_NEW_TOKENS", 1024, int))
-    teacher_batch_size: int        = field(default_factory=lambda: _get("RAD_TEACHER_BATCH_SIZE", 4, int))
+    teacher_backend: str           = field(default_factory=lambda: get("RAD_TEACHER_BACKEND", "hf_local"))
+    teacher_model_name: str        = field(default_factory=lambda: get("RAD_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B"))
+    teacher_api_url: Optional[str] = field(default_factory=lambda: get("RAD_TEACHER_API_URL", None))
+    teacher_api_key: Optional[str] = field(default_factory=lambda: get("RAD_TEACHER_API_KEY", None))
+    teacher_max_new_tokens: int    = field(default_factory=lambda: get("RAD_TEACHER_MAX_NEW_TOKENS", 1024, int))
+    teacher_batch_size: int        = field(default_factory=lambda: get("RAD_TEACHER_BATCH_SIZE", 4, int))
 
     # Trace filtering
-    trace_min_tokens: int          = field(default_factory=lambda: _get("RAD_TRACE_MIN_TOKENS", 200, int))
-    trace_max_tokens: int          = field(default_factory=lambda: _get("RAD_TRACE_MAX_TOKENS", 2500, int))
-    min_traces: int                = field(default_factory=lambda: _get("RAD_MIN_TRACES", 1000, int))
+    trace_min_tokens: int          = field(default_factory=lambda: get("RAD_TRACE_MIN_TOKENS", 200, int))
+    trace_max_tokens: int          = field(default_factory=lambda: get("RAD_TRACE_MAX_TOKENS", 2500, int))
+    min_traces: int                = field(default_factory=lambda: get("RAD_MIN_TRACES", 1000, int))
 
 
 @dataclass
 class ClusteringConfig:
     # Input
-    corpus_path: Path              = field(default_factory=lambda: Path(_get("CLUSTERING_CORPUS_PATH", "data/dapt/domain_dapt_corpus.jsonl")))
+    corpus_path: Path              = field(default_factory=lambda: Path(get("CLUSTERING_CORPUS_PATH", "data/dapt/domain_dapt_corpus.jsonl")))
 
     # Embedding
-    embedding_model: str           = field(default_factory=lambda: _get("CLUSTERING_EMBEDDING_MODEL", "all-mpnet-base-v2"))
-    embed_batch_size: int          = field(default_factory=lambda: _get("CLUSTERING_EMBED_BATCH_SIZE", 64, int))
-    embeddings_cache_path: Path    = field(default_factory=lambda: Path(_get("CLUSTERING_EMBEDDINGS_CACHE", "data/clustering/embeddings.npy")))
-    doc_ids_cache_path: Path       = field(default_factory=lambda: Path(_get("CLUSTERING_DOC_IDS_CACHE", "data/clustering/doc_ids.json")))
+    embedding_model: str           = field(default_factory=lambda: get("CLUSTERING_EMBEDDING_MODEL", "all-mpnet-base-v2"))
+    embed_batch_size: int          = field(default_factory=lambda: get("CLUSTERING_EMBED_BATCH_SIZE", 64, int))
+    embeddings_cache_path: Path    = field(default_factory=lambda: Path(get("CLUSTERING_EMBEDDINGS_CACHE", "data/clustering/embeddings.npy")))
+    doc_ids_cache_path: Path       = field(default_factory=lambda: Path(get("CLUSTERING_DOC_IDS_CACHE", "data/clustering/doc_ids.json")))
 
     # HDBSCAN
-    hdbscan_min_cluster_size: int  = field(default_factory=lambda: _get("HDBSCAN_MIN_CLUSTER_SIZE", 10, int))
-    hdbscan_min_samples: int       = field(default_factory=lambda: _get("HDBSCAN_MIN_SAMPLES", 5, int))
-    hdbscan_metric: str            = field(default_factory=lambda: _get("HDBSCAN_METRIC", "cosine"))
-    min_clusters: int              = field(default_factory=lambda: _get("CLUSTERING_MIN_CLUSTERS", 10, int))
-    use_pca: bool                  = field(default_factory=lambda: _get("CLUSTERING_USE_PCA", True, bool))
-    pca_components: int            = field(default_factory=lambda: _get("CLUSTERING_PCA_COMPONENTS", 10, int))
+    hdbscan_min_cluster_size: int  = field(default_factory=lambda: get("HDBSCAN_MIN_CLUSTER_SIZE", 10, int))
+    hdbscan_min_samples: int       = field(default_factory=lambda: get("HDBSCAN_MIN_SAMPLES", 5, int))
+    hdbscan_metric: str            = field(default_factory=lambda: get("HDBSCAN_METRIC", "cosine"))
+    min_clusters: int              = field(default_factory=lambda: get("CLUSTERING_MIN_CLUSTERS", 10, int))
+    use_pca: bool                  = field(default_factory=lambda: get("CLUSTERING_USE_PCA", True, bool))
+    pca_components: int            = field(default_factory=lambda: get("CLUSTERING_PCA_COMPONENTS", 10, int))
 
     # Noise handling
-    noise_assignment: str          = field(default_factory=lambda: _get("CLUSTERING_NOISE_ASSIGNMENT", "nearest"))
+    noise_assignment: str          = field(default_factory=lambda: get("CLUSTERING_NOISE_ASSIGNMENT", "nearest"))
 
     # Imbalance reweighting
-    cluster_min_fraction: float    = field(default_factory=lambda: _get("CLUSTER_MIN_FRACTION", 0.02, float))
-    cluster_max_fraction: float    = field(default_factory=lambda: _get("CLUSTER_MAX_FRACTION", 0.15, float))
+    cluster_min_fraction: float    = field(default_factory=lambda: get("CLUSTER_MIN_FRACTION", 0.02, float))
+    cluster_max_fraction: float    = field(default_factory=lambda: get("CLUSTER_MAX_FRACTION", 0.15, float))
 
     # Split ratios
-    split_dev_ratio: float         = field(default_factory=lambda: _get("SPLIT_DEV_RATIO", 0.70, float))
-    split_val_ratio: float         = field(default_factory=lambda: _get("SPLIT_VAL_RATIO", 0.20, float))
-    split_sealed_ratio: float      = field(default_factory=lambda: _get("SPLIT_SEALED_RATIO", 0.10, float))
+    split_dev_ratio: float         = field(default_factory=lambda: get("SPLIT_DEV_RATIO", 0.70, float))
+    split_val_ratio: float         = field(default_factory=lambda: get("SPLIT_VAL_RATIO", 0.20, float))
+    split_sealed_ratio: float      = field(default_factory=lambda: get("SPLIT_SEALED_RATIO", 0.10, float))
 
     # Output paths
-    output_dir: Path               = field(default_factory=lambda: Path(_get("CLUSTERING_OUTPUT_DIR", "data/clustering")))
-    assignments_path: Path         = field(default_factory=lambda: Path(_get("CLUSTERING_ASSIGNMENTS_PATH", "data/clustering/cluster_assignments.jsonl")))
-    splits_path: Path              = field(default_factory=lambda: Path(_get("CLUSTERING_SPLITS_PATH", "data/clustering/splits.json")))
-    cluster_manifest_path: Path    = field(default_factory=lambda: Path(_get("CLUSTERING_MANIFEST_PATH", "data/clustering/cluster_manifest.json")))
-    cluster_report_path: Path      = field(default_factory=lambda: Path(_get("CLUSTERING_REPORT_PATH", "logs/clustering/cluster_report.json")))
+    output_dir: Path               = field(default_factory=lambda: Path(get("CLUSTERING_OUTPUT_DIR", "data/clustering")))
+    assignments_path: Path         = field(default_factory=lambda: Path(get("CLUSTERING_ASSIGNMENTS_PATH", "data/clustering/cluster_assignments.jsonl")))
+    splits_path: Path              = field(default_factory=lambda: Path(get("CLUSTERING_SPLITS_PATH", "data/clustering/splits.json")))
+    cluster_manifest_path: Path    = field(default_factory=lambda: Path(get("CLUSTERING_MANIFEST_PATH", "data/clustering/cluster_manifest.json")))
+    cluster_report_path: Path      = field(default_factory=lambda: Path(get("CLUSTERING_REPORT_PATH", "logs/clustering/cluster_report.json")))
 
 
 @dataclass
 class TeacherBenchmarkingConfig:
-    candidate_teachers: List[str]       = field(default_factory=lambda: [t.strip() for t in _get("BENCHMARK_TEACHERS", "Qwen/Qwen3-1.7B").split(",") if t.strip()])
-    judge_backend: str                  = field(default_factory=lambda: _get("BENCHMARK_JUDGE_BACKEND", "api"))
-    judge_model_name: str               = field(default_factory=lambda: _get("BENCHMARK_JUDGE_MODEL", ""))
-    judge_api_url: Optional[str]        = field(default_factory=lambda: _get("BENCHMARK_JUDGE_API_URL", None))
-    judge_api_key: Optional[str]        = field(default_factory=lambda: _get("BENCHMARK_JUDGE_API_KEY", None))
-    judge_max_new_tokens: int           = field(default_factory=lambda: _get("BENCHMARK_JUDGE_MAX_NEW_TOKENS", 256, int))
+    candidate_teachers: List[str]       = field(default_factory=lambda: [t.strip() for t in get("BENCHMARK_TEACHERS", "Qwen/Qwen3-1.7B").split(",") if t.strip()])
+    judge_backend: str                  = field(default_factory=lambda: get("BENCHMARK_JUDGE_BACKEND", "api"))
+    judge_model_name: str               = field(default_factory=lambda: get("BENCHMARK_JUDGE_MODEL", ""))
+    judge_api_url: Optional[str]        = field(default_factory=lambda: get("BENCHMARK_JUDGE_API_URL", None))
+    judge_api_key: Optional[str]        = field(default_factory=lambda: get("BENCHMARK_JUDGE_API_KEY", None))
+    judge_max_new_tokens: int           = field(default_factory=lambda: get("BENCHMARK_JUDGE_MAX_NEW_TOKENS", 256, int))
     
-    teacher_backend: str                = field(default_factory=lambda: _get("BENCHMARK_TEACHER_BACKEND", ""))
-    teacher_batch_size: int             = field(default_factory=lambda: _get("BENCHMARK_TEACHER_BATCH_SIZE", 4, int))
+    teacher_backend: str                = field(default_factory=lambda: get("BENCHMARK_TEACHER_BACKEND", ""))
+    teacher_batch_size: int             = field(default_factory=lambda: get("BENCHMARK_TEACHER_BATCH_SIZE", 4, int))
     
-    eval_sample_size: int               = field(default_factory=lambda: _get("BENCHMARK_EVAL_SAMPLE_SIZE", 200, int))
-    min_eval_samples: int               = field(default_factory=lambda: _get("BENCHMARK_MIN_EVAL_SAMPLES", 10, int))
+    eval_sample_size: int               = field(default_factory=lambda: get("BENCHMARK_EVAL_SAMPLE_SIZE", 200, int))
+    min_eval_samples: int               = field(default_factory=lambda: get("BENCHMARK_MIN_EVAL_SAMPLES", 10, int))
     
-    enable_calibration: bool            = field(default_factory=lambda: _get("BENCHMARK_ENABLE_CALIBRATION", False, bool))
-    human_calibration_size: int         = field(default_factory=lambda: _get("BENCHMARK_CALIBRATION_SIZE", 200, int))
-    human_labels_path: Optional[Path]   = field(default_factory=lambda: Path(_get("BENCHMARK_HUMAN_LABELS_PATH", "")) if _get("BENCHMARK_HUMAN_LABELS_PATH", "") else None)
+    enable_calibration: bool            = field(default_factory=lambda: get("BENCHMARK_ENABLE_CALIBRATION", False, bool))
+    human_calibration_size: int         = field(default_factory=lambda: get("BENCHMARK_CALIBRATION_SIZE", 200, int))
+    human_labels_path: Optional[Path]   = field(default_factory=lambda: Path(get("BENCHMARK_HUMAN_LABELS_PATH", "")) if get("BENCHMARK_HUMAN_LABELS_PATH", "") else None)
     
-    hallucination_nli_threshold: float  = field(default_factory=lambda: _get("BENCHMARK_HALLUCINATION_NLI_THRESHOLD", 0.5, float))
-    citation_min_overlap: float         = field(default_factory=lambda: _get("BENCHMARK_CITATION_MIN_OVERLAP", 0.30, float))
-    nli_model: str                      = field(default_factory=lambda: _get("BENCHMARK_NLI_MODEL", "cross-encoder/nli-deberta-v3-small"))
+    hallucination_nli_threshold: float  = field(default_factory=lambda: get("BENCHMARK_HALLUCINATION_NLI_THRESHOLD", 0.5, float))
+    citation_min_overlap: float         = field(default_factory=lambda: get("BENCHMARK_CITATION_MIN_OVERLAP", 0.30, float))
+    nli_model: str                      = field(default_factory=lambda: get("BENCHMARK_NLI_MODEL", "cross-encoder/nli-deberta-v3-small"))
     
-    output_dir: Path                    = field(default_factory=lambda: Path(_get("BENCHMARKING_OUTPUT_DIR", "data/benchmarking")))
-    scores_path: Path                   = field(default_factory=lambda: Path(_get("BENCHMARKING_SCORES_PATH", "data/benchmarking/scores.jsonl")))
-    manifest_path: Path                 = field(default_factory=lambda: Path(_get("BENCHMARKING_MANIFEST_PATH", "data/benchmarking/benchmark_manifest.json")))
-    calibration_log_path: Path          = field(default_factory=lambda: Path(_get("BENCHMARKING_CALIBRATION_LOG", "logs/benchmarking/judge_calibration.jsonl")))
-    inter_rater_log_path: Path          = field(default_factory=lambda: Path(_get("BENCHMARKING_INTER_RATER_LOG", "logs/benchmarking/inter_rater_agreement.json")))
+    output_dir: Path                    = field(default_factory=lambda: Path(get("BENCHMARKING_OUTPUT_DIR", "data/benchmarking")))
+    scores_path: Path                   = field(default_factory=lambda: Path(get("BENCHMARKING_SCORES_PATH", "data/benchmarking/scores.jsonl")))
+    manifest_path: Path                 = field(default_factory=lambda: Path(get("BENCHMARKING_MANIFEST_PATH", "data/benchmarking/benchmark_manifest.json")))
+    calibration_log_path: Path          = field(default_factory=lambda: Path(get("BENCHMARKING_CALIBRATION_LOG", "logs/benchmarking/judge_calibration.jsonl")))
+    inter_rater_log_path: Path          = field(default_factory=lambda: Path(get("BENCHMARKING_INTER_RATER_LOG", "logs/benchmarking/inter_rater_agreement.json")))
 
 
 @dataclass
@@ -745,9 +746,13 @@ class PipelineConfig:
     def summary(self) -> str:
         return (
             f"\n{'='*60}\n"
-            f"  DAPT Step 0.3 Configuration\n"
+            f"  DAPT Configuration\n"
             f"{'='*60}\n"
             f"  Model           : {self.model.base_model_name}\n"
+            f"  PEFT DAPT       : {self.model.peft_dapt}\n"
+            f"  Train batch size: {self.optimizer.train_batch_size}\n"
+            f"  Eval batch size : {self.optimizer.eval_batch_size}\n"
+            f"  Grad checkpoint : {self.model.gradient_checkpointing}\n"
             f"  Corpus tokens   : {self.corpus.total_corpus_tokens/1e3:.1f}K\n"
             f"  Max passes      : {self.corpus.max_corpus_passes}\n"
             f"  Hard stop       : {self.corpus.hard_stop_tokens/1e3:.1f}K tokens\n"

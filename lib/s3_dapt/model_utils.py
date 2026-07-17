@@ -9,18 +9,25 @@ def load_model_and_tokenizer(cfg: DAPTConfig, device: torch.device):
         tokenizer.pad_token = tokenizer.eos_token
 
     if device.type == "cuda":
-        torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         attn_implementation = "sdpa"
     else:
-        torch_dtype = torch.float32
+        dtype = torch.float32
         attn_implementation = "eager"
 
     model = AutoModelForCausalLM.from_pretrained(
         cfg.model.base_model_name,
-        dtype=torch_dtype,
+        dtype=dtype,
         attn_implementation=attn_implementation
     )
     model.to(device)
+
+    # Enable gradient checkpointing if configured
+    if getattr(cfg.model, "gradient_checkpointing", False):
+        if getattr(cfg.model, "peft_dapt", False):
+            # PEFT requires enable_input_require_grads() to force gradients on input embeddings
+            model.enable_input_require_grads()
+        model.gradient_checkpointing_enable()
 
     if getattr(cfg.model, "peft_dapt", False):
         try:

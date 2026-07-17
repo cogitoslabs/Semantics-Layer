@@ -18,6 +18,45 @@ from .worker import worker_init, worker_task, ExtractionResult
 logger = get_logger(__name__)
 
 
+def run_corpus_builder(cfg: PipelineConfig) -> None:
+    """
+    Unified entry point for the corpus builder pipeline.
+    Instantiates the storage adapter and corpus builder, then executes the pipeline.
+    """
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass
+
+    import sys
+    setup_logger(
+        f"{__name__}.{sys._getframe().f_code.co_name}",
+        cfg.logging,
+    )
+    global logger
+    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
+
+    # Log cached auto-resolution details to files and stream
+    for log_msg in cfg.build.resolution_logs:
+        logger.info(log_msg)
+    
+    storage = get_adapter(cfg.storage)
+ 
+    builder = CorpusBuilder(
+        storage=storage,
+        cfg=cfg.build,
+        logging_cfg=cfg.logging,
+    )
+    builder.build()
+
+
+def try_delete(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 class CorpusBuilder:
     """
     Streams PDFs from the configured storage backend, dispatches extraction
@@ -57,7 +96,7 @@ class CorpusBuilder:
             f"{self.total_workers} workers | GPUs {self.gpu_ids}"
         )
 
-        gpu_queue = self._make_gpu_queue()
+        gpu_queue = self.make_gpu_queue()
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -94,11 +133,11 @@ class CorpusBuilder:
 
                         suffix = Path(path).suffix.lower()
                         if suffix == ".pdf":
-                            success = self._queue_pdf(pool, filename, path, is_temp, active_docs)
+                            success = self.queue_pdf(pool, filename, path, is_temp, active_docs)
                             if not success:
                                 continue
                         else:
-                            self._queue_text_doc(pool, filename, path, is_temp, active_docs)
+                            self.queue_text_doc(pool, filename, path, is_temp, active_docs)
 
                     # 2. Process and write the oldest document in the queue
                     if active_docs:
@@ -121,7 +160,7 @@ class CorpusBuilder:
 
                         for chunk in valid_chunks:
                             total_tokens += chunk.token_count
-                            out.write(json.dumps(self._record(doc_index, filename, chunk)) + "\n")
+                            out.write(json.dumps(self.record(doc_index, filename, chunk)) + "\n")
                             out.flush()
                             logger.info(
                                 f"[OK] #{doc_index} {filename} (chunk {chunk.chunk_index}) | "
@@ -130,7 +169,7 @@ class CorpusBuilder:
                             doc_index += 1
 
                         if is_temp:
-                            _try_delete(path)
+                            try_delete(path)
 
                         active_docs.pop(0)
 
@@ -143,18 +182,16 @@ class CorpusBuilder:
             f"{total_tokens:,} tokens -> {self.output_path}"
         )
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
-    def _make_gpu_queue(self):
+    def make_gpu_queue(self):
         q = multiprocessing.Queue()
         for gpu_id in self.gpu_ids:
             for _ in range(self.workers_per_gpu):
                 q.put(gpu_id)
         return q
 
-    def _queue_pdf(
+
+    def queue_pdf(
         self,
         pool: Any,
         filename: str,
@@ -177,13 +214,13 @@ class CorpusBuilder:
         except Exception as e:
             logger.error(f"[ERROR] Could not open PDF {filename}: {e}")
             if is_temp:
-                _try_delete(path)
+                try_delete(path)
             return False
 
         if page_count == 0:
             logger.warning(f"[SKIP] {filename} has 0 pages")
             if is_temp:
-                _try_delete(path)
+                try_delete(path)
             return False
 
         chunk_size = max(2, self.chunk_size)
@@ -211,7 +248,8 @@ class CorpusBuilder:
         )
         return True
 
-    def _queue_text_doc(
+
+    def queue_text_doc(
         self,
         pool: Any,
         filename: str,
@@ -231,8 +269,9 @@ class CorpusBuilder:
             f"[PLAN] Queued document {filename} asynchronously..."
         )
 
+
     @staticmethod
-    def _record(index: int, filename: str, chunk: Any) -> dict:
+    def record(index: int, filename: str, chunk: Any) -> dict:
         return {
             "id": f"domain_doc_{index:06d}",
             "source_file": filename,
@@ -241,42 +280,3 @@ class CorpusBuilder:
             "text": chunk.text,
             "token_count": chunk.token_count,
         }
-
-
-def _try_delete(path: str) -> None:
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
-
-
-def run_corpus_builder(cfg: PipelineConfig) -> None:
-    """
-    Unified entry point for the corpus builder pipeline.
-    Instantiates the storage adapter and corpus builder, then executes the pipeline.
-    """
-    try:
-        multiprocessing.set_start_method('spawn', force=True)
-    except RuntimeError:
-        pass
-
-    import sys
-    setup_logger(
-        f"{__name__}.{sys._getframe().f_code.co_name}",
-        cfg.logging,
-    )
-    global logger
-    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
-
-    # Log cached auto-resolution details to files and stream
-    for log_msg in cfg.build.resolution_logs:
-        logger.info(log_msg)
-    
-    storage = get_adapter(cfg.storage)
- 
-    builder = CorpusBuilder(
-        storage=storage,
-        cfg=cfg.build,
-        logging_cfg=cfg.logging,
-    )
-    builder.build()

@@ -7,9 +7,109 @@ import pytest
 import torch
 import numpy as np
 
+import math
+from typing import Any, Dict, List
+
 from lib.utils import PipelineConfig
-from lib.s3_dapt.dapt import evaluate_perplexity, evaluate_qa_accuracy, run_dapt_pipeline
+from lib.s3_dapt.dapt import run_dapt_pipeline
 from lib.s2_pretokenize import run_pretokenization
+
+
+def evaluate_perplexity(
+    model: Any,
+    tokenizer: Any,
+    dataset: List[Dict[str, Any]],
+    block_size: int = 512
+) -> float:
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+
+    orig_max_len = getattr(tokenizer, "model_max_length", None)
+    tokenizer.model_max_length = 100_000_000
+
+    try:
+        with torch.inference_mode():
+            for item in dataset:
+                text = item.get("text", "")
+                if not text.strip():
+                    continue
+
+                tokens = tokenizer.encode(
+                    text,
+                    add_special_tokens=False
+                )
+
+                if tokenizer.eos_token_id is not None:
+                    tokens.append(tokenizer.eos_token_id)
+
+                for start in range(0, len(tokens), block_size):
+                    chunk = tokens[start:start + block_size]
+
+                    if len(chunk) < 2:
+                        continue
+
+                    input_ids = torch.tensor(
+                        [chunk],
+                        dtype=torch.long,
+                        device=model.device
+                    )
+
+                    attention_mask = torch.ones_like(input_ids)
+
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=input_ids
+                    )
+
+                    num_tokens = len(chunk) - 1
+
+                    total_loss += outputs.loss.item() * num_tokens
+                    total_tokens += num_tokens
+    finally:
+        if orig_max_len is not None:
+            tokenizer.model_max_length = orig_max_len
+
+    if total_tokens == 0:
+        return float("inf")
+
+    avg_nll = total_loss / total_tokens
+    return math.exp(avg_nll)
+
+
+def evaluate_qa_accuracy(model: Any, tokenizer: Any, probe_questions: List[Dict[str, Any]]) -> float:
+    model.eval()
+    correct = 0
+    total = 0
+    options = ["A", "B", "C", "D"]
+    
+    with torch.inference_mode():
+        for q in probe_questions:
+            prompt = f"Question: {q['question']}\nAnswer:"
+            inputs = tokenizer(prompt, return_tensors="pt")
+            input_ids = inputs["input_ids"].to(model.device)
+            attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids)).to(model.device)
+            
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+            next_token_logits = outputs.logits[0, -1, :]
+            next_token_probs = torch.softmax(next_token_logits, dim=-1)
+            
+            option_probs = {}
+            for opt in options:
+                opt_token_ids = tokenizer.encode(" " + opt, add_special_tokens=False)
+                if len(opt_token_ids) > 0:
+                    opt_token_id = opt_token_ids[-1]
+                    option_probs[opt] = next_token_probs[opt_token_id].item()
+                else:
+                    option_probs[opt] = 0.0
+            
+            best_option = max(option_probs, key=option_probs.get)
+            if best_option == q.get("answer"):
+                correct += 1
+            total += 1
+            
+    return (correct / total) * 100 if total > 0 else 0.0
 
 
 @pytest.fixture
@@ -123,12 +223,15 @@ def test_run_dapt_pipeline(mock_model, mock_tokenizer):
         with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
              patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
              patch("lib.s3_dapt.dapt.run_all_probes") as mock_run_probes, \
+             patch("lib.s3_dapt.training_helpers.run_all_probes") as mock_run_probes_th, \
              patch.dict(os.environ, {
                  "PPL_CORPUS_PATH": ppl_corpus_path,
                  "VOCAB_CLOZE_PATH": vocab_cloze_path,
                  "RETRIEVAL_PROMPTS_PATH": retrieval_prompts_path,
                  "RETRIEVAL_REFERENCES_PATH": retrieval_references_path,
                  "PRETOKENIZED_BIN_PATH": pretokenized_bin_path,
+                 "WANDB_ENABLED": "False",
+                 "PEFT_DAPT": "False",
              }):
                 mock_from_token.return_value = mock_tokenizer
                 mock_from_model.return_value = mock_model
@@ -146,6 +249,7 @@ def test_run_dapt_pipeline(mock_model, mock_tokenizer):
                         "concept_precision": 0.5,
                     }
                 }
+                mock_run_probes_th.return_value = mock_run_probes.return_value
                 
                 cfg = PipelineConfig()
                 cfg.model.base_model_name = "dummy-model"
@@ -199,6 +303,7 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
         with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
              patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
              patch("lib.s3_dapt.dapt.run_all_probes") as mock_run_probes, \
+             patch("lib.s3_dapt.training_helpers.run_all_probes") as mock_run_probes_th, \
              patch("wandb.init") as mock_wandb_init, \
              patch("wandb.login") as mock_wandb_login, \
              patch("wandb.log") as mock_wandb_log, \
@@ -213,6 +318,7 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
                  "WANDB_API_KEY": "test-key-12345",
                  "WANDB_PROJECT": "test-project",
                  "WANDB_LOG_INTERVAL_STEPS": "1",
+                 "PEFT_DAPT": "False",
              }):
              
             mock_from_token.return_value = mock_tokenizer
@@ -231,6 +337,7 @@ def test_run_dapt_pipeline_with_wandb(mock_model, mock_tokenizer):
                     "concept_precision": 0.5,
                 }
             }
+            mock_run_probes_th.return_value = mock_run_probes.return_value
             
             cfg = PipelineConfig()
             cfg.model.base_model_name = "dummy-model"
@@ -277,6 +384,8 @@ def test_run_dapt_pipeline_missing_files_raises_error(mock_model, mock_tokenizer
             "RETRIEVAL_PROMPTS_PATH": os.path.join(tmpdir, "missing_prompts.json"),
             "RETRIEVAL_REFERENCES_PATH": os.path.join(tmpdir, "missing_references.json"),
             "PRETOKENIZED_BIN_PATH": pretokenized_bin_path,
+            "WANDB_ENABLED": "False",
+            "PEFT_DAPT": "False",
         }):
             with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
                  patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model:
@@ -540,6 +649,8 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
             "RUN_PERPLEXITY_PROBE": "False",
             "RUN_CLOZE_PROBE": "False",
             "RUN_CONCEPT_PROBE": "False",
+            "WANDB_ENABLED": "False",
+            "PEFT_DAPT": "False",
             "PPL_CORPUS_PATH": os.path.join(tmpdir, "missing_ppl.txt"),
             "CLOZE_SET_PATH": os.path.join(tmpdir, "missing_vocab.json"),
             "CONCEPT_PROMPTS_PATH": os.path.join(tmpdir, "missing_prompts.json"),
@@ -548,7 +659,8 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
         }):
             with patch("lib.s3_dapt.model_utils.AutoTokenizer.from_pretrained") as mock_from_token, \
                  patch("lib.s3_dapt.model_utils.AutoModelForCausalLM.from_pretrained") as mock_from_model, \
-                 patch("lib.s3_dapt.dapt.run_all_probes") as mock_run_probes:
+                 patch("lib.s3_dapt.dapt.run_all_probes") as mock_run_probes, \
+                 patch("lib.s3_dapt.training_helpers.run_all_probes") as mock_run_probes_th:
                 mock_from_token.return_value = mock_tokenizer
                 mock_from_model.return_value = mock_model
                 mock_run_probes.return_value = {
@@ -565,6 +677,7 @@ def test_run_dapt_pipeline_disabled_probes_bypasses_missing_files(mock_model, mo
                         "concept_precision": 0.0,
                     }
                 }
+                mock_run_probes_th.return_value = mock_run_probes.return_value
                 
                 cfg = PipelineConfig()
                 cfg.model.base_model_name = "dummy-model"
@@ -711,45 +824,45 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
         with open(retrieval_references_path, "w") as f:
             json.dump(["Ref1"], f)
             
-        # Create pipeline config
-        cfg = PipelineConfig()
-        cfg.model.checkpoint_dir = model_dir
-        cfg.logging.log_dir = Path(tmpdir) / "logs"
-        cfg.data.qa_probe_path = qa_path
-        cfg.data.cloze_set_path = vocab_path
-        cfg.data.concept_prompts_path = retrieval_prompts_path
-        cfg.data.concept_references_path = retrieval_references_path
-        cfg.probes.run_qa = True
-        cfg.probes.run_cloze = True
-        cfg.probes.run_concept = True
-        
-        # Mock AutoModelForCausalLM.from_pretrained and AutoTokenizer.from_pretrained
-        with patch("transformers.AutoModelForCausalLM.from_pretrained") as mock_model_load, \
-             patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer_load, \
-             patch("lib.s3_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa, \
-             patch("lib.s3_dapt.probes.cloze_probe.get_failed_cloze_samples") as mock_get_failed_term, \
-             patch("lib.s3_dapt.probes.concept_probe.get_failed_concept_samples") as mock_get_failed_ret:
-             
-            mock_model_load.return_value = mock_model
-            mock_tokenizer_load.return_value = mock_tokenizer
-            
-            # Setup dummy failures
-            mock_get_failed_qa.return_value = [{"question": "Q2", "expected_idx": 1, "expected_text": "B", "predicted_idx": 0, "predicted_text": "A", "cluster": "cat2"}]
-            mock_get_failed_term.return_value = [{"prompt": "___ is cool.", "target_term": "Term1", "generated_completions": ["completions"], "category": "cat1"}]
-            mock_get_failed_ret.return_value = [{"prompt": "Prompt1", "reference": "Ref1", "generated": "Gen1", "score": 0.35}]
-            
-            run_inference_and_log_failures(cfg)
-            
-            # Verify failures file was written
-            failed_evals_file = cfg.logging.log_dir / "failed_evals.json"
-            assert failed_evals_file.exists()
-            
-            with open(failed_evals_file, "r") as f:
-                data = json.load(f)
+        # Create pipeline config and run mock inference
+        with patch.dict(os.environ, {"PEFT_DAPT": "False", "WANDB_ENABLED": "False"}):
+            cfg = PipelineConfig()
+            cfg.model.checkpoint_dir = model_dir
+            cfg.logging.log_dir = Path(tmpdir) / "logs"
+            cfg.data.qa_probe_path = qa_path
+            cfg.data.cloze_set_path = vocab_path
+            cfg.data.concept_prompts_path = retrieval_prompts_path
+            cfg.data.concept_references_path = retrieval_references_path
+            cfg.probes.run_qa = True
+            cfg.probes.run_cloze = True
+            cfg.probes.run_concept = True
+
+            with patch("transformers.AutoModelForCausalLM.from_pretrained") as mock_model_load, \
+                 patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer_load, \
+                 patch("lib.s3_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa, \
+                 patch("lib.s3_dapt.probes.cloze_probe.get_failed_cloze_samples") as mock_get_failed_term, \
+                 patch("lib.s3_dapt.probes.concept_probe.get_failed_concept_samples") as mock_get_failed_ret:
+                 
+                mock_model_load.return_value = mock_model
+                mock_tokenizer_load.return_value = mock_tokenizer
                 
-            assert "qa" in data
-            assert len(data["qa"]) == 1
-            assert data["qa"][0]["question"] == "Q2"
+                # Setup dummy failures
+                mock_get_failed_qa.return_value = [{"question": "Q2", "expected_idx": 1, "expected_text": "B", "predicted_idx": 0, "predicted_text": "A", "cluster": "cat2"}]
+                mock_get_failed_term.return_value = [{"prompt": "___ is cool.", "target_term": "Term1", "generated_completions": ["completions"], "category": "cat1"}]
+                mock_get_failed_ret.return_value = [{"prompt": "Prompt1", "reference": "Ref1", "generated": "Gen1", "score": 0.35}]
+                
+                run_inference_and_log_failures(cfg)
+                
+                # Verify failures file was written
+                failed_evals_file = cfg.logging.log_dir / "failed_evals.json"
+                assert failed_evals_file.exists()
+                
+                with open(failed_evals_file, "r") as f:
+                    data = json.load(f)
+                    
+                assert "qa" in data
+                assert len(data["qa"]) == 1
+                assert data["qa"][0]["question"] == "Q2"
             
             assert "cloze" in data
             assert len(data["cloze"]) == 1
@@ -951,7 +1064,7 @@ def test_run_inference_and_log_failures_peft(mock_model, mock_tokenizer):
             # Verify base model load was called with the base model name
             mock_base_load.assert_called_once_with(
                 "dummy-model",
-                torch_dtype=torch.float32,
+                dtype=torch.float32,
                 attn_implementation="eager"
             )
             

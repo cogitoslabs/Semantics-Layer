@@ -1,5 +1,32 @@
 # Change History
 
+## Status: Completed (dapt_pipeline_impl, build_corpus, utils Refactoring, metrics_compat Clean Up, and Split-Batch OOM Recovery)
+
+- Refactored `_run_dapt_pipeline_impl` in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) to reduce its overall length and complexity.
+- Extracted model and tokenizer initialization, cache settings, and torch compilation into `_init_model_and_tokenizer`.
+- Extracted state dictionary setup into `_init_state`.
+- Extracted the evaluation validation checks, execution cycle, and memory warning / CUDA OOM retries into `_run_evaluation_cycle`.
+- Extracted the entire training loop block and final validation checks into `_run_training_loop`.
+- Removed the redundant `output_dir` local variable and parameter across `_run_training_loop`, `_handle_decision_action`, and `_handle_final_check` by referencing `str(cfg.model.checkpoint_dir)` directly within the handler functions.
+- Removed leading underscores (`_`) from all private helper functions in `dapt.py`, `build_corpus.py`, and `lib/utils` (`storage.py`, `profiller.py`, `checkpoint.py`, `config.py`) to establish consistent naming styling.
+- Reordered all function definitions in `dapt.py`, `build_corpus.py`, `storage.py`, `profiller.py`, `checkpoint.py`, and `config.py` to match the exact sequential order in which they are invoked during execution.
+- Verified that `pretokenize.py` does not contain any private helper functions and thus required no changes.
+- Completely removed the legacy `metrics_compat.py` file, cleaned up the unused imports in `dapt.py`, and moved the helper functions to `tests/test_dapt.py` to keep the unit tests functioning and self-contained.
+- Implemented a split-batch retry fallback mechanism in `train_step` and `run_train_step` to recover from CUDA Out-of-Memory (OOM) errors by splitting the failed batch into two halves and accumulating gradients with proper loss/gradient scaling (0.5), as well as clearing references in a `finally` block to prevent activation memory leaks.
+- Verified the correctness of all refactoring changes by running the local test suite (`.venv\Scripts\python -m pytest`), resulting in all **81 / 81 tests passing** successfully.
+
+---
+
+## Status: Completed (DAPT Configuration Summary and Execution Stats Update)
+
+- Modified the `summary` method of `PipelineConfig` in [config.py](file:///e:/Projects/cnd\Semantics/lib/utils/config.py) to display `train_batch_size`, `eval_batch_size`, `gradient_checkpointing`, and `peft_dapt` settings.
+- Added a unit test `test_pipeline_config_summary` in [test_config.py](file:///e:/Projects/cnd/Semantics/tests/test_config.py) to verify the presence of these fields in the summary text.
+- Modified `run_dapt_pipeline` in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) to track execution duration and the total tokens processed, logging/printing these statistics at the end of the run.
+- Patched unit tests in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py) to isolate process-level environment variables (like `WANDB_ENABLED` and `PEFT_DAPT`) and avoid loading real SciBERT checkpoints during testing.
+- Verified that all unit tests pass successfully.
+
+---
+
 ## Status: Completed (PEFT-DAPT Support)
 
 - Implemented Parameter-Efficient Continued Pretraining (PEFT-DAPT) using LoRA (Low-Rank Adaptation) adapters.

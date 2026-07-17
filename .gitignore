@@ -21,6 +21,7 @@ outputs/dapt_model/
 models/
 
 logs/
+oldlogs/
 wandb
 
 # Generated clustering embeddings

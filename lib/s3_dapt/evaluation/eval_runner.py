@@ -291,10 +291,10 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         attn_implementation = "sdpa"
     else:
-        torch_dtype = torch.float32
+        dtype = torch.float32
         attn_implementation = "eager"
 
     try:
@@ -302,14 +302,14 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
             from peft import PeftModel
             base_model = AutoModelForCausalLM.from_pretrained(
                 cfg.model.base_model_name,
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 attn_implementation=attn_implementation
             )
             model = PeftModel.from_pretrained(base_model, str(model_dir))
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 str(model_dir),
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 attn_implementation=attn_implementation
             )
         model.to(device)

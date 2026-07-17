@@ -32,6 +32,15 @@ def copy_state_dict_to_cpu(state_dict):
         return state_dict
 
 
+def rotate_checkpoints(checkpoint_dir: Path, keep_last: int) -> None:
+    """Delete oldest checkpoints, keeping only the `keep_last` most recent."""
+    ckpts = sorted(checkpoint_dir.glob("dapt_eval_*.pt"), key=lambda p: p.stat().st_mtime)
+    to_delete = ckpts[: max(0, len(ckpts) - keep_last)]
+    for old in to_delete:
+        old.unlink()
+        logger.debug(f"Rotated out checkpoint: {old}")
+
+
 def save_checkpoint(
     model,
     optimizer,
@@ -108,7 +117,7 @@ def save_checkpoint(
 
         # Rotate checkpoints on background thread as well
         try:
-            _rotate_checkpoints(checkpoint_dir, keep_last=keep_last)
+            rotate_checkpoints(checkpoint_dir, keep_last=keep_last)
         except Exception as ex:
             logger.warning(f"Failed to rotate checkpoints on background thread: {ex}")
 
@@ -151,15 +160,6 @@ def load_checkpoint(
     except Exception as e:
         logger.warning(f"Failed to load checkpoint from {ckpt_path} (expected if dummy mock file): {e}")
         return {}
-
-
-def _rotate_checkpoints(checkpoint_dir: Path, keep_last: int) -> None:
-    """Delete oldest checkpoints, keeping only the `keep_last` most recent."""
-    ckpts = sorted(checkpoint_dir.glob("dapt_eval_*.pt"), key=lambda p: p.stat().st_mtime)
-    to_delete = ckpts[: max(0, len(ckpts) - keep_last)]
-    for old in to_delete:
-        old.unlink()
-        logger.debug(f"Rotated out checkpoint: {old}")
 
 
 def select_best_checkpoint(
