@@ -728,7 +728,27 @@ def test_check_convergence_gates_disabled_probes():
     assert gate_details["ppl_gate"] is True
     assert gate_details["secondary_gate"] is False
 
-    # Now if we disable terminology and retrieval as well, all gates are satisfied
+    # Now if we disable terminology and retrieval as well, all gates are satisfied.
+    # But because tokens_processed (100) < total_corpus_tokens (500), it should return CONTINUE.
+    decision, gate_details = check_convergence_gates(
+        state=state,
+        qa_acc_threshold=0.55,
+        ppl_improvement_threshold=2.0,
+        ppl_plateau_window=2,
+        cloze_threshold=0.80,
+        concept_threshold=0.60,
+        hard_stop_tokens=1000,
+        total_corpus_tokens=500,
+        run_qa=False,
+        run_perplexity=False,
+        run_cloze=False,
+        run_concept=False,
+    )
+    assert decision == DAPTDecision.CONTINUE
+    assert gate_details["all_converged"] is True
+
+    # If we increase tokens_processed to >= total_corpus_tokens, it should return CONVERGED.
+    state["tokens_processed"] = 600
     decision, gate_details = check_convergence_gates(
         state=state,
         qa_acc_threshold=0.55,
@@ -745,6 +765,56 @@ def test_check_convergence_gates_disabled_probes():
     )
     assert decision == DAPTDecision.CONVERGED
     assert gate_details["all_converged"] is True
+
+
+def test_check_convergence_gates_requires_one_pass():
+    from lib.s3_dapt.evaluation.gate_logic import check_convergence_gates, DAPTDecision
+    
+    state = {
+        "tokens_processed": 400,
+        "perplexity_history": [],
+        "qa_acc_history": [],
+        "cloze_cov_history": [],
+        "concept_prec_history": [],
+    }
+    
+    # All probes disabled so convergence is met.
+    # tokens_processed is 400, total_corpus_tokens is 500.
+    # Should continue because 1 full pass is not completed yet.
+    decision, gate_details = check_convergence_gates(
+        state=state,
+        qa_acc_threshold=0.55,
+        ppl_improvement_threshold=2.0,
+        ppl_plateau_window=2,
+        cloze_threshold=0.80,
+        concept_threshold=0.60,
+        hard_stop_tokens=1000,
+        total_corpus_tokens=500,
+        run_qa=False,
+        run_perplexity=False,
+        run_cloze=False,
+        run_concept=False,
+    )
+    assert decision == DAPTDecision.CONTINUE
+    assert gate_details["all_converged"] is True
+
+    # Now let's complete the pass by processing more tokens
+    state["tokens_processed"] = 500
+    decision, gate_details = check_convergence_gates(
+        state=state,
+        qa_acc_threshold=0.55,
+        ppl_improvement_threshold=2.0,
+        ppl_plateau_window=2,
+        cloze_threshold=0.80,
+        concept_threshold=0.60,
+        hard_stop_tokens=1000,
+        total_corpus_tokens=500,
+        run_qa=False,
+        run_perplexity=False,
+        run_cloze=False,
+        run_concept=False,
+    )
+    assert decision == DAPTDecision.CONVERGED
 
 
 def test_select_best_checkpoint_fallback_metrics():

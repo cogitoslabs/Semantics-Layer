@@ -1,5 +1,14 @@
 # Change History
 
+## Status: Completed (Convergence Gate Minimum Pass Enforcement and .gitignore Cleanup)
+
+- Modified `check_convergence_gates` in [gate_logic.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/gate_logic.py) to require at least one full pass through the training corpus (`tokens_processed >= total_corpus_tokens`) before allowing convergence to trigger, preventing early stopping on unrepresentative steps.
+- Updated `.gitignore` in [.gitignore](file:///e:/Projects/cnd/Semantics/.gitignore) to simplify ignore rules by ignoring the entire `data/` directory.
+- Added comprehensive unit tests `test_check_convergence_gates_requires_one_pass` and updated `test_check_convergence_gates_disabled_probes` in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py) to verify the minimum pass requirement for convergence.
+- Verified that all 82 tests pass successfully.
+
+---
+
 ## Status: Completed (dapt_pipeline_impl, build_corpus, utils Refactoring, metrics_compat Clean Up, and Split-Batch OOM Recovery)
 
 - Refactored `_run_dapt_pipeline_impl` in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) to reduce its overall length and complexity.

@@ -106,6 +106,12 @@ def check_convergence_gates(
 
     # ── Normal Convergence ────────────────────────────────────────────────────
     if all_converged:
+        if state["tokens_processed"] < total_corpus_tokens:
+            logger.info(
+                f"Convergence criteria met at {state['tokens_processed']} tokens, "
+                f"but continuing to complete at least 1 full pass ({total_corpus_tokens} tokens)."
+            )
+            return DAPTDecision.CONTINUE, gate_details
         return DAPTDecision.CONVERGED, gate_details
 
     return DAPTDecision.CONTINUE, gate_details
