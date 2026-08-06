@@ -360,7 +360,8 @@ def test_pipeline_end_to_end(test_cfg):
             mock_ret_embedder_class.return_value = mock_emb
 
             from lib.s4_rad_prep import run_rad_prep_pipeline
-            run_rad_prep_pipeline(test_cfg, rad_mode="full")
+            run_rad_prep_pipeline(test_cfg)
+
 
             # Check all artifacts
             assert test_cfg.rad.chunks_path.exists()

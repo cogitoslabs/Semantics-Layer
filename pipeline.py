@@ -21,25 +21,20 @@ if __name__ == "__main__":
         default="all",
         help="Pipeline step to execute: s1 (Corpus Construction), s2 (Pre-tokenization), s3 (Domain Adaptive Pretraining), s4 (Retrieval-Augmented Distillation Prep), s5 (Corpus Engineering & Micro-Clustering), s6 (Teacher Benchmarking)"
     )
-    parser.add_argument(
-        "--rad-mode",
-        choices=["index", "prompts", "traces", "full"],
-        default="full",
-        help="Sub-mode for step s4: index (chunk & index corpus), prompts (prepare grounded QA prompts), full (index and prepare prompts)"
-    )
 
     args = parser.parse_args()
+
     # Instantiate and validate configuration
     cfg = PipelineConfig()
     cfg.validate()
     cfg.ensure_dirs()
-    
+
     # Initialize pipeline logging
     setup_logger("pipeline", cfg.logging)
     logger = get_logger("pipeline")
-    
+
     logger.info(f"Args step are : {args.step}")
-    
+
     if args.step == "s1" or args.step == "all":
         logger.info("Initializing corpus building pipeline using Docling parser")
         run_corpus_builder(cfg)
@@ -56,14 +51,11 @@ if __name__ == "__main__":
         logger.info("Running final inference on saved model and logging failed evaluations...")
         run_inference_and_log_failures(cfg)
     if args.step == "s4" or args.step == "all":
-        rad_mode = getattr(args, "rad_mode", "full")
-        logger.info(f"Initializing Retrieval-Augmented Distillation Preparation (RAD Prep) in mode: {rad_mode}")
-        run_rad_prep_pipeline(cfg, rad_mode)
+        logger.info("Initializing Retrieval-Augmented Distillation Preparation (RAD Prep)")
+        run_rad_prep_pipeline(cfg)
     if args.step == "s5" or args.step == "all":
         logger.info("Initializing Corpus Engineering & Micro-Clustering (Step 5)")
         run_clustering_pipeline(cfg)
     if args.step == "s6" or args.step == "all":
         logger.info("Initializing Teacher Benchmarking (Phase 2, Step 2.1)")
         run_teacher_benchmarking(cfg)
-
-
