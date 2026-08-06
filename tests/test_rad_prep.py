@@ -279,7 +279,7 @@ def test_trace_generator_no_retrieval(test_cfg):
     assert "\\boxed{}" in prompt
 
 
-def test_trace_token_filter(test_cfg):
+def test_trace_prompt_generator(test_cfg):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         test_cfg.rad.traces_dir = tmp_path / "traces"
@@ -292,53 +292,34 @@ def test_trace_token_filter(test_cfg):
         ]
 
         ret_results = [
-            RetrievalResult(chunks=[], scores=[], passed_threshold=2, retrieval_mode="dense"),
-            RetrievalResult(chunks=[], scores=[], passed_threshold=2, retrieval_mode="dense"),
-            RetrievalResult(chunks=[], scores=[], passed_threshold=2, retrieval_mode="dense")
+            RetrievalResult(chunks=[Chunk(chunk_id="c1", doc_id="d1", doc_type="abstract", text="context 1", token_count=2)], scores=[0.9], passed_threshold=2, retrieval_mode="dense"),
+            RetrievalResult(chunks=[Chunk(chunk_id="c2", doc_id="d2", doc_type="abstract", text="context 2", token_count=2)], scores=[0.95], passed_threshold=2, retrieval_mode="dense"),
+            RetrievalResult(chunks=[], scores=[], passed_threshold=0, retrieval_mode="dense")
         ]
 
         router = NoRetrievalRouter(tmp_path / "logs" / "rad_prep" / "no_retrieval_rates.jsonl")
 
-        # Mock Teacher backend outputs:
-        # trace 1: 5 words (short -> discarded if min is 10)
-        # trace 2: 25 words (valid)
-        # trace 3: 100 words (long -> discarded if max is 50)
-        traces = [
-            "short trace",
-            "This is a valid trace with exactly fifteen words in it to satisfy the requirements",
-            " ".join(["long"] * 80)
-        ]
+        generator = TraceGenerator(test_cfg)
+        generator.generate_traces(samples, ret_results, router)
 
-        with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
-             patch("lib.s4_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
-            mock_tokenizer = SimpleMockTokenizer()
-            mock_tok_class.return_value = mock_tokenizer
+        # Check files
+        grounded_file = test_cfg.rad.traces_dir / "grounded_traces.jsonl"
+        no_ret_file = test_cfg.rad.traces_dir / "no_retrieval_traces.jsonl"
 
-            mock_backend = MagicMock()
-            mock_backend.generate_batch.return_value = traces
-            mock_backend_class.return_value = mock_backend
+        assert grounded_file.exists()
+        assert no_ret_file.exists()
 
-            generator = TraceGenerator(test_cfg)
-            generator.generate_traces(samples, ret_results, router)
+        with open(grounded_file, "r") as f:
+            grounded_lines = [json.loads(line) for line in f]
+        with open(no_ret_file, "r") as f:
+            no_ret_lines = [json.loads(line) for line in f]
 
-            # Check files
-            grounded_file = test_cfg.rad.traces_dir / "grounded_traces.jsonl"
-            discarded_file = test_cfg.logging.log_dir / "rad_prep" / "discarded_traces.jsonl"
+        assert len(grounded_lines) == 2
+        assert grounded_lines[0]["sample_id"] == "s1"
+        assert grounded_lines[1]["sample_id"] == "s2"
 
-            assert grounded_file.exists()
-            assert discarded_file.exists()
-
-            with open(grounded_file, "r") as f:
-                grounded_lines = [json.loads(line) for line in f]
-            with open(discarded_file, "r") as f:
-                discarded_lines = [json.loads(line) for line in f]
-
-            assert len(grounded_lines) == 1
-            assert grounded_lines[0]["sample_id"] == "s2"
-
-            assert len(discarded_lines) == 2
-            assert discarded_lines[0]["sample_id"] == "s1"
-            assert discarded_lines[1]["sample_id"] == "s3"
+        assert len(no_ret_lines) == 1
+        assert no_ret_lines[0]["sample_id"] == "s3"
 
 
 def test_pipeline_end_to_end(test_cfg):
@@ -364,8 +345,7 @@ def test_pipeline_end_to_end(test_cfg):
         # Mock tokenizers and embeddings
         with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
              patch("lib.s4_rad_prep.indexer.DenseEmbedder") as mock_embedder_class, \
-             patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_ret_embedder_class, \
-             patch("lib.s4_rad_prep.trace_generator.LocalHFBackend") as mock_backend_class:
+             patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_ret_embedder_class:
 
             mock_tok = SimpleMockTokenizer()
             mock_tok_class.return_value = mock_tok
@@ -376,13 +356,6 @@ def test_pipeline_end_to_end(test_cfg):
             )
             mock_embedder_class.return_value = mock_emb
             mock_ret_embedder_class.return_value = mock_emb
-
-            mock_backend = MagicMock()
-            mock_backend.generate_batch.return_value = [
-                "This is a valid trace for question one that has enough length to pass the token filter.",
-                "This is another valid trace for question two that has enough length to pass the token filter."
-            ]
-            mock_backend_class.return_value = mock_backend
 
             from lib.s4_rad_prep import run_rad_prep_pipeline
             run_rad_prep_pipeline(test_cfg, rad_mode="full")
@@ -397,6 +370,7 @@ def test_pipeline_end_to_end(test_cfg):
                 manifest = json.load(f)
                 assert manifest["status"] == "complete"
                 assert manifest["metrics"]["grounded_trace_count"] == 2
+
 
         from lib.utils.logger import close_loggers
         close_loggers()
@@ -419,31 +393,35 @@ def test_trace_generator_bedrock(test_cfg):
         mock_client_instance = MagicMock()
         mock_client_instance.converse.return_value = mock_response
         mock_boto_client.return_value = mock_client_instance
-
-        generator = TraceGenerator(test_cfg)
-        traces = generator.backend.generate_batch(["Test prompt"])
+        from lib.s4_rad_prep.trace_generator import BedrockBackend
+        backend = BedrockBackend(test_cfg)
+        traces = backend.generate_batch(["Test prompt"])
 
         assert len(traces) == 1
         assert traces[0] == "This is a response from Llama on Bedrock."
         mock_client_instance.converse.assert_called_once()
 
 
+
 def test_trace_generator_bedrock_missing_credentials(test_cfg):
     test_cfg.rad.teacher_backend = "aws"
+    from lib.s4_rad_prep.trace_generator import BedrockBackend
     with patch.dict("os.environ", {}, clear=True):
         with pytest.raises(RuntimeError, match="SEVERE ERROR: Missing AWS credentials"):
-            TraceGenerator(test_cfg)
+            BedrockBackend(test_cfg)
 
 
 def test_trace_generator_bedrock_api_error(test_cfg):
     test_cfg.rad.teacher_backend = "bedrock"
+    from lib.s4_rad_prep.trace_generator import BedrockBackend
     with patch.dict("os.environ", {"AWS_ACCESS_KEY_ID": "test_id", "AWS_SECRET_ACCESS_KEY": "test_secret"}), \
          patch("boto3.client") as mock_boto_client:
         mock_client_instance = MagicMock()
         mock_client_instance.converse.side_effect = Exception("Access Denied / Unable to locate credentials")
         mock_boto_client.return_value = mock_client_instance
 
-        generator = TraceGenerator(test_cfg)
+        backend = BedrockBackend(test_cfg)
         with pytest.raises(RuntimeError, match="SEVERE ERROR: AWS Bedrock API call failed"):
-            generator.backend.generate_batch(["Test prompt"])
+            backend.generate_batch(["Test prompt"])
+
 

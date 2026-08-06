@@ -1,6 +1,16 @@
 # Change History
 
-## Status: Completed (Online Probe Check Streamlit Web UI `ui/app.py`)
+## Status: Completed (Removed LLM Teacher Trace Generation from `s4_rad_prep`)
+
+- Refactored `s4_rad_prep` ([rad_prep.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/rad_prep.py) and [trace_generator.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/trace_generator.py)) to remove redundant LLM teacher trace generation.
+- Streamlined `s4_rad_prep` to focus on document chunking (`chunker.py`), FAISS & BM25 indexing (`indexer.py`), context retrieval routing (`retriever.py`, `no_retrieval_router.py`), and preparing grounded QA prompt records (`grounded_traces.jsonl` and `no_retrieval_traces.jsonl`).
+- Preserved teacher backend classes (`LocalHFBackend`, `APIBackend`, `BedrockBackend`) in [trace_generator.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/trace_generator.py) for downstream candidate teacher benchmarking (`s6_teacher_benchmarking`) and post-`s6` full trace generation.
+- Updated feature specification in [rad-prep.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/rad-prep.md) and documentation in [S4_RAD_PREP.md](file:///e:/Projects/cnd/Semantics/docs/S4_RAD_PREP.md).
+- Updated unit test suite in [test_rad_prep.py](file:///e:/Projects/cnd/Semantics/tests/test_rad_prep.py).
+- Verified **100% test pass rate across all 125 workspace unit tests** (**125/125 passing**).
+
+---
+
 
 - Built interactive Streamlit Web Application in [app.py](file:///e:/Projects/cnd/Semantics/ui/app.py) under `ui/` directory.
 - Added 2 primary input controls: **Probe** radio selector (`Cloze Probe` vs `Concept Probe`) and **Prompt** multiline input area.

@@ -21,10 +21,8 @@ class TraceRecord:
     answer: str
     retrieved_context: str
     no_retrieval: bool
-    teacher_trace: str
-    token_count: int
-    teacher_model: str
     embedding_model: str
+
 
 
 class TeacherModelBackend:
@@ -222,51 +220,30 @@ def format_prompt(question: str, answer: str, context_chunks: List[Chunk], no_re
 
 
 class TraceGenerator:
+    """Generates grounded QA prompt records (with retrieved context) for downstream teacher benchmarking and trace generation."""
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
-        self.student_tokenizer = AutoTokenizer.from_pretrained(cfg.model.base_model_name)
-
-        backend_type = cfg.rad.teacher_backend.lower() if cfg.rad.teacher_backend else ""
-        if backend_type == "hf_local":
-            self.backend = LocalHFBackend(cfg)
-        elif backend_type == "api":
-            self.backend = APIBackend(cfg)
-        elif backend_type in ("bedrock", "aws"):
-            self.backend = BedrockBackend(cfg)
-        else:
-            raise ValueError(f"Unknown teacher backend: {cfg.rad.teacher_backend}")
-
         self.traces_dir = Path(cfg.rad.traces_dir)
         self.traces_dir.mkdir(parents=True, exist_ok=True)
-        self.discarded_log = Path(cfg.logging.log_dir) / "rad_prep" / "discarded_traces.jsonl"
-        self.discarded_log.parent.mkdir(parents=True, exist_ok=True)
 
     def generate_traces(self, samples: List[Dict[str, Any]], retrieved_results: List[Any], no_retrieval_router: Any) -> Dict[str, int]:
-        """Generate teacher traces in batches for the parsed samples, writing incrementally."""
+        """Prepare grounded prompt records in batches, writing incrementally without LLM inference."""
         batch_size = self.cfg.rad.teacher_batch_size
         grounded_path = self.traces_dir / "grounded_traces.jsonl"
         no_retrieval_path = self.traces_dir / "no_retrieval_traces.jsonl"
-
-        min_tok = self.cfg.rad.trace_min_tokens
-        max_tok = self.cfg.rad.trace_max_tokens
 
         grounded_count = 0
         no_retrieval_count = 0
         discarded_count = 0
 
-        logger.info(f"Generating teacher traces for {len(samples)} samples in batches of {batch_size}")
+        logger.info(f"Preparing grounded QA prompt records for {len(samples)} samples in batches of {batch_size}")
 
         with open(grounded_path, "a", encoding="utf-8") as f_grounded, \
-             open(no_retrieval_path, "a", encoding="utf-8") as f_no_ret, \
-             open(self.discarded_log, "a", encoding="utf-8") as f_discard:
+             open(no_retrieval_path, "a", encoding="utf-8") as f_no_ret:
 
             for i in range(0, len(samples), batch_size):
                 batch_samples = samples[i:i + batch_size]
                 batch_retrieved = retrieved_results[i:i + batch_size]
-
-                batch_prompts = []
-                batch_decisions = []
-                batch_answers = []
 
                 for idx_in_batch, (sample, ret_res) in enumerate(zip(batch_samples, batch_retrieved)):
                     global_idx = i + idx_in_batch
@@ -279,25 +256,10 @@ class TraceGenerator:
                     else:
                         answer = sample.get("answer", "")
 
-                    batch_answers.append(answer)
-
                     sample_id = sample.get("sample_id", f"sample_{global_idx}")
                     cluster_id = sample.get("cluster", sample.get("cluster_id"))
 
                     decision = no_retrieval_router.route_sample(sample_id, cluster_id, ret_res.passed_threshold)
-                    batch_decisions.append(decision)
-
-                    prompt = format_prompt(question, answer, ret_res.chunks, decision.no_retrieval)
-                    batch_prompts.append(prompt)
-
-                batch_traces = self.backend.generate_batch(batch_prompts)
-
-                for sample, answer, decision, ret_res, trace in zip(batch_samples, batch_answers, batch_decisions, batch_retrieved, batch_traces):
-                    sample_id = decision.sample_id
-                    cluster_id = decision.cluster_id
-                    question = sample["question"]
-
-                    token_count = len(self.student_tokenizer.encode(trace, add_special_tokens=False))
 
                     record_dict = {
                         "sample_id": sample_id,
@@ -306,29 +268,16 @@ class TraceGenerator:
                         "answer": answer,
                         "retrieved_context": "\n\n".join(chunk.text for chunk in ret_res.chunks),
                         "no_retrieval": decision.no_retrieval,
-                        "teacher_trace": trace,
-                        "token_count": token_count,
-                        "teacher_model": self.cfg.rad.teacher_model_name,
                         "embedding_model": self.cfg.rad.embedding_model
                     }
 
-                    if token_count < min_tok:
-                        reason = f"Trace token count ({token_count}) is below minimum limit ({min_tok})"
-                        f_discard.write(json.dumps({"sample_id": sample_id, "reason": reason, "trace": trace}) + "\n")
-                        logger.debug(f"Discarded trace for sample {sample_id}: {reason}")
-                        discarded_count += 1
-                    elif token_count > max_tok:
-                        reason = f"Trace token count ({token_count}) exceeds maximum limit ({max_tok})"
-                        f_discard.write(json.dumps({"sample_id": sample_id, "reason": reason, "trace": trace}) + "\n")
-                        logger.debug(f"Discarded trace for sample {sample_id}: {reason}")
-                        discarded_count += 1
+
+                    if decision.no_retrieval:
+                        f_no_ret.write(json.dumps(record_dict) + "\n")
+                        no_retrieval_count += 1
                     else:
-                        if decision.no_retrieval:
-                            f_no_ret.write(json.dumps(record_dict) + "\n")
-                            no_retrieval_count += 1
-                        else:
-                            f_grounded.write(json.dumps(record_dict) + "\n")
-                            grounded_count += 1
+                        f_grounded.write(json.dumps(record_dict) + "\n")
+                        grounded_count += 1
 
                 no_retrieval_router.flush_batch()
 
@@ -337,3 +286,4 @@ class TraceGenerator:
             "no_retrieval_count": no_retrieval_count,
             "discarded_count": discarded_count
         }
+

@@ -48,7 +48,7 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
         run_indexing(cfg, chunks)
 
     if rad_mode in ("full", "traces"):
-        logger.info("Generating grounded teacher traces...")
+        logger.info("Preparing grounded QA prompts...")
 
         # Load samples
         qa_samples_path = Path(cfg.rad.qa_samples_path)
@@ -62,7 +62,7 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
                     samples.append(json.loads(line))
 
         if not samples:
-            logger.warning("No QA samples found. Exiting trace generation.")
+            logger.warning("No QA samples found. Exiting prompt preparation.")
             return
 
         # Initialize retriever
@@ -80,21 +80,19 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
         router = NoRetrievalRouter(no_retrieval_rates_path)
         generator = TraceGenerator(cfg)
 
-        # Generate traces
+        # Generate prompt records
         trace_counts = generator.generate_traces(samples, retrieved_results, router)
 
         grounded_count = trace_counts["grounded_count"]
         no_ret_count = trace_counts["no_retrieval_count"]
-        discarded_count = trace_counts["discarded_count"]
 
-        total_attempted = grounded_count + no_ret_count + discarded_count
-        discarded_rate = discarded_count / total_attempted if total_attempted > 0 else 0.0
+        total_attempted = grounded_count + no_ret_count
 
         router_stats = router.get_aggregate_stats()
 
         # Check validation gates
-        target_min_traces = min(cfg.rad.min_traces, int(0.95 * total_attempted)) if total_attempted > 0 else cfg.rad.min_traces
-        passed_min_traces = grounded_count >= target_min_traces
+        target_min_prompts = min(cfg.rad.min_traces, int(0.95 * total_attempted)) if total_attempted > 0 else cfg.rad.min_traces
+        passed_min_prompts = grounded_count >= target_min_prompts
 
         cluster_no_retrieval_rates = router_stats.get("by_cluster", {})
         passed_cluster_no_ret = True
@@ -103,28 +101,22 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
                 logger.warning(f"Cluster {cluster} exceeded 30% no-retrieval rate: {stats['rate']:.2%}")
                 passed_cluster_no_ret = False
 
-        passed_discarded_rate = discarded_rate <= 0.20
-        if not passed_discarded_rate:
-            logger.warning(f"Discarded trace rate exceeded 20%: {discarded_rate:.2%}")
-
-        # If any validation warnings occur, it is incomplete according to the spec gate criteria
-        status = "complete" if (passed_min_traces and passed_cluster_no_ret and passed_discarded_rate) else "incomplete"
+        status = "complete" if (passed_min_prompts and passed_cluster_no_ret) else "incomplete"
 
         manifest = {
             "status": status,
             "timestamp": time.time(),
             "metrics": {
+                "grounded_prompt_count": grounded_count,
+                "no_retrieval_prompt_count": no_ret_count,
                 "grounded_trace_count": grounded_count,
                 "no_retrieval_trace_count": no_ret_count,
-                "discarded_trace_count": discarded_count,
                 "total_attempted": total_attempted,
-                "discarded_rate": discarded_rate,
                 "no_retrieval_stats": router_stats,
             },
             "gates": {
-                "passed_min_traces": passed_min_traces,
+                "passed_min_prompts": passed_min_prompts,
                 "passed_cluster_no_ret": passed_cluster_no_ret,
-                "passed_discarded_rate": passed_discarded_rate,
             },
         }
 
@@ -139,11 +131,12 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
             f"  Step 0.3 (RAD Prep) Execution Summary\n"
             f"================================================================\n"
             f"  Overall Status          : {status.upper()}\n"
-            f"  Grounded Traces         : {grounded_count} (Gate: >= {target_min_traces} -> {'PASS' if passed_min_traces else 'INCOMPLETE'})\n"
-            f"  No-Retrieval Traces     : {no_ret_count} ({router_stats.get('overall_rate', 0.0):.1%} overall, Gate <= 30% -> {'PASS' if passed_cluster_no_ret else 'WARN'})\n"
-            f"  Discarded Traces        : {discarded_count} ({discarded_rate:.1%} rate, Gate <= 20% -> {'PASS' if passed_discarded_rate else 'WARN'})\n"
+            f"  Grounded Prompts        : {grounded_count} (Gate: >= {target_min_prompts} -> {'PASS' if passed_min_prompts else 'INCOMPLETE'})\n"
+            f"  No-Retrieval Prompts    : {no_ret_count} ({router_stats.get('overall_rate', 0.0):.1%} overall, Gate <= 30% -> {'PASS' if passed_cluster_no_ret else 'WARN'})\n"
             f"  Total Attempted Samples : {total_attempted}\n"
             f"  Manifest Output Path    : {phase_manifest_path}\n"
             f"================================================================\n"
         )
+
+
 

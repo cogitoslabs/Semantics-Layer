@@ -2,16 +2,16 @@
 
 ## Objective
 
-Build an indexed biomedical retrieval corpus and a grounded teacher trace generation pipeline. This is the primary architectural defense against hallucination: instead of training the student on parametric-only teacher outputs, traces are anchored to retrieved evidence from a domain-matched corpus.
+Build an indexed biomedical retrieval corpus and a grounded retrieval QA prompt preparation pipeline. This is the primary architectural defense against hallucination: instead of training the student on parametric-only teacher outputs, prompts are anchored to retrieved evidence from a domain-matched corpus. Teacher model generation is performed downstream after teacher benchmarking and election.
 
 ---
 
 ## Scope
 
-This feature implements **Step 0.3** of the pipeline, which sits between DAPT (`s2_dapt`) and Corpus Engineering (`s4_clustering`, future). It produces two outputs consumed by Phase 2 trace generation:
+This feature implements **Step 0.3** of the pipeline, which sits between DAPT (`s2_dapt`) and Corpus Engineering (`s4_clustering`, future). It produces two outputs consumed by Phase 2 teacher benchmarking and trace generation:
 
 1. A searchable index over the biomedical retrieval corpus
-2. A JSONL corpus of grounded teacher traces (Question + Context → Reasoning + Answer)
+2. A JSONL corpus of grounded QA prompts with retrieved context (Question + Context + Ground Truth)
 
 ---
 
@@ -241,6 +241,8 @@ The pipeline can be run in two sub-modes via `--rad-mode`:
 
 ---
 
+---
+
 ## Output Artifacts
 
 | Artifact | Path | Phase Log Entry |
@@ -248,21 +250,19 @@ The pipeline can be run in two sub-modes via `--rad-mode`:
 | Chunks JSONL | `data/rad_prep/chunks.jsonl` | chunk count, token stats |
 | FAISS index | `data/rad_prep/index/index.faiss` | embedding model, chunk count |
 | Index manifest | `data/rad_prep/index/index_manifest.json` | model, timestamp, chunk count |
-| Grounded traces | `data/rad_prep/traces/grounded_traces.jsonl` | trace count, token stats |
-| No-retrieval traces | `data/rad_prep/traces/no_retrieval_traces.jsonl` | count, % of total |
+| Grounded QA Prompts | `data/rad_prep/traces/grounded_traces.jsonl` | prompt count, retrieved context stats |
+| No-retrieval QA Prompts | `data/rad_prep/traces/no_retrieval_traces.jsonl` | count, % of total |
 | No-retrieval rates | `logs/rad_prep/no_retrieval_rates.jsonl` | per-cluster rates |
-| Discarded traces | `logs/rad_prep/discarded_traces.jsonl` | count, reasons |
-| Phase manifest | `logs/rad_prep/phase_manifest.json` | all above stats + pass/fail |
+| Phase manifest | `logs/rad_prep/phase_manifest.json` | prompt stats + pass/fail |
 
 ---
 
 ## Validation Gate
 
-After trace generation, the pipeline logs a summary. No hard gate is defined at this step (gating is in Phase 2 trace harmonization), but the following must pass for the phase manifest to record `status: complete`:
+After prompt preparation, the pipeline logs a summary. For the phase manifest to record `status: complete`:
 
-- Grounded trace count ≥ `min(cfg.rad.min_traces, int(0.95 * total_attempted))` (default: 1000 or 95% of attempted evaluation samples, preventing false incomplete status on smaller sample sets)
+- Grounded prompt count ≥ `min(cfg.rad.min_traces, int(0.95 * total_attempted))` (default: 1000 or 95% of evaluation samples, preventing false incomplete status on smaller sample sets)
 - No-retrieval rate per cluster ≤ 30% (warn if exceeded; does not block — indicates indexing gap)
-- Discarded trace rate ≤ 20% (warn if exceeded)
 
 ---
 
@@ -291,10 +291,9 @@ File: `tests/test_rad_prep.py`
 | `test_relevance_threshold_gate` | samples below 0.65 filtered, passed_threshold count correct |
 | `test_no_retrieval_router` | triggers when < 2 chunks pass |
 | `test_hybrid_fusion` | hybrid scores differ from pure dense/sparse |
-| `test_trace_generator_grounded` | [CONTEXT] field present, \boxed{} in output |
-| `test_trace_generator_no_retrieval` | [NO CONTEXT AVAILABLE] field present |
-| `test_trace_token_filter` | traces < 200 or > 2500 tokens are discarded, not truncated |
-| `test_pipeline_end_to_end` | runs full s3 step with minimal mock corpus, checks artifacts exist |
+| `test_prompt_generator_grounded` | [CONTEXT] field present in formatted prompt |
+| `test_prompt_generator_no_retrieval` | [NO CONTEXT AVAILABLE] field present |
+| `test_pipeline_end_to_end` | runs full s4 step with minimal mock corpus, checks artifacts exist |
 
 ---
 
@@ -304,7 +303,7 @@ File: `tests/test_rad_prep.py`
 
 2. **FAISS `IndexFlatIP` with L2-normalized vectors** gives exact cosine similarity without approximation error. For the expected corpus size (textbooks + PMC = millions of chunks), exact search is feasible on CPU. Switch to `IndexIVFFlat` only if index exceeds 10M vectors.
 
-3. **Discard, don't truncate, over-length traces.** A trace cut at token 2500 mid-reasoning teaches broken chain-of-thought. This follows the project-overview spec exactly.
+3. **Separate Retrieval Prompting from Teacher Generation.** `s4_rad_prep` constructs the indexed retrieval corpus and prepares grounded QA prompts. Teacher LLM generation is deferred to Phase 2 after teacher benchmarking and election.
 
 4. **`[NO CONTEXT AVAILABLE]` as explicit token, not field omission.** Prevents model confusion at inference time between missing context and successful empty retrieval.
 
@@ -312,4 +311,5 @@ File: `tests/test_rad_prep.py`
 
 6. **No re-ranker in v1.** The spec lists re-ranking as "optional but recommended." First build validates retrieval quality with threshold gating alone. Re-ranker (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`) is a follow-up item.
 
-7. **Teacher backend abstraction.** The `hf_local` / `api` split lets the same pipeline run against a local Qwen model during development and an API-hosted teacher (DeepSeek, Nvidia) in production without code changes.
+7. **Teacher backend abstraction.** The `hf_local` / `api` / `bedrock` backends are preserved for candidate teacher benchmarking and post-election full trace generation.
+
