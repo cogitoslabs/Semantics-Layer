@@ -563,7 +563,12 @@ class ClusteringConfig:
     embeddings_cache_path: Path    = field(default_factory=lambda: Path(get("CLUSTERING_EMBEDDINGS_CACHE", "data/clustering/embeddings.npy")))
     doc_ids_cache_path: Path       = field(default_factory=lambda: Path(get("CLUSTERING_DOC_IDS_CACHE", "data/clustering/doc_ids.json")))
 
-    # HDBSCAN
+    # Dimensionality Reduction & HDBSCAN
+    dim_reduction_method: str     = field(default_factory=lambda: get("CLUSTERING_DIM_REDUCTION_METHOD", "umap"))  # umap|pca|none|passthrough
+    umap_n_components: int         = field(default_factory=lambda: get("UMAP_N_COMPONENTS", 15, int))
+    umap_n_neighbors: int          = field(default_factory=lambda: get("UMAP_N_NEIGHBORS", 15, int))
+    umap_min_dist: float           = field(default_factory=lambda: get("UMAP_MIN_DIST", 0.0, float))
+    umap_metric: str               = field(default_factory=lambda: get("UMAP_METRIC", "cosine"))
     hdbscan_min_cluster_size: int  = field(default_factory=lambda: get("HDBSCAN_MIN_CLUSTER_SIZE", 6, int))
     hdbscan_min_samples: int       = field(default_factory=lambda: get("HDBSCAN_MIN_SAMPLES", 2, int))
     hdbscan_metric: str            = field(default_factory=lambda: get("HDBSCAN_METRIC", "cosine"))

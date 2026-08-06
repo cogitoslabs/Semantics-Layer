@@ -107,6 +107,7 @@ def run_reporting(
     manifest = {
         "status": status,
         "embedding_model": cfg.clustering.embedding_model,
+        "dim_reduction_method": cfg.clustering.dim_reduction_method,
         "total_docs": total_docs,
         "noise_docs": noise_docs,
         "noise_fraction": float(f"{noise_fraction:.4f}"),

@@ -11,6 +11,7 @@ import numpy as np
 
 from lib.utils import PipelineConfig
 from lib.s5_clustering.embedder import run_embedding, load_corpus
+from lib.s5_clustering.dim_reducer import apply_dimensionality_reduction
 from lib.s5_clustering.clusterer import run_clustering, ClusterAssignment
 from lib.s5_clustering.splitter import run_splitting
 from lib.s5_clustering.cluster_reporter import run_reporting
@@ -511,3 +512,69 @@ def test_pipeline_end_to_end(test_cfg, mock_corpus_file, mock_sentence_transform
                 manifest = json.load(f)
             assert manifest["status"] == "complete"
             assert manifest["total_clusters"] == 10
+            assert "dim_reduction_method" in manifest
+
+
+def test_dim_reducer_umap(test_cfg):
+    np.random.seed(42)
+    embeddings = np.random.randn(25, 768).astype(np.float32)
+    test_cfg.clustering.dim_reduction_method = "umap"
+    test_cfg.clustering.umap_n_components = 5
+    test_cfg.clustering.umap_n_neighbors = 10
+
+    reduced, meta = apply_dimensionality_reduction(embeddings, test_cfg)
+    assert reduced.shape == (25, 5)
+    assert meta["method"] == "umap"
+    assert meta["reduced_dim"] == 5
+    assert meta["fallback_triggered"] is False
+    # Check L2 normalized
+    norms = np.linalg.norm(reduced, axis=1)
+    np.testing.assert_allclose(norms, 1.0, rtol=1e-4)
+
+
+def test_dim_reducer_pca(test_cfg):
+    np.random.seed(42)
+    embeddings = np.random.randn(20, 768).astype(np.float32)
+    test_cfg.clustering.dim_reduction_method = "pca"
+    test_cfg.clustering.pca_components = 8
+
+    reduced, meta = apply_dimensionality_reduction(embeddings, test_cfg)
+    assert reduced.shape == (20, 8)
+    assert meta["method"] == "pca"
+    assert meta["reduced_dim"] == 8
+    # Check L2 normalized
+    norms = np.linalg.norm(reduced, axis=1)
+    np.testing.assert_allclose(norms, 1.0, rtol=1e-4)
+
+
+def test_dim_reducer_passthrough(test_cfg):
+    np.random.seed(42)
+    embeddings = np.random.randn(10, 768).astype(np.float32)
+    test_cfg.clustering.dim_reduction_method = "passthrough"
+
+    reduced, meta = apply_dimensionality_reduction(embeddings, test_cfg)
+    assert reduced.shape == (10, 768)
+    assert meta["method"] == "passthrough"
+    assert meta["reduced_dim"] == 768
+
+
+def test_dim_reducer_umap_fallback_small_corpus(test_cfg):
+    embeddings = np.random.randn(4, 768).astype(np.float32)
+    test_cfg.clustering.dim_reduction_method = "umap"
+    test_cfg.clustering.umap_n_components = 15
+
+    # Should trigger fallback to PCA because n_docs (4) <= n_components (15)
+    reduced, meta = apply_dimensionality_reduction(embeddings, test_cfg)
+    assert meta["fallback_triggered"] is True
+    assert meta["method"] == "pca"
+    assert reduced.shape[0] == 4
+
+
+def test_dim_reducer_invalid_method(test_cfg):
+    embeddings = np.random.randn(10, 768).astype(np.float32)
+    test_cfg.clustering.dim_reduction_method = "invalid_method"
+
+    with pytest.raises(ValueError) as excinfo:
+        apply_dimensionality_reduction(embeddings, test_cfg)
+    assert "Unsupported dim_reduction_method" in str(excinfo.value)
+

@@ -8,9 +8,9 @@ import numpy as np
 from typing import List
 import hdbscan
 from sklearn.metrics.pairwise import cosine_distances
-from sklearn.decomposition import PCA
 
 from lib.utils import PipelineConfig
+from lib.s5_clustering.dim_reducer import apply_dimensionality_reduction
 
 logger = logging.getLogger(__name__)
 
@@ -26,42 +26,24 @@ class ClusterAssignment:
 
 def run_clustering(cfg: PipelineConfig, embeddings: np.ndarray, doc_ids: List[str]) -> List[ClusterAssignment]:
     """
-    Perform HDBSCAN clustering on embeddings.
+    Perform HDBSCAN clustering on embeddings after applying dimensionality reduction.
     """
-    logger.info("Initializing HDBSCAN...")
+    logger.info("Initializing clustering process...")
     
     # Configure HDBSCAN
     min_cluster_size = cfg.clustering.hdbscan_min_cluster_size
     min_samples = cfg.clustering.hdbscan_min_samples
     metric = cfg.clustering.hdbscan_metric
-    use_pca = cfg.clustering.use_pca
-    pca_comps = cfg.clustering.pca_components
     
-    # Process embeddings
-    if use_pca and embeddings.shape[0] > pca_comps:
-        logger.info(f"Applying PCA dimensionality reduction to {pca_comps} components...")
-        # L2-normalize original embeddings first
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        norms[norms == 0] = 1e-12
-        emb_normalized = embeddings / norms
-        
-        # Fit and apply PCA
-        pca = PCA(n_components=pca_comps, random_state=cfg.misc.seed)
-        emb_reduced = pca.fit_transform(emb_normalized)
-        
-        # L2-normalize PCA-reduced embeddings
-        reduced_norms = np.linalg.norm(emb_reduced, axis=1, keepdims=True)
-        reduced_norms[reduced_norms == 0] = 1e-12
-        clustering_embeddings = emb_reduced / reduced_norms
-        
-        # Use Euclidean metric for normalized reduced space
+    # Apply dimensionality reduction (UMAP / PCA / Pass-through)
+    clustering_embeddings, dim_metadata = apply_dimensionality_reduction(embeddings, cfg)
+    
+    if dim_metadata["method"] in ("umap", "pca"):
         clustering_metric = "euclidean"
     else:
-        logger.info("PCA is disabled or document count is too small. Using raw embeddings.")
-        clustering_embeddings = embeddings
         clustering_metric = metric
-        
-    logger.info("Fitting HDBSCAN on document embeddings...")
+
+    logger.info(f"Fitting HDBSCAN on document embeddings (method={dim_metadata['method']}, dim={clustering_embeddings.shape[1]})...")
     
     # HDBSCAN does not natively support 'cosine' with space trees, so we use precomputed cosine distances.
     if clustering_metric == "cosine":

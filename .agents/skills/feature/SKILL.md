@@ -17,14 +17,13 @@ current-feature.md has the objective and highlevel details of the current featur
 ## Task
 
 Parse the input: `$ARGUMENTS`
-- **Action**: The first word of `$ARGUMENTS` (e.g., `load`, `design`, `build`, `review`, `explain`, `complete`).
+- **Action**: The first word of `$ARGUMENTS` (e.g., `design`, `build`, `review`, `explain`, `complete`).
 - **Feature Name**: The second word of `$ARGUMENTS` (optional). If not specified, fall back to deriving the feature name from `context/current-feature.md`.
 
 Execute the requested Action using the parsed Feature Name.
 
 | Action | Description |
 |--------|-------------|
-| `load` | Load feature from feature-hub into current-feature.md |
 | `design` | Write the detailed Design Specifications |
 | `build` | Begin implementation, create branch |
 | `review` | Check goals met, code quality |

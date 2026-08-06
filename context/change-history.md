@@ -1,5 +1,16 @@
 # Change History
 
+## Status: Completed (Refactored Dimensionality Reduction in Step 5)
+
+- Implemented modular dimensionality reduction module [dim_reducer.py](file:///e:/Projects/cnd/Semantics/lib/s5_clustering/dim_reducer.py) supporting UMAP, PCA, and Pass-through strategies with automatic small-corpus fallback handling.
+- Refactored [clusterer.py](file:///e:/Projects/cnd/Semantics/lib/s5_clustering/clusterer.py) to decouple dimensionality reduction from HDBSCAN micro-clustering.
+- Added `umap-learn>=0.5.5` to [pyproject.toml](file:///e:/Projects/cnd/Semantics/pyproject.toml) and extended `ClusteringConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) with UMAP hyperparameter defaults (`dim_reduction_method="umap"`, `umap_n_components=15`, `umap_n_neighbors=15`, `umap_min_dist=0.0`, `umap_metric="cosine"`).
+- Recorded `dim_reduction_method` in cluster manifest reporting ([cluster_reporter.py](file:///e:/Projects/cnd/Semantics/lib/s5_clustering/cluster_reporter.py)).
+- Created feature specification in [dimensionality-reduction.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/dimensionality-reduction.md) and updated documentation in [S5_CLUSTERING.md](file:///e:/Projects/cnd/Semantics/docs/S5_CLUSTERING.md).
+- Added comprehensive unit test suite covering UMAP, PCA, Passthrough, and Fallback modes in [test_clustering.py](file:///e:/Projects/cnd/Semantics/tests/test_clustering.py).
+
+---
+
 ## Status: Completed (Removed Legacy `teacher_backend` Validation from RAD Prep Config)
 
 - Removed stale `self.rad.teacher_backend` validation check from `PipelineConfig.validate()` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py), resolving `AttributeError` when running `pipeline.py --step s4` following the removal of LLM teacher trace generation from Step 4.

@@ -1,13 +1,13 @@
 # Step 5: Corpus Engineering & Micro-Clustering (`lib/s5_clustering`)
 
-This module implements **Step 5 (Corpus Engineering & Micro-Clustering)** of the Semantics Layer Pipeline. It generates dense document embeddings, applies PCA dimensionality reduction, runs HDBSCAN micro-clustering to discover latent neuroscience domains, reassigns noise points to nearest centroids, calculates imbalance reweighting caps, partitions per-cluster datasets into a three-way split (dev/val/sealed), and validates cluster quality gates.
+This module implements **Step 5 (Corpus Engineering & Micro-Clustering)** of the Semantics Layer Pipeline. It generates dense document embeddings, applies non-linear UMAP or PCA dimensionality reduction, runs HDBSCAN micro-clustering to discover latent neuroscience domains, reassigns noise points to nearest centroids, calculates imbalance reweighting caps, partitions per-cluster datasets into a three-way split (dev/val/sealed), and validates cluster quality gates.
 
 ---
 
 ## 1. Objectives
 
 - **Dense Document Embedding Generation**: Embed all documents in the unified DAPT corpus using a sentence transformer model (`all-mpnet-base-v2`). Cache embeddings and document ID lists (`embeddings.npy`, `doc_ids.json`) to disk to bypass re-computation.
-- **PCA Dimensionality Reduction**: Apply Principal Component Analysis (PCA) to reduce high-dimensional embeddings down to 10 components (when `use_pca=True`), preventing high-dimensional distance concentration before clustering.
+- **Modular Dimensionality Reduction**: Apply UMAP (Uniform Manifold Approximation and Projection) by default to preserve non-linear local neighborhood topology in high-dimensional embeddings before clustering (or fall back to PCA / Pass-through mode).
 - **Latent Micro-Clustering**: Run HDBSCAN density-based clustering to automatically discover latent neuroscience sub-domains (micro-clusters) without hardcoding cluster counts.
 - **Noise Point Centroid Resolution**: Reassign unclustered noise documents (originally labeled `-1` by HDBSCAN) to their nearest active cluster centroid via cosine distance similarity when `noise_assignment="nearest"`.
 - **Three-Way Dataset Partitioning**: Partition documents within each micro-cluster into a deterministic three-way split (70% development / 20% validation / 10% sealed test) using a fixed random seed (`cfg.misc.seed`).
@@ -19,7 +19,7 @@ This module implements **Step 5 (Corpus Engineering & Micro-Clustering)** of the
 
 - **Unified Domain Corpus**: `cfg.clustering.corpus_path` (`data/dapt/domain_dapt_corpus.jsonl`) — Clean JSONL pretraining corpus output by Step 1.
 - **Sentence Transformer Model**: `cfg.clustering.embedding_model` (`all-mpnet-base-v2`) — Pretrained sentence-transformer embedding model.
-- **Random Seed**: `cfg.misc.seed` (default 42) — Ensures deterministic PCA reduction and train/val/sealed document splitting.
+- **Random Seed**: `cfg.misc.seed` (default 42) — Ensures deterministic dimensionality reduction and train/val/sealed document splitting.
 
 ---
 
@@ -27,7 +27,7 @@ This module implements **Step 5 (Corpus Engineering & Micro-Clustering)** of the
 
 1. **Cluster Assignments**: `cfg.clustering.assignments_path` (`data/clustering/cluster_assignments.jsonl`) — Line-delimited JSON recording `doc_id`, `cluster_id`, `cluster_label` (`cluster_000`, `cluster_001`, ...), `is_noise`, and `assigned_by` (`hdbscan` or `nearest_centroid`).
 2. **Three-Way Dataset Splits**: `cfg.clustering.splits_path` (`data/clustering/splits.json`) — JSON file containing `dev_doc_ids`, `val_doc_ids`, `sealed_doc_ids`, `raw_fraction`, and `reweight_cap` for every micro-cluster.
-3. **Cluster Manifest**: `cfg.clustering.cluster_manifest_path` (`data/clustering/cluster_manifest.json`) — Manifest recording execution status (`complete` / `failed`), embedding model, noise statistics, cluster size metrics (min/max/mean/median/std), and warning messages.
+3. **Cluster Manifest**: `cfg.clustering.cluster_manifest_path` (`data/clustering/cluster_manifest.json`) — Manifest recording execution status (`complete` / `failed`), embedding model, dimensionality reduction method, noise statistics, cluster size metrics (min/max/mean/median/std), and warning messages.
 4. **Cluster Statistics Report**: `cfg.clustering.cluster_report_path` (`logs/clustering/cluster_report.json`) — Summary report detailing document counts, raw dataset fractions, and reweighting caps per micro-cluster.
 5. **Embeddings & Document ID Cache**: `cfg.clustering.embeddings_cache_path` (`data/clustering/embeddings.npy`) and `doc_ids_cache_path` (`data/clustering/doc_ids.json`) — Cached numpy array and ID mapping.
 
@@ -44,12 +44,17 @@ All parameters are defined in `lib/utils/config.py` under `ClusteringConfig` (`c
 | `cfg.clustering.embed_batch_size`<br>`Env: CLUSTERING_EMBED_BATCH_SIZE` | `64` | Batch size for document embedding generation. |
 | `cfg.clustering.embeddings_cache_path`<br>`Env: CLUSTERING_EMBEDDINGS_CACHE` | `data/clustering/`<br>`embeddings.npy` | Cache path for dense embedding NumPy array. |
 | `cfg.clustering.doc_ids_cache_path`<br>`Env: CLUSTERING_DOC_IDS_CACHE` | `data/clustering/`<br>`doc_ids.json` | Cache path for document ID list. |
+| `cfg.clustering.dim_reduction_method`<br>`Env: CLUSTERING_DIM_REDUCTION_METHOD` | `umap` | Reduction strategy (`umap`, `pca`, `none`, `passthrough`). |
+| `cfg.clustering.umap_n_components`<br>`Env: UMAP_N_COMPONENTS` | `15` | Target component count for UMAP. |
+| `cfg.clustering.umap_n_neighbors`<br>`Env: UMAP_N_NEIGHBORS` | `15` | Neighborhood size for UMAP manifold estimation. |
+| `cfg.clustering.umap_min_dist`<br>`Env: UMAP_MIN_DIST` | `0.0` | Minimum distance between embedded points. |
+| `cfg.clustering.umap_metric`<br>`Env: UMAP_METRIC` | `cosine` | Distance metric for UMAP input manifold. |
 | `cfg.clustering.hdbscan_min_cluster_size`<br>`Env: HDBSCAN_MIN_CLUSTER_SIZE` | `6` | Minimum cluster size parameter for HDBSCAN. |
-| `cfg.clustering.hdbscan_min_samples`<br>`Env: HDBSCAN_MIN_SAMPLES` | `1` | Minimum samples parameter for HDBSCAN. |
+| `cfg.clustering.hdbscan_min_samples`<br>`Env: HDBSCAN_MIN_SAMPLES` | `2` | Minimum samples parameter for HDBSCAN. |
 | `cfg.clustering.hdbscan_metric`<br>`Env: HDBSCAN_METRIC` | `cosine` | Metric used for HDBSCAN distance calculation. |
 | `cfg.clustering.min_clusters`<br>`Env: CLUSTERING_MIN_CLUSTERS` | `10` | Hard failure threshold for minimum cluster count. |
-| `cfg.clustering.use_pca`<br>`Env: CLUSTERING_USE_PCA` | `True` | Enable PCA dimensionality reduction before HDBSCAN. |
-| `cfg.clustering.pca_components`<br>`Env: CLUSTERING_PCA_COMPONENTS` | `20` | Target PCA components count. |
+| `cfg.clustering.use_pca`<br>`Env: CLUSTERING_USE_PCA` | `True` | Backwards compatibility flag for PCA. |
+| `cfg.clustering.pca_components`<br>`Env: CLUSTERING_PCA_COMPONENTS` | `50` | Target PCA components count when `dim_reduction_method="pca"`. |
 | `cfg.clustering.noise_assignment`<br>`Env: CLUSTERING_NOISE_ASSIGNMENT` | `nearest` | Strategy for noise points (`nearest` centroid or `drop`). |
 | `cfg.clustering.cluster_min_fraction`<br>`Env: CLUSTER_MIN_FRACTION` | `0.02` | Minimum desired raw fraction threshold for reweight capping. |
 | `cfg.clustering.cluster_max_fraction`<br>`Env: CLUSTER_MAX_FRACTION` | `0.15` | Maximum desired raw fraction threshold for reweight capping. |
@@ -72,27 +77,32 @@ All parameters are defined in `lib/utils/config.py` under `ClusteringConfig` (`c
   - `load_corpus(corpus_path)`: Reads input JSONL file and yields `(doc_id, text)` tuples.
   - `run_embedding(cfg: PipelineConfig)`: Checks `embeddings.npy` and `doc_ids.json` cache files. On cache hit (matching document count and model ID), loads cached embeddings. On cache miss, encodes texts using `SentenceTransformer(cfg.clustering.embedding_model)` with batch size 64, displaying a progress bar, and saves results to disk.
 
-### 3. `clusterer.py` (`run_clustering`, `ClusterAssignment`)
-- **Role**: PCA reduction, HDBSCAN density clustering, and nearest-centroid noise resolution engine.
+### 3. `dim_reducer.py` (`apply_dimensionality_reduction`) [NEW]
+- **Role**: Modular dimensionality reduction engine supporting UMAP, PCA, and Pass-through strategies.
+- **Functions & Classes**:
+  - `apply_dimensionality_reduction(embeddings: np.ndarray, cfg: PipelineConfig)`: Applies requested dimensionality reduction (`umap`, `pca`, `none`, `passthrough`). Normalizes vectors L2-norm style and includes fallback mechanisms for small document counts.
+
+### 4. `clusterer.py` (`run_clustering`, `ClusterAssignment`)
+- **Role**: Micro-clustering execution and nearest-centroid noise resolution engine.
 - **Functions & Classes**:
   - `ClusterAssignment`: Dataclass storing `doc_id`, `cluster_id`, `cluster_label` (`cluster_000`, `cluster_001`, ...), `is_noise`, and `assigned_by` (`hdbscan`, `nearest_centroid`, or `dropped`).
   - `run_clustering(cfg: PipelineConfig, embeddings, doc_ids)`:
-    - Normalizes embeddings, fits PCA (`pca_components=10`), and re-normalizes reduced vectors.
-    - Fits HDBSCAN (`min_cluster_size=10`, `min_samples=5`).
+    - Calls `apply_dimensionality_reduction(embeddings, cfg)`.
+    - Fits HDBSCAN (`min_cluster_size=6`, `min_samples=2`).
     - Resolves noise points (labeled `-1`): computes mean L2-normalized centroids for each active cluster, calculates cosine similarity dot products between noise vectors and centroids, and reassigns noise points to their nearest cluster centroid.
 
-### 4. `splitter.py` (`run_splitting`, `ClusterSplit`)
+### 5. `splitter.py` (`run_splitting`, `ClusterSplit`)
 - **Role**: Per-cluster three-way dataset partitioner and imbalance reweighting calculator.
 - **Functions & Classes**:
   - `ClusterSplit`: Dataclass storing `cluster_id`, `cluster_label`, `dev_doc_ids`, `val_doc_ids`, `sealed_doc_ids`, `total_docs`, `raw_fraction`, and `reweight_cap`.
   - `run_splitting(cfg: PipelineConfig, assignments)`: Groups active documents by micro-cluster. Computes raw dataset fractions. Calculates `reweight_cap` recommendations if a cluster fraction is $< 0.02$ or $> 0.15$. Shuffles document IDs deterministically using `cfg.misc.seed` and partitions documents into 70% dev / 20% val / 10% sealed test sets (enforcing $\ge 1$ validation document for clusters with $\ge 3$ documents).
 
-### 5. `cluster_reporter.py` (`run_reporting`)
+### 6. `cluster_reporter.py` (`run_reporting`)
 - **Role**: Cluster quality reporter and validation gate checker.
 - **Functions & Classes**:
   - `run_reporting(cfg, assignments, splits_data)`: Computes statistical metrics (min, max, mean, median, std of cluster sizes), checks noise fraction and imbalance caps, enforces validation gate criteria (hard failure if total clusters $< 10$ or validation split is empty; warning if clusters $< 50$, noise $> 30\%$, or largest cluster $> 40\%$), and writes `cluster_manifest.json` and `cluster_report.json`.
 
-### 6. `__init__.py`
+### 7. `__init__.py`
 - **Role**: Public API exports for `lib.s5_clustering`.
 - **Exports**: `run_clustering_pipeline`.
 
@@ -109,36 +119,35 @@ flowchart TD
         D --> E[Batch Encode & Save Cache]
     end
 
-    subgraph Clustering["2. PCA & HDBSCAN Micro-Clustering (clusterer.py)"]
-        C & E --> F[L2 Normalize & Fit PCA to 10 Components]
-        F --> G[Fit HDBSCAN min_cluster_size=10, min_samples=5]
-        G --> H{HDBSCAN Noise Resolution}
-        H -->|noise_assignment = nearest| I[Compute L2-Normalized Cluster Centroids]
-        I --> J[Reassign Noise Docs via Cosine Distance to Nearest Centroid]
-        H -->|noise_assignment = drop| K[Drop Noise Docs]
-        J & K --> L[Output Cluster Assignments: data/clustering/cluster_assignments.jsonl]
+    subgraph Reduction["2. Modular Dimensionality Reduction (dim_reducer.py)"]
+        C & E --> F{dim_reduction_method}
+        F -->|umap| G[UMAP n_components=15, min_dist=0.0]
+        F -->|pca| H[PCA n_components=50]
+        F -->|none / passthrough| I[Pass-through Raw Embeddings]
+        G & H & I --> J[L2 Normalize Reduced Vectors]
     end
 
-    subgraph Splitting["3. Three-Way Split & Reweighting (splitter.py)"]
-        L --> M[Group Active Docs by Micro-Cluster]
-        M --> N[Calculate Raw Cluster Fractions & Reweight Caps]
-        N --> O[Deterministic Shuffle with seed = cfg.misc.seed]
-        O --> P[Split into 70% Dev / 20% Val / 10% Sealed Test]
-        P --> Q[Save Splits to data/clustering/splits.json]
+    subgraph Clustering["3. HDBSCAN Micro-Clustering (clusterer.py)"]
+        J --> K[Fit HDBSCAN min_cluster_size=6, min_samples=2]
+        K --> L{HDBSCAN Noise Resolution}
+        L -->|noise_assignment = nearest| M[Compute L2-Normalized Cluster Centroids]
+        M --> N[Reassign Noise Docs via Cosine Distance to Nearest Centroid]
+        L -->|noise_assignment = drop| O[Drop Noise Docs]
+        N & O --> P[Output Cluster Assignments: data/clustering/cluster_assignments.jsonl]
     end
 
-    subgraph Reporting["4. Report Generation & Gate Checks (cluster_reporter.py)"]
-        Q --> R[Compute Cluster Size Statistics & Check Validation Gates]
-        R --> S{Validation Gate Pass?}
-        S -->|Hard Fail: < 10 clusters or empty val split| T[Raise ValueError Pipeline Failure]
-        S -->|Pass / Warnings| U[Save Cluster Manifest & Report to data/clustering/]
+    subgraph Splitting["4. Three-Way Split & Reweighting (splitter.py)"]
+        P --> Q[Group Active Docs by Micro-Cluster]
+        Q --> R[Calculate Raw Cluster Fractions & Reweight Caps]
+        R --> S[Deterministic Shuffle with seed = cfg.misc.seed]
+        S --> T[Split into 70% Dev / 20% Val / 10% Sealed Test]
+        T --> U[Save Splits to data/clustering/splits.json]
+    end
+
+    subgraph Reporting["5. Report Generation & Gate Checks (cluster_reporter.py)"]
+        U --> V[Compute Cluster Size Statistics & Check Validation Gates]
+        V --> W{Validation Gate Pass?}
+        W -->|Hard Fail: < 10 clusters or empty val split| X[Raise ValueError Pipeline Failure]
+        W -->|Pass / Warnings| Y[Save Cluster Manifest & Report to data/clustering/]
     end
 ```
-
-### Detailed Functional Walkthrough
-
-1. **Document Ingestion & Embedding Cache Check**: `run_embedding` loads document IDs and text records from `data/dapt/domain_dapt_corpus.jsonl`. It inspects `embeddings.npy` and `doc_ids.json`. If document counts and embedding model names match, it loads the cached array. Otherwise, it encodes document texts using `SentenceTransformer("all-mpnet-base-v2")` with batch size 64 and writes the cache.
-2. **PCA Reduction & HDBSCAN Clustering**: `run_clustering` normalizes original embeddings and applies PCA dimensionality reduction to 10 components (`pca_components=10`). It fits HDBSCAN (`min_cluster_size=10`, `min_samples=5`), discovering latent neuroscience micro-clusters.
-3. **Noise Point Centroid Resolution**: For documents originally tagged as noise (`-1`), `clusterer.py` calculates L2-normalized mean centroids for all active clusters. It computes cosine similarity dot products between each noise vector and all cluster centroids, reassigning noise documents to their closest matching cluster centroid. Outputs `cluster_assignments.jsonl`.
-4. **Per-Cluster Dataset Splitting & Reweighting**: `run_splitting` processes each micro-cluster independently. It calculates raw dataset fractions and reweighting caps (`reweight_cap` recommended if fraction $< 0.02$ or $> 0.15$). It shuffles document IDs deterministically (`cfg.misc.seed`) and partitions them into a three-way split (70% dev / 20% val / 10% sealed test), saving `splits.json`.
-5. **Validation Gating & Manifest Reporting**: `run_reporting` computes cluster size summary statistics (min, max, mean, median, std). It checks validation gates: hard fails if cluster count is $< 10$ or any validation split is empty; warns if noise exceeds 30% or the largest cluster exceeds 40%. Saves `cluster_manifest.json` and `cluster_report.json`.
