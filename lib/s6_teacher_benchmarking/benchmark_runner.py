@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 def make_teacher_backend(cfg: PipelineConfig, teacher_name: str):
     """Instantiate the teacher backend using the candidate teacher name."""
-    from lib.s4_rad_prep.trace_generator import LocalHFBackend, APIBackend, BedrockBackend
+    from lib.utils.teacher_backend import LocalHFBackend, APIBackend, BedrockBackend
+
     
     # Create copy of config to avoid side effects
     teacher_cfg = copy.deepcopy(cfg)

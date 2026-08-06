@@ -8,9 +8,10 @@ from lib.s4_rad_prep.chunker import run_chunking
 from lib.s4_rad_prep.indexer import run_indexing
 from lib.s4_rad_prep.retriever import Retriever
 from lib.s4_rad_prep.no_retrieval_router import NoRetrievalRouter
-from lib.s4_rad_prep.trace_generator import TraceGenerator
+from lib.s4_rad_prep.prompt_generator import PromptGenerator
 
 logger = logging.getLogger(__name__)
+
 
 def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
     """Orchestrate the Step 0.3 Retrieval-Augmented Distillation Preparation (RAD Prep) pipeline."""
@@ -78,10 +79,11 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
 
         # Initialize router and generator
         router = NoRetrievalRouter(no_retrieval_rates_path)
-        generator = TraceGenerator(cfg)
+        generator = PromptGenerator(cfg)
 
         # Generate prompt records
-        trace_counts = generator.generate_traces(samples, retrieved_results, router)
+        trace_counts = generator.generate_prompts(samples, retrieved_results, router)
+
 
         grounded_count = trace_counts["grounded_count"]
         no_ret_count = trace_counts["no_retrieval_count"]

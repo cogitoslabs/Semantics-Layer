@@ -13,7 +13,8 @@ from lib.s4_rad_prep.chunker import Chunk, chunk_document, run_chunking
 from lib.s4_rad_prep.indexer import run_indexing
 from lib.s4_rad_prep.retriever import Retriever, RetrievalResult
 from lib.s4_rad_prep.no_retrieval_router import NoRetrievalRouter
-from lib.s4_rad_prep.trace_generator import format_prompt, TraceGenerator
+from lib.s4_rad_prep.prompt_generator import format_prompt, PromptGenerator
+
 
 
 class SimpleMockTokenizer:
@@ -299,8 +300,9 @@ def test_trace_prompt_generator(test_cfg):
 
         router = NoRetrievalRouter(tmp_path / "logs" / "rad_prep" / "no_retrieval_rates.jsonl")
 
-        generator = TraceGenerator(test_cfg)
-        generator.generate_traces(samples, ret_results, router)
+        generator = PromptGenerator(test_cfg)
+        generator.generate_prompts(samples, ret_results, router)
+
 
         # Check files
         grounded_file = test_cfg.rad.traces_dir / "grounded_traces.jsonl"
@@ -393,7 +395,7 @@ def test_trace_generator_bedrock(test_cfg):
         mock_client_instance = MagicMock()
         mock_client_instance.converse.return_value = mock_response
         mock_boto_client.return_value = mock_client_instance
-        from lib.s4_rad_prep.trace_generator import BedrockBackend
+        from lib.utils.teacher_backend import BedrockBackend
         backend = BedrockBackend(test_cfg)
         traces = backend.generate_batch(["Test prompt"])
 
@@ -405,7 +407,7 @@ def test_trace_generator_bedrock(test_cfg):
 
 def test_trace_generator_bedrock_missing_credentials(test_cfg):
     test_cfg.rad.teacher_backend = "aws"
-    from lib.s4_rad_prep.trace_generator import BedrockBackend
+    from lib.utils.teacher_backend import BedrockBackend
     with patch.dict("os.environ", {}, clear=True):
         with pytest.raises(RuntimeError, match="SEVERE ERROR: Missing AWS credentials"):
             BedrockBackend(test_cfg)
@@ -413,7 +415,7 @@ def test_trace_generator_bedrock_missing_credentials(test_cfg):
 
 def test_trace_generator_bedrock_api_error(test_cfg):
     test_cfg.rad.teacher_backend = "bedrock"
-    from lib.s4_rad_prep.trace_generator import BedrockBackend
+    from lib.utils.teacher_backend import BedrockBackend
     with patch.dict("os.environ", {"AWS_ACCESS_KEY_ID": "test_id", "AWS_SECRET_ACCESS_KEY": "test_secret"}), \
          patch("boto3.client") as mock_boto_client:
         mock_client_instance = MagicMock()

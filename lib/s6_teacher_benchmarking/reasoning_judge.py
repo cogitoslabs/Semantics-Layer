@@ -7,13 +7,13 @@ from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 
 from lib.utils import PipelineConfig
+from lib.utils.teacher_backend import LocalHFBackend, APIBackend, BedrockBackend
 
 logger = logging.getLogger(__name__)
 
 
 def make_judge_backend(cfg: PipelineConfig):
     """Instantiate the teacher backend using the independently configured judge parameters."""
-    from lib.s4_rad_prep.trace_generator import LocalHFBackend, APIBackend, BedrockBackend
     
     # Create a deep copy of configuration to avoid modifying original rad config
     judge_cfg = copy.deepcopy(cfg)

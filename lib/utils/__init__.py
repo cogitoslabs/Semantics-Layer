@@ -9,6 +9,7 @@ from .profiller import FunctionProfiler
 from .clean_text import clean_corpus_text, remove_inline_references, is_standalone_index_or_bibliography
 from .pdf_utils import extract_main_text_from_pdfs
 from .model_tracer import model_trace
+from .teacher_backend import TeacherModelBackend, LocalHFBackend, APIBackend, BedrockBackend
 
 __all__ = [
     "setup_logger",
@@ -26,4 +27,9 @@ __all__ = [
     "is_standalone_index_or_bibliography",
     "extract_main_text_from_pdfs",
     "model_trace",
+    "TeacherModelBackend",
+    "LocalHFBackend",
+    "APIBackend",
+    "BedrockBackend",
 ]
+
