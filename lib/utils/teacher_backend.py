@@ -1,6 +1,7 @@
 import os
 import logging
-from typing import List
+from typing import Any, List
+
 from concurrent.futures import ThreadPoolExecutor
 import torch
 import requests
@@ -15,11 +16,27 @@ class TeacherModelBackend:
         raise NotImplementedError
 
 
+def _get_teacher_setting(cfg: PipelineConfig, attr_name: str, env_var: str, default: Any = None) -> Any:
+    if hasattr(cfg, "benchmarking") and hasattr(cfg.benchmarking, attr_name):
+        val = getattr(cfg.benchmarking, attr_name)
+        if val:
+            return val
+    if hasattr(cfg, attr_name):
+        val = getattr(cfg, attr_name)
+        if val:
+            return val
+    if hasattr(cfg, "rad") and hasattr(cfg.rad, attr_name):
+        val = getattr(cfg.rad, attr_name)
+        if val:
+            return val
+    return os.environ.get(env_var, default)
+
+
 class LocalHFBackend(TeacherModelBackend):
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
-        self.model_name = cfg.rad.teacher_model_name
-        self.max_new_tokens = cfg.rad.teacher_max_new_tokens
+        self.model_name = _get_teacher_setting(cfg, "teacher_model_name", "BENCHMARK_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B")
+        self.max_new_tokens = _get_teacher_setting(cfg, "teacher_max_new_tokens", "BENCHMARK_TEACHER_MAX_NEW_TOKENS", 1024)
 
         logger.info(f"Loading local teacher tokenizer and model: {self.model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
@@ -29,7 +46,8 @@ class LocalHFBackend(TeacherModelBackend):
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
-            dtype = torch.bfloat16 if cfg.model.model_dtype == "bfloat16" else torch.float16
+            model_dtype = getattr(getattr(cfg, "model", None), "model_dtype", "float16")
+            dtype = torch.bfloat16 if model_dtype == "bfloat16" else torch.float16
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 dtype=dtype,
@@ -60,13 +78,13 @@ class LocalHFBackend(TeacherModelBackend):
 class APIBackend(TeacherModelBackend):
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
-        self.model_name = cfg.rad.teacher_model_name
-        self.api_url = cfg.rad.teacher_api_url
-        self.api_key = cfg.rad.teacher_api_key or os.environ.get("RAD_TEACHER_API_KEY", "")
-        self.max_new_tokens = cfg.rad.teacher_max_new_tokens
+        self.model_name = _get_teacher_setting(cfg, "teacher_model_name", "BENCHMARK_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B")
+        self.api_url = _get_teacher_setting(cfg, "teacher_api_url", "BENCHMARK_TEACHER_API_URL")
+        self.api_key = _get_teacher_setting(cfg, "teacher_api_key", "BENCHMARK_TEACHER_API_KEY", "")
+        self.max_new_tokens = int(_get_teacher_setting(cfg, "teacher_max_new_tokens", "BENCHMARK_TEACHER_MAX_NEW_TOKENS", 1024))
 
         if not self.api_url:
-            raise ValueError("RAD_TEACHER_API_URL must be provided when using api teacher backend.")
+            raise ValueError("BENCHMARK_TEACHER_API_URL must be provided when using api teacher backend.")
 
         if not (self.api_url.endswith("/chat/completions") or self.api_url.endswith("/completions")):
             if self.api_url.endswith("/"):
@@ -111,9 +129,10 @@ class APIBackend(TeacherModelBackend):
 class BedrockBackend(TeacherModelBackend):
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
-        self.model_name = cfg.rad.teacher_model_name
+        self.model_name = _get_teacher_setting(cfg, "teacher_model_name", "BENCHMARK_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B")
         self.region_name = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", "us-east-1"))
-        self.max_new_tokens = cfg.rad.teacher_max_new_tokens
+        self.max_new_tokens = int(_get_teacher_setting(cfg, "teacher_max_new_tokens", "BENCHMARK_TEACHER_MAX_NEW_TOKENS", 1024))
+
 
         import boto3
         from botocore.config import Config

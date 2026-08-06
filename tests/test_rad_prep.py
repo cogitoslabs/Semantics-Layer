@@ -51,13 +51,9 @@ def test_cfg():
     cfg.rad.abstract_overlap_tokens = 1
     cfg.rad.top_k = 3
     cfg.rad.relevance_threshold = 0.65
-    cfg.rad.embed_batch_size = 2
-    cfg.rad.teacher_backend = "hf_local"
-    cfg.rad.teacher_batch_size = 2
-    cfg.rad.trace_min_tokens = 10
-    cfg.rad.trace_max_tokens = 50
     cfg.rad.min_traces = 2
     return cfg
+
 
 
 def test_chunker_long_form(mock_tokenizer):
@@ -380,8 +376,9 @@ def test_pipeline_end_to_end(test_cfg):
 
 
 def test_trace_generator_bedrock(test_cfg):
-    test_cfg.rad.teacher_backend = "bedrock"
-    test_cfg.rad.teacher_model_name = "meta.llama3"
+    test_cfg.benchmarking.teacher_backend = "bedrock"
+    test_cfg.benchmarking.teacher_model_name = "meta.llama3"
+
 
     mock_response = {
         "output": {
@@ -407,7 +404,7 @@ def test_trace_generator_bedrock(test_cfg):
 
 
 def test_trace_generator_bedrock_missing_credentials(test_cfg):
-    test_cfg.rad.teacher_backend = "aws"
+    test_cfg.benchmarking.teacher_backend = "aws"
     from lib.utils.teacher_backend import BedrockBackend
     with patch.dict("os.environ", {}, clear=True):
         with pytest.raises(RuntimeError, match="SEVERE ERROR: Missing AWS credentials"):
@@ -415,7 +412,8 @@ def test_trace_generator_bedrock_missing_credentials(test_cfg):
 
 
 def test_trace_generator_bedrock_api_error(test_cfg):
-    test_cfg.rad.teacher_backend = "bedrock"
+    test_cfg.benchmarking.teacher_backend = "bedrock"
+
     from lib.utils.teacher_backend import BedrockBackend
     with patch.dict("os.environ", {"AWS_ACCESS_KEY_ID": "test_id", "AWS_SECRET_ACCESS_KEY": "test_secret"}), \
          patch("boto3.client") as mock_boto_client:

@@ -521,16 +521,9 @@ class RADPrepConfig:
     abstract_chunk_tokens: int     = field(default_factory=lambda: get("RAD_ABSTRACT_CHUNK_TOKENS", 256, int))
     abstract_overlap_tokens: int   = field(default_factory=lambda: get("RAD_ABSTRACT_OVERLAP_TOKENS", 32, int))
 
-    # Teacher
-    teacher_backend: str           = field(default_factory=lambda: get("RAD_TEACHER_BACKEND", "hf_local"))
-    teacher_model_name: str        = field(default_factory=lambda: get("RAD_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B"))
-    teacher_api_url: Optional[str] = field(default_factory=lambda: get("RAD_TEACHER_API_URL", None))
-    teacher_api_key: Optional[str] = field(default_factory=lambda: get("RAD_TEACHER_API_KEY", None))
-    teacher_max_new_tokens: int    = field(default_factory=lambda: get("RAD_TEACHER_MAX_NEW_TOKENS", 1024, int))
-    teacher_batch_size: int        = field(default_factory=lambda: get("RAD_TEACHER_BATCH_SIZE", 16, int))
-
     # Prompt prep gating
     min_traces: int                = field(default_factory=lambda: get("RAD_MIN_TRACES", 1000, int))
+
 
 
 
@@ -582,8 +575,14 @@ class TeacherBenchmarkingConfig:
     judge_api_key: Optional[str]        = field(default_factory=lambda: get("BENCHMARK_JUDGE_API_KEY", None))
     judge_max_new_tokens: int           = field(default_factory=lambda: get("BENCHMARK_JUDGE_MAX_NEW_TOKENS", 256, int))
     
-    teacher_backend: str                = field(default_factory=lambda: get("BENCHMARK_TEACHER_BACKEND", ""))
-    teacher_batch_size: int             = field(default_factory=lambda: get("BENCHMARK_TEACHER_BATCH_SIZE", 4, int))
+    # Teacher generation backend & settings
+    teacher_backend: str                = field(default_factory=lambda: get_with_fallback("BENCHMARK_TEACHER_BACKEND", "RAD_TEACHER_BACKEND", "hf_local"))
+    teacher_model_name: str             = field(default_factory=lambda: get_with_fallback("BENCHMARK_TEACHER_MODEL_NAME", "RAD_TEACHER_MODEL_NAME", "Qwen/Qwen3-1.7B"))
+    teacher_api_url: Optional[str]      = field(default_factory=lambda: get_with_fallback("BENCHMARK_TEACHER_API_URL", "RAD_TEACHER_API_URL", None))
+    teacher_api_key: Optional[str]      = field(default_factory=lambda: get_with_fallback("BENCHMARK_TEACHER_API_KEY", "RAD_TEACHER_API_KEY", None))
+    teacher_max_new_tokens: int         = field(default_factory=lambda: get_with_fallback("BENCHMARK_TEACHER_MAX_NEW_TOKENS", "RAD_TEACHER_MAX_NEW_TOKENS", 1024, int))
+    teacher_batch_size: int             = field(default_factory=lambda: get_with_fallback("BENCHMARK_TEACHER_BATCH_SIZE", "RAD_TEACHER_BATCH_SIZE", 16, int))
+
     
     eval_sample_size: int               = field(default_factory=lambda: get("BENCHMARK_EVAL_SAMPLE_SIZE", 10, int))
     min_eval_samples: int               = field(default_factory=lambda: get("BENCHMARK_MIN_EVAL_SAMPLES", 2, int))

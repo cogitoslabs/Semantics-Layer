@@ -51,7 +51,8 @@ class PromptGenerator:
 
     def generate_prompts(self, samples: List[Dict[str, Any]], retrieved_results: List[Any], no_retrieval_router: Any) -> Dict[str, int]:
         """Prepare grounded prompt records in batches, writing incrementally."""
-        batch_size = self.cfg.rad.teacher_batch_size
+        batch_size = 16
+
         grounded_path = self.traces_dir / "grounded_traces.jsonl"
         no_retrieval_path = self.traces_dir / "no_retrieval_traces.jsonl"
 
