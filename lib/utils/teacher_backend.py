@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 from typing import Any, List
 
@@ -92,7 +93,32 @@ class APIBackend(TeacherModelBackend):
             else:
                 self.api_url += "/v1/chat/completions"
 
+        self._verify_connection()
+
         logger.info(f"API Backend configured for endpoint: {self.api_url} using model: {self.model_name}")
+
+    def _verify_connection(self) -> None:
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "user", "content": "ping"}
+            ],
+            "max_tokens": 1,
+            "temperature": 0.0,
+        }
+
+        try:
+            response = requests.post(self.api_url, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
+        except Exception as e:
+            logger.critical(f"API backend verification failed for endpoint '{self.api_url}' (model: {self.model_name}): {e}")
+            sys.exit(1)
 
     def generate_batch(self, prompts: List[str]) -> List[str]:
         headers = {
