@@ -85,8 +85,9 @@ def run_rad_prep_pipeline(cfg: PipelineConfig) -> None:
     router_stats = router.get_aggregate_stats()
 
     # Check validation gates
-    target_min_prompts = min(cfg.rad.min_traces, int(0.95 * total_attempted)) if total_attempted > 0 else cfg.rad.min_traces
+    target_min_prompts = int(cfg.rad.min_grounded_pct * total_attempted)
     passed_min_prompts = grounded_count >= target_min_prompts
+
 
     cluster_no_retrieval_rates = router_stats.get("by_cluster", {})
     passed_cluster_no_ret = True

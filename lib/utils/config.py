@@ -522,7 +522,21 @@ class RADPrepConfig:
     abstract_overlap_tokens: int   = field(default_factory=lambda: get("RAD_ABSTRACT_OVERLAP_TOKENS", 32, int))
 
     # Prompt prep gating
-    min_traces: int                = field(default_factory=lambda: get("RAD_MIN_TRACES", 1000, int))
+    min_grounded_pct: float        = field(default_factory=lambda: get_with_fallback("RAD_MIN_GROUNDED_PCT", "RAD_MIN_TRACES", 0.95, float))
+
+    def __post_init__(self):
+        if self.min_grounded_pct > 1.0:
+            self.min_grounded_pct = self.min_grounded_pct / 100.0
+
+    @property
+    def min_traces(self) -> float:
+        return self.min_grounded_pct
+
+    @min_traces.setter
+    def min_traces(self, val: float):
+        self.min_grounded_pct = val / 100.0 if val > 1.0 else val
+
+
 
 
 

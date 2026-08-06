@@ -50,9 +50,9 @@ def test_cfg():
     cfg.rad.abstract_chunk_tokens = 5
     cfg.rad.abstract_overlap_tokens = 1
     cfg.rad.top_k = 3
-    cfg.rad.relevance_threshold = 0.65
-    cfg.rad.min_traces = 2
+    cfg.rad.min_grounded_pct = 0.50
     return cfg
+
 
 
 

@@ -261,7 +261,8 @@ The pipeline can be run in two sub-modes via `--rad-mode`:
 
 After prompt preparation, the pipeline logs a summary. For the phase manifest to record `status: complete`:
 
-- Grounded prompt count ≥ `min(cfg.rad.min_traces, int(0.95 * total_attempted))` (default: 1000 or 95% of evaluation samples, preventing false incomplete status on smaller sample sets)
+- Grounded prompt count ≥ `int(cfg.rad.min_grounded_pct * total_attempted)` (default: 95% of evaluation samples, preventing false incomplete status on smaller sample sets)
+
 - No-retrieval rate per cluster ≤ 30% (warn if exceeded; does not block — indicates indexing gap)
 
 ---

@@ -11,7 +11,8 @@ This module implements **Step 4 (Retrieval-Augmented Distillation Preparation â€
 - **Hybrid Context Retrieval**: Retrieve top-$k$ (default 7) relevant context chunks per query using hybrid scoring ($0.5 \cdot \text{dense} + 0.5 \cdot \text{sparse}$).
 - **No-Retrieval Sample Routing**: Route QA samples to either grounded or no-retrieval tracks based on similarity thresholding. Samples with fewer than 2 retrieved chunks exceeding `relevance_threshold` (default 0.65 cosine similarity) are routed to the no-retrieval track.
 - **Grounded QA Prompt Preparation**: Assemble grounded QA prompt records (with retrieved context) and no-retrieval QA prompt records, creating datasets for downstream teacher benchmarking and trace generation.
-- **Validation Gates & Phase Manifest**: Enforce prompt coverage and cluster retrieval validation gates ($\ge 1000$ grounded prompts, $\le 30\%$ no-retrieval rate per cluster), outputting a phase manifest (`phase_manifest.json`) and summary log. Supports execution modes: `index` (chunking & indexing only), `prompts` / `traces` (retrieval & prompt preparation only), or `full` (end-to-end).
+- **Validation Gates & Phase Manifest**: Enforce prompt coverage and cluster retrieval validation gates ($\ge 95\%$ grounded prompts, $\le 30\%$ no-retrieval rate per cluster), outputting a phase manifest (`phase_manifest.json`) and summary log.
+
 
 ---
 
@@ -55,6 +56,8 @@ All parameters are defined in `lib/utils/config.py` under `RADPrepConfig` (`cfg.
 | `cfg.rad.long_form_overlap_tokens`<br>`Env: RAD_LONG_FORM_OVERLAP_TOKENS` | `64` | Overlap size in tokens for long-form documents. |
 | `cfg.rad.abstract_chunk_tokens`<br>`Env: RAD_ABSTRACT_CHUNK_TOKENS` | `256` | Chunk size in tokens for abstract documents. |
 | `cfg.rad.abstract_overlap_tokens`<br>`Env: RAD_ABSTRACT_OVERLAP_TOKENS` | `32` | Overlap size in tokens for abstract documents. |
+| `cfg.rad.min_grounded_pct`<br>`Env: RAD_MIN_GROUNDED_PCT` | `0.95` (95%) | Minimum grounded prompt percentage threshold gate. |
+
 
 ---
 
