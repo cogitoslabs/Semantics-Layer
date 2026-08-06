@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 class DenseEmbedder:
     def __init__(self, model_key: str, device: Optional[str] = None):
-        if model_key == "biolinkbert" or model_key == "hybrid":
+        if model_key == "bge-large":
+            self.model_name = "BAAI/bge-large-en-v1.5"
+        elif model_key == "biolinkbert" or model_key == "hybrid":
             self.model_name = "michiyasunaga/BioLinkBERT-large"
         elif model_key == "pubmedbert":
             self.model_name = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
@@ -26,10 +28,17 @@ class DenseEmbedder:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.model = AutoModel.from_pretrained(self.model_name).to(self.device)
         self.model.eval()
+        self.is_bge = "bge" in self.model_name.lower()
 
-    def embed_batch(self, texts: List[str]) -> np.ndarray:
+    def embed_batch(self, texts: List[str], is_query: bool = False) -> np.ndarray:
+        if is_query and self.is_bge:
+            instruction = "Represent this sentence for searching relevant passages: "
+            formatted_texts = [instruction + t if not t.startswith(instruction) else t for t in texts]
+        else:
+            formatted_texts = texts
+
         inputs = self.tokenizer(
-            texts,
+            formatted_texts,
             padding=True,
             truncation=True,
             max_length=512,

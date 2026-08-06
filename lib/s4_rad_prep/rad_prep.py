@@ -43,25 +43,21 @@ def run_rad_prep_pipeline(cfg: PipelineConfig) -> None:
     run_indexing(cfg, chunks)
 
     logger.info("Preparing grounded QA prompts...")
-
     # Load samples
     qa_samples_path = Path(cfg.rad.qa_samples_path)
     if not qa_samples_path.exists():
         raise FileNotFoundError(f"QA samples file not found at {qa_samples_path}")
-
     samples = []
     with open(qa_samples_path, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 samples.append(json.loads(line))
-
     if not samples:
         logger.warning("No QA samples found. Exiting prompt preparation.")
         return
 
     # Initialize retriever
     retriever = Retriever(cfg)
-
     # Retrieve context for all samples
     logger.info(f"Retrieving context for {len(samples)} samples using mode {cfg.rad.retrieval_mode}")
     retrieved_results = []
@@ -71,7 +67,7 @@ def run_rad_prep_pipeline(cfg: PipelineConfig) -> None:
         retrieved_results.append(res)
 
     # Initialize router and generator
-    router = NoRetrievalRouter(no_retrieval_rates_path)
+    router = NoRetrievalRouter(no_retrieval_rates_path, min_passed_chunks=cfg.rad.min_passed_chunks)
     generator = PromptGenerator(cfg)
 
     # Generate prompt records

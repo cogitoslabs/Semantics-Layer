@@ -127,3 +127,17 @@ def test_pipeline_config_summary():
     assert "Eval batch size" in summary_text
     assert "Grad checkpoint" in summary_text
 
+
+def test_rad_reranker_config_validation():
+    cfg = PipelineConfig()
+    cfg.rad.top_k = 10
+    cfg.rad.rerank_candidate_k = 5  # invalid: candidate_k < top_k
+    with pytest.raises(ValueError, match="RAD_RERANK_CANDIDATE_K"):
+        cfg.validate()
+
+    cfg.rad.rerank_candidate_k = 20
+    cfg.rad.reranker_batch_size = 0  # invalid: batch_size < 1
+    with pytest.raises(ValueError, match="RAD_RERANKER_BATCH_SIZE"):
+        cfg.validate()
+
+

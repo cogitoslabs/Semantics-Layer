@@ -5,5 +5,6 @@ Public surface for the Step 0.3 Retrieval-Augmented Distillation Preparation (RA
 """
 
 from .rad_prep import run_rad_prep_pipeline
+from .reranker import CrossEncoderReranker
 
-__all__ = ["run_rad_prep_pipeline"]
+__all__ = ["run_rad_prep_pipeline", "CrossEncoderReranker"]

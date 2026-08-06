@@ -16,16 +16,17 @@ class RoutingDecision:
 
 
 class NoRetrievalRouter:
-    def __init__(self, log_path: Path):
+    def __init__(self, log_path: Path, min_passed_chunks: int = 1):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.min_passed_chunks = max(1, min_passed_chunks)
         self._decisions: List[RoutingDecision] = []
 
     def route_sample(self, sample_id: str, cluster_id: Optional[str], passed_chunks: int) -> RoutingDecision:
-        """Route sample to no_retrieval track if passed chunks are fewer than 2."""
-        no_retrieval = passed_chunks < 2
+        """Route sample to no_retrieval track if passed chunks are fewer than min_passed_chunks."""
+        no_retrieval = passed_chunks < self.min_passed_chunks
         reason = (
-            f"Insufficient retrieved chunks: {passed_chunks} passed threshold (minimum required is 2)"
+            f"Insufficient retrieved chunks: {passed_chunks} passed threshold (minimum required is {self.min_passed_chunks})"
             if no_retrieval
             else "Sufficient context retrieved"
         )

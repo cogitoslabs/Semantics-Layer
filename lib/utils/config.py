@@ -509,11 +509,18 @@ class RADPrepConfig:
     qa_samples_path: Path          = field(default_factory=lambda: Path(get("RAD_QA_SAMPLES_PATH", "evals/dapt/probe_qa.jsonl")))
 
     # Retrieval settings
-    embedding_model: str           = field(default_factory=lambda: get("RAD_EMBEDDING_MODEL", "biolinkbert"))
+    embedding_model: str           = field(default_factory=lambda: get("RAD_EMBEDDING_MODEL", "bge-large"))
     retrieval_mode: str            = field(default_factory=lambda: get("RAD_RETRIEVAL_MODE", "hybrid"))  # dense|sparse|hybrid
     top_k: int                     = field(default_factory=lambda: get("RAD_TOP_K", 7, int))
     relevance_threshold: float     = field(default_factory=lambda: get("RAD_RELEVANCE_THRESHOLD", 0.65, float))
     embed_batch_size: int          = field(default_factory=lambda: get("RAD_EMBED_BATCH_SIZE", 256, int))
+
+    # Reranking settings
+    use_reranker: bool             = field(default_factory=lambda: get("RAD_USE_RERANKER", True, bool))
+    reranker_model: str            = field(default_factory=lambda: get("RAD_RERANKER_MODEL", "BAAI/bge-reranker-large"))
+    rerank_candidate_k: int        = field(default_factory=lambda: get("RAD_RERANK_CANDIDATE_K", 100, int))
+    reranker_batch_size: int       = field(default_factory=lambda: get("RAD_RERANKER_BATCH_SIZE", 32, int))
+    query_expansion: bool          = field(default_factory=lambda: get("RAD_QUERY_EXPANSION", True, bool))
 
     # Chunking
     long_form_chunk_tokens: int    = field(default_factory=lambda: get("RAD_LONG_FORM_CHUNK_TOKENS", 512, int))
@@ -523,10 +530,14 @@ class RADPrepConfig:
 
     # Prompt prep gating
     min_grounded_pct: float        = field(default_factory=lambda: get_with_fallback("RAD_MIN_GROUNDED_PCT", "RAD_MIN_TRACES", 0.95, float))
+    min_passed_chunks: int         = field(default_factory=lambda: get("RAD_MIN_PASSED_CHUNKS", 1, int))
 
     def __post_init__(self):
         if self.min_grounded_pct > 1.0:
             self.min_grounded_pct = self.min_grounded_pct / 100.0
+        # Auto-calibrate relevance threshold for Cross-Encoder sigmoid probabilities (0.30 vs 0.65 for bi-encoder cosine)
+        if self.use_reranker and "RAD_RELEVANCE_THRESHOLD" not in os.environ and self.relevance_threshold in (0.65, 0.45):
+            self.relevance_threshold = 0.30
 
     @property
     def min_traces(self) -> float:
@@ -686,8 +697,6 @@ class PipelineConfig:
                 errors.append("LORA_TARGET_MODULES cannot be empty when PEFT_DAPT is enabled")
 
         # RAD Prep Validation
-        if self.rad.teacher_backend not in ("hf_local", "api", "bedrock"):
-            errors.append(f"RAD_TEACHER_BACKEND must be 'hf_local', 'api', or 'bedrock', got '{self.rad.teacher_backend}'")
         if not (0.0 <= self.rad.relevance_threshold <= 1.0):
             errors.append(f"RAD_RELEVANCE_THRESHOLD must be in [0,1], got {self.rad.relevance_threshold}")
         if self.rad.top_k < 1:
@@ -698,6 +707,10 @@ class PipelineConfig:
             errors.append(f"RAD_LONG_FORM_CHUNK_TOKENS ({self.rad.long_form_chunk_tokens}) must be > overlap ({self.rad.long_form_overlap_tokens})")
         if self.rad.abstract_chunk_tokens <= self.rad.abstract_overlap_tokens:
             errors.append(f"RAD_ABSTRACT_CHUNK_TOKENS ({self.rad.abstract_chunk_tokens}) must be > overlap ({self.rad.abstract_overlap_tokens})")
+        if self.rad.rerank_candidate_k < self.rad.top_k:
+            errors.append(f"RAD_RERANK_CANDIDATE_K ({self.rad.rerank_candidate_k}) must be >= RAD_TOP_K ({self.rad.top_k})")
+        if self.rad.reranker_batch_size < 1:
+            errors.append(f"RAD_RERANKER_BATCH_SIZE must be >= 1, got {self.rad.reranker_batch_size}")
 
         # Clustering Validation
         if self.clustering.noise_assignment not in ("nearest", "drop"):

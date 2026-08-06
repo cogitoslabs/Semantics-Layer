@@ -426,3 +426,200 @@ def test_trace_generator_bedrock_api_error(test_cfg):
             backend.generate_batch(["Test prompt"])
 
 
+def test_bge_large_dense_embedder():
+    from lib.s4_rad_prep.indexer import DenseEmbedder
+
+    mock_outputs = MagicMock()
+    # last_hidden_state shape (1, 3, 4)
+    mock_outputs.last_hidden_state = torch.ones((1, 3, 4))
+
+    with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok, \
+         patch("transformers.AutoModel.from_pretrained") as mock_model:
+
+        tok_instance = MagicMock()
+        tok_instance.return_value = {
+            "input_ids": torch.tensor([[1, 2, 3]]),
+            "attention_mask": torch.tensor([[1, 1, 1]])
+        }
+        mock_tok.return_value = tok_instance
+        model_instance = MagicMock()
+        model_instance.return_value = mock_outputs
+        mock_model.return_value = model_instance
+
+        embedder = DenseEmbedder("bge-large", device="cpu")
+        assert embedder.model_name == "BAAI/bge-large-en-v1.5"
+        assert embedder.is_bge is True
+
+        res = embedder.embed_batch(["neuroscience research"], is_query=True)
+        assert res.shape == (1, 4)
+        # Check query instruction prefix was added
+        called_args = tok_instance.call_args[0][0]
+        assert called_args[0].startswith("Represent this sentence for searching relevant passages:")
+
+
+def test_query_variant_extraction(test_cfg):
+    test_cfg.rad.chunks_path = Path("nonexistent_chunks.jsonl")
+    test_cfg.rad.index_dir = Path("nonexistent_index")
+
+    with patch("lib.s4_rad_prep.retriever.DenseEmbedder"), \
+         patch("transformers.AutoTokenizer.from_pretrained"):
+        retriever = object.__new__(Retriever)
+        retriever.cfg = test_cfg
+
+        variants = retriever._extract_query_variants("Which definition best describes 'Sulcus'?")
+        assert "Sulcus definition" in variants
+        assert "Sulcus" in variants
+        assert "Which definition best describes 'Sulcus'?" in variants
+
+
+def test_dense_embedder_backward_compatibility():
+    from lib.s4_rad_prep.indexer import DenseEmbedder
+
+    mock_outputs = MagicMock()
+    mock_outputs.last_hidden_state = torch.ones((1, 3, 4))
+
+    with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok, \
+         patch("transformers.AutoModel.from_pretrained") as mock_model:
+
+        tok_instance = MagicMock()
+        tok_instance.return_value = {
+            "input_ids": torch.tensor([[1, 2, 3]]),
+            "attention_mask": torch.tensor([[1, 1, 1]])
+        }
+        mock_tok.return_value = tok_instance
+        model_instance = MagicMock()
+        model_instance.return_value = mock_outputs
+        mock_model.return_value = model_instance
+
+        embedder_bio = DenseEmbedder("biolinkbert", device="cpu")
+        assert embedder_bio.model_name == "michiyasunaga/BioLinkBERT-large"
+        assert embedder_bio.is_bge is False
+
+        embedder_pub = DenseEmbedder("pubmedbert", device="cpu")
+        assert embedder_pub.model_name == "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+        assert embedder_pub.is_bge is False
+
+
+def test_cross_encoder_reranker():
+    from lib.s4_rad_prep.reranker import CrossEncoderReranker
+
+    chunks = [
+        Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="cortex visual system", token_count=3),
+        Chunk(chunk_id="c2", doc_id="d2", doc_type="long_form", text="synaptic plasticity memory", token_count=3),
+    ]
+
+    mock_logits = torch.tensor([[2.0], [-1.0]])  # sigmoid(2.0)~0.88, sigmoid(-1.0)~0.27
+    mock_outputs = MagicMock()
+    mock_outputs.logits = mock_logits
+
+    with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok, \
+         patch("transformers.AutoModelForSequenceClassification.from_pretrained") as mock_model:
+
+        tok_instance = MagicMock()
+        tok_instance.return_value = {
+            "input_ids": torch.tensor([[1, 2], [3, 4]]),
+            "attention_mask": torch.tensor([[1, 1], [1, 1]])
+        }
+        mock_tok.return_value = tok_instance
+
+        model_instance = MagicMock()
+        model_instance.return_value = mock_outputs
+        mock_model.return_value = model_instance
+
+        reranker = CrossEncoderReranker("BAAI/bge-reranker-large", device="cpu", batch_size=32)
+        reranked_chunks, reranked_scores = reranker.rerank("visual cortex", chunks, top_k=2)
+
+        assert len(reranked_chunks) == 2
+        assert reranked_chunks[0].chunk_id == "c1"
+        assert reranked_scores[0] > reranked_scores[1]
+        assert reranked_scores[0] == pytest.approx(0.88, rel=1e-1)
+
+
+def test_hybrid_retrieval_with_reranker(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.index_dir = tmp_path / "index"
+        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+        test_cfg.rad.retrieval_mode = "hybrid"
+        test_cfg.rad.use_reranker = True
+        test_cfg.rad.rerank_candidate_k = 10
+        test_cfg.rad.top_k = 2
+        test_cfg.rad.relevance_threshold = 0.50
+
+        chunks = [
+            Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="visual cortex occipital lobe", token_count=4),
+            Chunk(chunk_id="c2", doc_id="d2", doc_type="long_form", text="motor cortex frontal lobe", token_count=4),
+        ]
+        with open(test_cfg.rad.chunks_path, "w") as f:
+            for c in chunks:
+                f.write(json.dumps(c.__dict__) + "\n")
+
+        index = faiss.IndexFlatIP(4)
+        index.add(np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype="float32"))
+        test_cfg.rad.index_dir.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(index, str(test_cfg.rad.index_dir / "index.faiss"))
+
+        mock_query_emb = np.array([[0.9, 0.1, 0, 0]], dtype="float32")
+
+        mock_reranker = MagicMock()
+        mock_reranker.rerank.return_value = ([chunks[0]], [0.85])
+
+        with patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+             patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
+
+            mock_embedder = MagicMock()
+            mock_embedder.embed_batch.return_value = mock_query_emb
+            mock_embedder_class.return_value = mock_embedder
+            mock_tok_class.return_value = SimpleMockTokenizer()
+
+            retriever = Retriever(test_cfg, reranker=mock_reranker)
+            result = retriever.retrieve("visual cortex occipital")
+
+            assert len(result.chunks) == 1
+            assert result.chunks[0].chunk_id == "c1"
+            assert result.scores[0] == pytest.approx(0.85, rel=1e-2)
+            mock_reranker.rerank.assert_called_once()
+
+
+def test_reranker_disabled_fallback(test_cfg):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_cfg.rad.index_dir = tmp_path / "index"
+        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+        test_cfg.rad.retrieval_mode = "hybrid"
+        test_cfg.rad.use_reranker = False
+        test_cfg.rad.top_k = 2
+        test_cfg.rad.relevance_threshold = 0.00  # allow RRF scores to pass
+
+        chunks = [
+            Chunk(chunk_id="c1", doc_id="d1", doc_type="long_form", text="hippocampus memory formation", token_count=3),
+            Chunk(chunk_id="c2", doc_id="d2", doc_type="long_form", text="amygdala emotional processing", token_count=3),
+        ]
+        with open(test_cfg.rad.chunks_path, "w") as f:
+            for c in chunks:
+                f.write(json.dumps(c.__dict__) + "\n")
+
+        index = faiss.IndexFlatIP(4)
+        index.add(np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype="float32"))
+        test_cfg.rad.index_dir.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(index, str(test_cfg.rad.index_dir / "index.faiss"))
+
+        mock_query_emb = np.array([[0.9, 0.1, 0, 0]], dtype="float32")
+
+        with patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_embedder_class, \
+             patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class:
+
+            mock_embedder = MagicMock()
+            mock_embedder.embed_batch.return_value = mock_query_emb
+            mock_embedder_class.return_value = mock_embedder
+            mock_tok_class.return_value = SimpleMockTokenizer()
+
+            retriever = Retriever(test_cfg)
+            assert retriever.reranker is None
+            result = retriever.retrieve("hippocampus memory")
+
+            assert len(result.chunks) == 2
+            assert result.chunks[0].chunk_id == "c1"
+
+
+

@@ -1,5 +1,11 @@
 # Change History
 
+## Status: Completed (Removed Legacy `teacher_backend` Validation from RAD Prep Config)
+
+- Removed stale `self.rad.teacher_backend` validation check from `PipelineConfig.validate()` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py), resolving `AttributeError` when running `pipeline.py --step s4` following the removal of LLM teacher trace generation from Step 4.
+
+---
+
 ## Status: Completed (Removed LLM Teacher Trace Generation from `s4_rad_prep`)
 
 - Refactored `s4_rad_prep` ([rad_prep.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/rad_prep.py) and [trace_generator.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/trace_generator.py)) to remove redundant LLM teacher trace generation.
