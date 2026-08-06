@@ -23,10 +23,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--rad-mode",
-        choices=["index", "traces", "full"],
+        choices=["index", "prompts", "traces", "full"],
         default="full",
-        help="Sub-mode for step s4: index (chunk & index corpus), traces (generate traces), full (index and generate)"
+        help="Sub-mode for step s4: index (chunk & index corpus), prompts (prepare grounded QA prompts), full (index and prepare prompts)"
     )
+
     args = parser.parse_args()
     # Instantiate and validate configuration
     cfg = PipelineConfig()

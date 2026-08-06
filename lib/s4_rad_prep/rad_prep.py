@@ -25,31 +25,31 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     no_retrieval_rates_path = logs_dir / "no_retrieval_rates.jsonl"
-    discarded_traces_path = logs_dir / "discarded_traces.jsonl"
     phase_manifest_path = logs_dir / "phase_manifest.json"
 
     grounded_path = Path(cfg.rad.traces_dir) / "grounded_traces.jsonl"
     no_ret_path = Path(cfg.rad.traces_dir) / "no_retrieval_traces.jsonl"
 
-    # Reset log and trace files if we are starting a trace generation run
-    if rad_mode in ("full", "traces"):
+    run_index = rad_mode in ("full", "index")
+    run_prompts = rad_mode in ("full", "prompts", "traces")
+
+    # Reset log and output files if preparing prompts
+    if run_prompts:
         if no_retrieval_rates_path.exists():
             no_retrieval_rates_path.unlink()
-        if discarded_traces_path.exists():
-            discarded_traces_path.unlink()
         if grounded_path.exists():
             grounded_path.unlink()
         if no_ret_path.exists():
             no_ret_path.unlink()
 
-    chunks = None
-    if rad_mode in ("full", "index"):
+    if run_index:
         logger.info("Chunking and indexing retrieval corpus...")
         chunks = run_chunking(cfg)
         run_indexing(cfg, chunks)
 
-    if rad_mode in ("full", "traces"):
+    if run_prompts:
         logger.info("Preparing grounded QA prompts...")
+
 
         # Load samples
         qa_samples_path = Path(cfg.rad.qa_samples_path)
