@@ -529,10 +529,9 @@ class RADPrepConfig:
     teacher_max_new_tokens: int    = field(default_factory=lambda: get("RAD_TEACHER_MAX_NEW_TOKENS", 1024, int))
     teacher_batch_size: int        = field(default_factory=lambda: get("RAD_TEACHER_BATCH_SIZE", 16, int))
 
-    # Trace filtering
-    trace_min_tokens: int          = field(default_factory=lambda: get("RAD_TRACE_MIN_TOKENS", 15, int))
-    trace_max_tokens: int          = field(default_factory=lambda: get("RAD_TRACE_MAX_TOKENS", 2500, int))
+    # Prompt prep gating
     min_traces: int                = field(default_factory=lambda: get("RAD_MIN_TRACES", 1000, int))
+
 
 
 @dataclass

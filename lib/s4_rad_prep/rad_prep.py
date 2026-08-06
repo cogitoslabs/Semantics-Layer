@@ -44,8 +44,6 @@ def run_rad_prep_pipeline(cfg: PipelineConfig) -> None:
 
     logger.info("Preparing grounded QA prompts...")
 
-
-
     # Load samples
     qa_samples_path = Path(cfg.rad.qa_samples_path)
     if not qa_samples_path.exists():
@@ -60,7 +58,6 @@ def run_rad_prep_pipeline(cfg: PipelineConfig) -> None:
     if not samples:
         logger.warning("No QA samples found. Exiting prompt preparation.")
         return
-
 
     # Initialize retriever
     retriever = Retriever(cfg)
@@ -125,7 +122,7 @@ def run_rad_prep_pipeline(cfg: PipelineConfig) -> None:
     logger.info(
         f"\n"
         f"================================================================\n"
-        f"  Step 0.3 (RAD Prep) Execution Summary\n"
+        f"  Step 4 (RAD Prep) Execution Summary\n"
         f"================================================================\n"
         f"  Overall Status          : {status.upper()}\n"
         f"  Grounded Prompts        : {grounded_count} (Gate: >= {target_min_prompts} -> {'PASS' if passed_min_prompts else 'INCOMPLETE'})\n"
