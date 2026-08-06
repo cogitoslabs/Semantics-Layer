@@ -457,4 +457,12 @@
 - Dynamic Gate Scaling in RAD Prep: Updated `passed_min_traces` in [rad_prep.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/rad_prep.py) to use 95% of attempted traces (`grounded_count >= min(cfg.rad.min_traces, int(0.95 * total_attempted))`) as the completion gating requirement.
 - Reduced HDBSCAN noise rate in Step 5: Updated [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) defaults (`hdbscan_min_samples = 2` and `pca_components = 50`) to reduce unclustered boundary noise points.
 
+---
 
+## Status: Completed (Environment Files Cleanup & Consolidation)
+
+- Consolidated `.env.common`, `.env.cpu`, and `.env.gpu` into a single [.env](file:///e:/Projects/cnd/Semantics/.env) file and updated [.env.example](file:///e:/Projects/cnd/Semantics/.env.example) configuration template.
+- Updated [lib/utils/config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) to load [.env](file:///e:/Projects/cnd/Semantics/.env) exclusively and removed legacy split file loading.
+- Cleaned up legacy `.env.common`, `.env.cpu`, and `.env.gpu` files and updated [.gitignore](file:///e:/Projects/cnd/Semantics/.gitignore).
+- Updated references in [README.md](file:///e:/Projects/cnd/Semantics/README.md), [docs/S4_RAD_PREP.md](file:///e:/Projects/cnd/Semantics/docs/S4_RAD_PREP.md), [scripts/online_concept_check.py](file:///e:/Projects/cnd/Semantics/scripts/online_concept_check.py), and [scripts/online_cloze_check.py](file:///e:/Projects/cnd/Semantics/scripts/online_cloze_check.py).
+- Added end-to-end unit test suite in [tests/test_env_cleanup.py](file:///e:/Projects/cnd/Semantics/tests/test_env_cleanup.py) to verify `.env` loading and legacy file cleanup.

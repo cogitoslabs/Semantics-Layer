@@ -7,9 +7,6 @@ wheels/
 *.egg-info
 
 .env
-.env.cpu
-.env.gpu
-.env.common
 .env.*
 !.env.example
 

@@ -104,18 +104,8 @@ def is_gpu_available() -> bool:
 
     return False
 
-# Priority order (first loaded takes precedence under override=False):
-# 1. Local overrides (.env) if present
-# 2. Specific hardware settings (.env.gpu or .env.cpu)
-# 3. Shared settings (.env.common)
+# Load environment configuration from root .env
 load_dotenv(dotenv_path=root_dir / ".env")
-
-if is_gpu_available():
-    load_dotenv(dotenv_path=root_dir / ".env.gpu")
-else:
-    load_dotenv(dotenv_path=root_dir / ".env.cpu")
-
-load_dotenv(dotenv_path=root_dir / ".env.common")
 
 DOCLING_NUM_THREADS_WAS_AUTO = False
 

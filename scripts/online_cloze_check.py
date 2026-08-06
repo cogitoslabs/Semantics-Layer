@@ -1,7 +1,7 @@
 """
 online_cloze_check.py — Interactive and CLI terminal tool for online cloze probe check.
 
-Loads model and tokenizer based on .env.common and PipelineConfig, takes prompt input
+Loads model and tokenizer based on .env and PipelineConfig, takes prompt input
 from terminal, and generates completions using exact cloze probe generation parameters.
 """
 

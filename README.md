@@ -35,10 +35,8 @@ The pipeline consists of 6 sequential steps executed via [pipeline.py](file:///e
 ```
 Semantics/
 ├── .agents/                 # Workspace-scoped agent skills and customized rules
-├── .env.common              # Common environment variables shared across CPU/GPU environments
-├── .env.cpu                 # CPU-specific configuration overrides (PyPdfium fallback, threads)
+├── .env                     # Local environment configuration file
 ├── .env.example             # Example environment configuration template
-├── .env.gpu                 # GPU-specific configuration overrides (CUDA devices, VRAM batching)
 ├── CLAUDE.md                # Claude AI developer guidelines and environment specs
 ├── GEMINI.md                # Gemini AI agent rules and context guidelines
 ├── README.md                # Root project documentation (this file)

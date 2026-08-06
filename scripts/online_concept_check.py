@@ -1,7 +1,7 @@
 """
 online_concept_check.py — Interactive and CLI terminal tool for online concept probe check.
 
-Loads model and tokenizer based on .env.common and PipelineConfig, takes prompt input
+Loads model and tokenizer based on .env and PipelineConfig, takes prompt input
 from terminal, and generates output using exact concept probe generation parameters.
 """
 

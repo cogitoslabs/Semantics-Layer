@@ -42,7 +42,7 @@ This module implements **Step 4 (Retrieval-Augmented Distillation Preparation â€
 
 ## 4. Configurations
 
-All parameters are defined in `lib/utils/config.py` under `RADPrepConfig` (`cfg.rad`), fully configurable in `.env.common` and overridable via environment variables:
+All parameters are defined in `lib/utils/config.py` under `RADPrepConfig` (`cfg.rad`), fully configurable in `.env` and overridable via environment variables:
 
 | Parameter & Environment Variable | Default Value | Description |
 | :--- | :---: | :--- |
