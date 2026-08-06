@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List, Any, Optional
 
-from lib.utils import PipelineConfig
+from lib.utils import PipelineConfig, setup_logger, flush_loggers
 from lib.s6_teacher_benchmarking.eval_sampler import run_eval_sampling
 from lib.s6_teacher_benchmarking.benchmark_runner import run_benchmark_generation_and_scoring
 from lib.s6_teacher_benchmarking.reasoning_judge import run_cohen_kappa_evaluation
@@ -20,6 +20,9 @@ def run_teacher_benchmarking(
     Orchestrates eval sampling, trace generation, multi-dimension scoring,
     and manifest/score aggregation.
     """
+    # Guarantee pipeline.log is initialized and attached
+    setup_logger("lib", cfg.logging)
+    
     logger.info("Starting Phase 2, Step 2.1 — Teacher Benchmarking...")
     cfg.ensure_dirs()
     
@@ -51,4 +54,5 @@ def run_teacher_benchmarking(
     )
     
     logger.info("Teacher Benchmarking pipeline step completed successfully.")
+    flush_loggers()
     return manifest

@@ -137,8 +137,38 @@ class BedrockBackend(TeacherModelBackend):
         self.max_new_tokens = cfg.rad.teacher_max_new_tokens
 
         import boto3
-        logger.info(f"Initializing AWS Bedrock Runtime client in region {self.region_name}")
-        self.client = boto3.client("bedrock-runtime", region_name=self.region_name)
+        from botocore.config import Config
+
+        aws_access_key_id = os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY")
+        aws_secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("AWS_SECRET_KEY")
+        aws_session_token = os.environ.get("AWS_SESSION_TOKEN")
+
+        if not aws_access_key_id or not aws_secret_access_key:
+            err_msg = (
+                "SEVERE ERROR: Missing AWS credentials in environment variables! "
+                "RAD_TEACHER_BACKEND requires AWS_ACCESS_KEY_ID (or AWS_ACCESS_KEY) and "
+                "AWS_SECRET_ACCESS_KEY (or AWS_SECRET_KEY) to be explicitly set."
+            )
+            logger.critical(err_msg)
+            raise RuntimeError(err_msg)
+
+        boto_config = Config(max_pool_connections=32)
+        client_kwargs = {
+            "region_name": self.region_name,
+            "aws_access_key_id": aws_access_key_id,
+            "aws_secret_access_key": aws_secret_access_key,
+            "config": boto_config
+        }
+        if aws_session_token:
+            client_kwargs["aws_session_token"] = aws_session_token
+
+        logger.info(f"Initializing AWS Bedrock Runtime client in region {self.region_name} using explicit credentials")
+        try:
+            self.client = boto3.client("bedrock-runtime", **client_kwargs)
+        except Exception as e:
+            err_msg = f"SEVERE ERROR: Failed to initialize AWS Bedrock client: {e}"
+            logger.critical(err_msg)
+            raise RuntimeError(err_msg) from e
 
     def generate_batch(self, prompts: List[str]) -> List[str]:
         def send_request(prompt: str) -> str:
@@ -158,9 +188,9 @@ class BedrockBackend(TeacherModelBackend):
                 )
                 return response["output"]["message"]["content"][0]["text"]
             except Exception as e:
-                logger.error(f"Error calling AWS Bedrock model {self.model_name}: {e}")
-                # Return empty string on error so we don't break the batch alignment, but it will be filtered out due to length
-                return ""
+                err_msg = f"SEVERE ERROR: AWS Bedrock API call failed for model {self.model_name}: {e}"
+                logger.critical(err_msg)
+                raise RuntimeError(err_msg) from e
 
         max_workers = min(len(prompts), 16)
         logger.info(f"Sending {len(prompts)} concurrent Bedrock requests with {max_workers} workers")
@@ -183,7 +213,8 @@ def format_prompt(question: str, answer: str, context_chunks: List[Chunk], no_re
         context_text = "\n\n".join(chunk.text for chunk in context_chunks)
         return (
             "[SYSTEM]: You are a neuroscientist. Reason step-by-step using the provided context. "
-            "Cite specific passages where applicable. Wrap your final answer inside \\boxed{}.\n\n"
+            "Annotate key statements with bracketed passage citations matching the provided context (e.g. [Context 1] or [Passage 1]). "
+            "Wrap your final answer inside \\boxed{}.\n\n"
             f"[CONTEXT]: {context_text}\n"
             f"[QUESTION]: {question}\n"
             f"[GROUND TRUTH]: {answer}"
@@ -195,116 +226,114 @@ class TraceGenerator:
         self.cfg = cfg
         self.student_tokenizer = AutoTokenizer.from_pretrained(cfg.model.base_model_name)
 
-        backend_type = cfg.rad.teacher_backend
+        backend_type = cfg.rad.teacher_backend.lower() if cfg.rad.teacher_backend else ""
         if backend_type == "hf_local":
             self.backend = LocalHFBackend(cfg)
         elif backend_type == "api":
             self.backend = APIBackend(cfg)
-        elif backend_type == "bedrock":
+        elif backend_type in ("bedrock", "aws"):
             self.backend = BedrockBackend(cfg)
         else:
-            raise ValueError(f"Unknown teacher backend: {backend_type}")
+            raise ValueError(f"Unknown teacher backend: {cfg.rad.teacher_backend}")
 
         self.traces_dir = Path(cfg.rad.traces_dir)
         self.traces_dir.mkdir(parents=True, exist_ok=True)
         self.discarded_log = Path(cfg.logging.log_dir) / "rad_prep" / "discarded_traces.jsonl"
         self.discarded_log.parent.mkdir(parents=True, exist_ok=True)
 
-    def generate_traces(self, samples: List[Dict[str, Any]], retrieved_results: List[Any], no_retrieval_router: Any) -> None:
-        """Generate teacher traces in batches for the parsed samples."""
+    def generate_traces(self, samples: List[Dict[str, Any]], retrieved_results: List[Any], no_retrieval_router: Any) -> Dict[str, int]:
+        """Generate teacher traces in batches for the parsed samples, writing incrementally."""
         batch_size = self.cfg.rad.teacher_batch_size
         grounded_path = self.traces_dir / "grounded_traces.jsonl"
         no_retrieval_path = self.traces_dir / "no_retrieval_traces.jsonl"
 
-        # Prepare all prompts and routing decisions
-        prompts = []
-        decisions = []
-        resolved_answers = []
+        min_tok = self.cfg.rad.trace_min_tokens
+        max_tok = self.cfg.rad.trace_max_tokens
 
-        for idx, (sample, ret_res) in enumerate(zip(samples, retrieved_results)):
-            question = sample["question"]
+        grounded_count = 0
+        no_retrieval_count = 0
+        discarded_count = 0
 
-            # Resolve answer text from direct "answer" string or choices + answer_idx
-            if "choices" in sample and "answer_idx" in sample:
-                choices = sample["choices"]
-                ans_idx = sample["answer_idx"]
-                answer = choices[ans_idx]
-            else:
-                answer = sample.get("answer", "")
+        logger.info(f"Generating teacher traces for {len(samples)} samples in batches of {batch_size}")
 
-            resolved_answers.append(answer)
+        with open(grounded_path, "a", encoding="utf-8") as f_grounded, \
+             open(no_retrieval_path, "a", encoding="utf-8") as f_no_ret, \
+             open(self.discarded_log, "a", encoding="utf-8") as f_discard:
 
-            sample_id = sample.get("sample_id", f"sample_{idx}")
-            cluster_id = sample.get("cluster", sample.get("cluster_id"))
+            for i in range(0, len(samples), batch_size):
+                batch_samples = samples[i:i + batch_size]
+                batch_retrieved = retrieved_results[i:i + batch_size]
 
-            decision = no_retrieval_router.route_sample(sample_id, cluster_id, ret_res.passed_threshold)
-            decisions.append(decision)
+                batch_prompts = []
+                batch_decisions = []
+                batch_answers = []
 
-            prompt = format_prompt(question, answer, ret_res.chunks, decision.no_retrieval)
-            prompts.append(prompt)
+                for idx_in_batch, (sample, ret_res) in enumerate(zip(batch_samples, batch_retrieved)):
+                    global_idx = i + idx_in_batch
+                    question = sample["question"]
 
-        # Generate traces in batches
-        all_traces = []
-        logger.info(f"Generating teacher traces for {len(prompts)} prompts in batches of {batch_size}")
-        for i in range(0, len(prompts), batch_size):
-            batch_prompts = prompts[i:i + batch_size]
-            batch_traces = self.backend.generate_batch(batch_prompts)
-            all_traces.extend(batch_traces)
-
-        # Process and write traces
-        logger.info("Writing and filtering generated traces")
-        with open(grounded_path, "w", encoding="utf-8") as f_grounded, \
-             open(no_retrieval_path, "w", encoding="utf-8") as f_no_ret, \
-             open(self.discarded_log, "w", encoding="utf-8") as f_discard:
-
-            for idx, (sample, answer, decision, ret_res, trace) in enumerate(zip(samples, resolved_answers, decisions, retrieved_results, all_traces)):
-                sample_id = decision.sample_id
-                cluster_id = decision.cluster_id
-                question = sample["question"]
-
-                # Token count validation
-                token_count = len(self.student_tokenizer.encode(trace, add_special_tokens=False))
-
-                # Check validation boundaries
-                min_tok = self.cfg.rad.trace_min_tokens
-                max_tok = self.cfg.rad.trace_max_tokens
-
-                record = TraceRecord(
-                    sample_id=sample_id,
-                    cluster_id=cluster_id,
-                    question=question,
-                    answer=answer,
-                    retrieved_context="\n\n".join(chunk.text for chunk in ret_res.chunks),
-                    no_retrieval=decision.no_retrieval,
-                    teacher_trace=trace,
-                    token_count=token_count,
-                    teacher_model=self.cfg.rad.teacher_model_name,
-                    embedding_model=self.cfg.rad.embedding_model
-                )
-
-                record_dict = {
-                    "sample_id": record.sample_id,
-                    "cluster_id": record.cluster_id,
-                    "question": record.question,
-                    "answer": record.answer,
-                    "retrieved_context": record.retrieved_context,
-                    "no_retrieval": record.no_retrieval,
-                    "teacher_trace": record.teacher_trace,
-                    "token_count": record.token_count,
-                    "teacher_model": record.teacher_model,
-                    "embedding_model": record.embedding_model
-                }
-
-                if token_count < min_tok:
-                    reason = f"Trace token count ({token_count}) is below minimum limit ({min_tok})"
-                    f_discard.write(json.dumps({"sample_id": sample_id, "reason": reason, "trace": trace}) + "\n")
-                    logger.debug(f"Discarded trace for sample {sample_id}: {reason}")
-                elif token_count > max_tok:
-                    reason = f"Trace token count ({token_count}) exceeds maximum limit ({max_tok})"
-                    f_discard.write(json.dumps({"sample_id": sample_id, "reason": reason, "trace": trace}) + "\n")
-                    logger.debug(f"Discarded trace for sample {sample_id}: {reason}")
-                else:
-                    if record.no_retrieval:
-                        f_no_ret.write(json.dumps(record_dict) + "\n")
+                    if "choices" in sample and "answer_idx" in sample:
+                        choices = sample["choices"]
+                        ans_idx = sample["answer_idx"]
+                        answer = choices[ans_idx]
                     else:
-                        f_grounded.write(json.dumps(record_dict) + "\n")
+                        answer = sample.get("answer", "")
+
+                    batch_answers.append(answer)
+
+                    sample_id = sample.get("sample_id", f"sample_{global_idx}")
+                    cluster_id = sample.get("cluster", sample.get("cluster_id"))
+
+                    decision = no_retrieval_router.route_sample(sample_id, cluster_id, ret_res.passed_threshold)
+                    batch_decisions.append(decision)
+
+                    prompt = format_prompt(question, answer, ret_res.chunks, decision.no_retrieval)
+                    batch_prompts.append(prompt)
+
+                batch_traces = self.backend.generate_batch(batch_prompts)
+
+                for sample, answer, decision, ret_res, trace in zip(batch_samples, batch_answers, batch_decisions, batch_retrieved, batch_traces):
+                    sample_id = decision.sample_id
+                    cluster_id = decision.cluster_id
+                    question = sample["question"]
+
+                    token_count = len(self.student_tokenizer.encode(trace, add_special_tokens=False))
+
+                    record_dict = {
+                        "sample_id": sample_id,
+                        "cluster_id": cluster_id,
+                        "question": question,
+                        "answer": answer,
+                        "retrieved_context": "\n\n".join(chunk.text for chunk in ret_res.chunks),
+                        "no_retrieval": decision.no_retrieval,
+                        "teacher_trace": trace,
+                        "token_count": token_count,
+                        "teacher_model": self.cfg.rad.teacher_model_name,
+                        "embedding_model": self.cfg.rad.embedding_model
+                    }
+
+                    if token_count < min_tok:
+                        reason = f"Trace token count ({token_count}) is below minimum limit ({min_tok})"
+                        f_discard.write(json.dumps({"sample_id": sample_id, "reason": reason, "trace": trace}) + "\n")
+                        logger.debug(f"Discarded trace for sample {sample_id}: {reason}")
+                        discarded_count += 1
+                    elif token_count > max_tok:
+                        reason = f"Trace token count ({token_count}) exceeds maximum limit ({max_tok})"
+                        f_discard.write(json.dumps({"sample_id": sample_id, "reason": reason, "trace": trace}) + "\n")
+                        logger.debug(f"Discarded trace for sample {sample_id}: {reason}")
+                        discarded_count += 1
+                    else:
+                        if decision.no_retrieval:
+                            f_no_ret.write(json.dumps(record_dict) + "\n")
+                            no_retrieval_count += 1
+                        else:
+                            f_grounded.write(json.dumps(record_dict) + "\n")
+                            grounded_count += 1
+
+                no_retrieval_router.flush_batch()
+
+        return {
+            "grounded_count": grounded_count,
+            "no_retrieval_count": no_retrieval_count,
+            "discarded_count": discarded_count
+        }

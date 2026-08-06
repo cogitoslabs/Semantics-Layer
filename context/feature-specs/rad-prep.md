@@ -260,7 +260,7 @@ The pipeline can be run in two sub-modes via `--rad-mode`:
 
 After trace generation, the pipeline logs a summary. No hard gate is defined at this step (gating is in Phase 2 trace harmonization), but the following must pass for the phase manifest to record `status: complete`:
 
-- Grounded trace count ≥ `cfg.rad.min_traces` (default: 1000, sanity-check only)
+- Grounded trace count ≥ `min(cfg.rad.min_traces, int(0.95 * total_attempted))` (default: 1000 or 95% of attempted evaluation samples, preventing false incomplete status on smaller sample sets)
 - No-retrieval rate per cluster ≤ 30% (warn if exceeded; does not block — indicates indexing gap)
 - Discarded trace rate ≤ 20% (warn if exceeded)
 

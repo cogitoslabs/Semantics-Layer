@@ -13,6 +13,15 @@ def run_replay_corpus(cfg: PipelineConfig) -> None:
     exactly ~600 blocks (~614.4K tokens), and saves the raw text documents
     to dapt/in/fineweb_replay.jsonl for downstream merging and pre-tokenization.
     """
+    import sys
+    from lib.utils import setup_logger
+    setup_logger(
+        f"{__name__}.{sys._getframe().f_code.co_name}",
+        cfg.logging,
+    )
+    global logger
+    logger = get_logger(f"{__name__}.{sys._getframe().f_code.co_name}")
+
     # 1. Output location: cfg.data.dapt_in_dir / "fineweb_replay.jsonl"
     out_dir = Path(cfg.data.dapt_in_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

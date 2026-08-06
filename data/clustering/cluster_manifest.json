@@ -1,21 +1,20 @@
 {
   "status": "complete",
   "embedding_model": "all-mpnet-base-v2",
-  "total_docs": 594,
-  "noise_docs": 333,
-  "noise_fraction": 0.5606,
-  "total_clusters": 27,
+  "total_docs": 1586,
+  "noise_docs": 832,
+  "noise_fraction": 0.5246,
+  "total_clusters": 52,
   "cluster_sizes": {
-    "min": 9,
-    "max": 43,
-    "mean": 22.0,
-    "median": 21.0,
-    "std": 8.2
+    "min": 12,
+    "max": 79,
+    "mean": 30.5,
+    "median": 26.0,
+    "std": 16.1
   },
-  "capped_min_count": 3,
+  "capped_min_count": 36,
   "capped_max_count": 0,
   "warnings": [
-    "Fewer micro-clusters than expected: 27 < 50 threshold.",
-    "High noise fraction: 56.06% > 30% threshold. Consider lowering min_cluster_size."
+    "High noise fraction: 52.46% > 30% threshold. Consider lowering min_cluster_size."
   ]
 }

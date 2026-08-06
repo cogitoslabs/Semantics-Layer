@@ -9,13 +9,13 @@ used by gate_logic.check_convergence_gates().
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from lib.utils import DAPTConfig
-from lib.s3_dapt.probes.qa_probe         import eval_qa_accuracy
+from lib.s3_dapt.probes.qa_probe         import eval_qa_accuracy, get_qa_probe_samples
 from lib.s3_dapt.probes.perplexity_probe import eval_perplexity
-from lib.s3_dapt.probes.cloze_probe import eval_cloze_coverage
-from lib.s3_dapt.probes.concept_probe  import eval_concept_precision, clear_scorer_cache
+from lib.s3_dapt.probes.cloze_probe import eval_cloze_coverage, get_cloze_probe_samples
+from lib.s3_dapt.probes.concept_probe  import eval_concept_precision, clear_scorer_cache, get_concept_probe_samples
 from lib.utils.logger import get_logger, MetricsWriter
 
 logger = get_logger("dapt.eval_runner")
@@ -84,6 +84,7 @@ def run_all_probes(
             device=device,
             batch_size=qa_batch_size,
             max_length=cfg.probes.qa_max_seq_len,
+            eval_num=state["eval_count"],
         )
         qa_elapsed = time.time() - t0
     else:
@@ -110,6 +111,7 @@ def run_all_probes(
                 device=device,
                 generation_batch_size=cfg.probes.cloze_gen_batch_size,
                 max_length=cfg.probes.cloze_max_seq_len,
+                eval_num=state["eval_count"],
             )
             term_elapsed = time.time() - t0
         else:
@@ -143,7 +145,9 @@ def run_all_probes(
                 use_bertscore=use_bertscore,
                 generation_batch_size=cfg.probes.concept_gen_batch_size,
                 bertscore_batch_size=cfg.probes.concept_bertscore_batch_size,
+                failure_threshold=cfg.gates.concept_threshold,
                 max_length=cfg.probes.concept_max_seq_len,
+                eval_num=state["eval_count"],
             )
             ret_elapsed = time.time() - t0
         else:
@@ -159,74 +163,54 @@ def run_all_probes(
         }
         ret_elapsed = 0.0
 
+    # ── Aggregate metrics ──────────────────────────────────────────────────────
     total_elapsed = time.time() - eval_start
-
-    # Calculate perplexity improvement if possible
-    ppl_improvement_pct = None
-    if len(state["perplexity_history"]) > 0:
-        from lib.s3_dapt.probes.perplexity_probe import compute_ppl_improvement
-        ppl_improvement_pct = compute_ppl_improvement(state["perplexity_history"][-1], ppl_result["perplexity"])
-
-    # ── Assemble metrics record ───────────────────────────────────────────────
     metrics = {
-        "eval_id"          : state["eval_count"],
-        "tokens_processed" : state["tokens_processed"],
-        "corpus_pass"      : state["tokens_processed"] / cfg.corpus.total_corpus_tokens,
-        "timestamp"        : datetime.now(timezone.utc).isoformat(),
-        "ppl_improvement_pct": ppl_improvement_pct,
-        "metrics"          : {
-            "perplexity"        : ppl_result["perplexity"],
-            "avg_nll_nats"      : ppl_result["avg_nll_nats"],
-            "qa_accuracy"       : qa_result["accuracy"],
-            "qa_correct"        : qa_result["correct"],
-            "qa_total"          : qa_result["total"],
-            "cloze_coverage"    : term_result["coverage"],
-            "concept_precision" : ret_result["precision"],
-        },
-        "per_cluster_qa"   : qa_result.get("per_cluster_accuracy", {}),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eval_count": state["eval_count"],
+        "eval_id": state["eval_count"],
+        "step": state.get("global_step", state.get("steps_completed", 0)),
+        "tokens_processed": state["tokens_processed"],
+        "epoch": state["tokens_processed"] / cfg.corpus.total_corpus_tokens,
+        "perplexity": ppl_result["perplexity"],
+        "avg_nll_nats": ppl_result["avg_nll_nats"],
+        "qa_accuracy": qa_result["accuracy"],
+        "qa_correct": qa_result["correct"],
+        "qa_total": qa_result["total"],
+        "per_cluster_qa": qa_result.get("per_cluster_accuracy", {}),
+        "cloze_coverage": term_result["coverage"],
         "per_category_cloze": term_result.get("per_category", {}),
-        "probe_elapsed_sec": {
-            "perplexity"  : round(ppl_elapsed, 1),
-            "qa"          : round(qa_elapsed, 1),
-            "cloze"       : round(term_elapsed, 1),
-            "concept"     : round(ret_elapsed, 1),
-            "total"       : round(total_elapsed, 1),
-        },
+        "concept_precision": ret_result["precision"],
+        "concept_mean_bertscore_f1": ret_result.get("mean_bertscore_f1", 0.0),
+        "concept_min_bertscore_f1": ret_result.get("min_bertscore_f1", 0.0),
+        "concept_max_bertscore_f1": ret_result.get("max_bertscore_f1", 0.0),
+        "elapsed_seconds": total_elapsed,
+        "ppl_elapsed": ppl_elapsed,
+        "qa_elapsed": qa_elapsed,
+        "term_elapsed": term_elapsed,
+        "ret_elapsed": ret_elapsed,
     }
 
-    # ── Update rolling state histories ────────────────────────────────────────
+    # Update state histories
+    state.setdefault("eval_history", []).append(metrics)
+    state.setdefault("eval_timestamps", []).append(metrics["timestamp"])
+    state.setdefault("tokens_history", []).append(state["tokens_processed"])
+
     if cfg.probes.run_perplexity:
-        state["perplexity_history"].append(ppl_result["perplexity"])
+        state.setdefault("perplexity_history", []).append(ppl_result["perplexity"])
+        if "ppl_history" in state and isinstance(state["ppl_history"], list):
+            if state["ppl_history"] is not state["perplexity_history"]:
+                state["ppl_history"].append(ppl_result["perplexity"])
+        else:
+            state["ppl_history"] = state["perplexity_history"]
     if cfg.probes.run_qa:
-        state["qa_acc_history"].append(qa_result["accuracy"])
-    if cfg.probes.run_cloze:
-        state["cloze_cov_history"].append(term_result["coverage"])
-    if cfg.probes.run_concept:
-        state["concept_prec_history"].append(ret_result["precision"])
+        state.setdefault("qa_acc_history", []).append(qa_result["accuracy"])
+    if cfg.probes.run_cloze and run_slow_probes:
+        state.setdefault("cloze_cov_history", []).append(term_result["coverage"])
+    if cfg.probes.run_concept and run_slow_probes:
+        state.setdefault("concept_prec_history", []).append(ret_result["precision"])
 
-    # ── Write to JSONL ────────────────────────────────────────────────────────
     metrics_writer.write(metrics)
-
-    # ── Log to Weights & Biases ───────────────────────────────────────────────
-    if cfg.wandb.enabled:
-        try:
-            import wandb
-            log_data = {}
-            if cfg.probes.run_perplexity:
-                log_data["eval/perplexity"] = float(ppl_result["perplexity"])
-            if cfg.probes.run_qa:
-                log_data["eval/qa_accuracy"] = float(qa_result["accuracy"])
-            if cfg.probes.run_cloze:
-                log_data["eval/cloze_coverage"] = float(term_result["coverage"])
-            if cfg.probes.run_concept:
-                log_data["eval/concept_precision"] = float(ret_result["precision"])
-            log_data.update({
-                "eval/eval_count": int(state["eval_count"]),
-                "eval/tokens_processed": int(state["tokens_processed"]),
-            })
-            wandb.log(log_data)
-        except Exception as e:
-            logger.warning(f"Failed to log evaluation metrics to wandb: {e}")
 
     logger.info(
         f"\n  Eval #{state['eval_count']} summary:\n"
@@ -237,26 +221,25 @@ def run_all_probes(
         f"(elapsed: {total_elapsed:.0f}s)\n"
     )
 
-    # ── Compile and save failed evaluations if using high-fidelity SciBERT (final evaluation) ──
-    if use_bertscore:
-        failed_runs = {}
-        if cfg.probes.run_qa and "failures" in qa_result:
-            failed_runs["qa"] = qa_result["failures"]
-        if cfg.probes.run_cloze and "failures" in term_result:
-            failed_runs["cloze"] = term_result["failures"]
-        if cfg.probes.run_concept and "failures" in ret_result:
-            failed_runs["concept"] = ret_result["failures"]
+    # ── Compile and save all evaluation probe traces for EVERY evaluation pass ──
+    eval_traces_path = (
+        getattr(cfg.logging, "eval_traces_file", None)
+        or (cfg.logging.log_dir / "dapt_eval_traces.csv")
+    )
 
-        failures_json_path = cfg.logging.log_dir / "failed_evals.json"
-        try:
-            import os
-            import json
-            os.makedirs(cfg.logging.log_dir, exist_ok=True)
-            with open(failures_json_path, "w", encoding="utf-8") as f:
-                json.dump(failed_runs, f, indent=2)
-            logger.info(f"Failed evaluations automatically saved to {failures_json_path}")
-        except Exception as e:
-            logger.error(f"Failed to write failed evaluations JSON file: {e}")
+    current_pass_traces = []
+    if cfg.probes.run_qa:
+        current_pass_traces.extend(qa_result.get("eval_traces", qa_result.get("samples", [])))
+    if cfg.probes.run_cloze:
+        current_pass_traces.extend(term_result.get("eval_traces", term_result.get("samples", [])))
+    if cfg.probes.run_concept:
+        current_pass_traces.extend(ret_result.get("eval_traces", ret_result.get("samples", [])))
+
+    try:
+        append_eval_traces_to_csv(eval_traces_path, current_pass_traces)
+        logger.info(f"Detailed evaluation probe traces (Pass/Fail, Eval #{state['eval_count']}) saved to {eval_traces_path}")
+    except Exception as e:
+        logger.error(f"Failed to write evaluation probe traces CSV file: {e}")
 
     # Clear cached scorers to reclaim VRAM
     clear_scorer_cache()
@@ -264,30 +247,59 @@ def run_all_probes(
     return metrics
 
 
+CSV_FIELDNAMES = [
+    "Eval #",
+    "Eval Category",
+    "Eval Seq #",
+    "Eval",
+    "Generated Answer by the model",
+    "Matching Score",
+    "Result",
+]
+
+
+def append_eval_traces_to_csv(eval_traces_path: Path, new_traces: List[Dict[str, Any]]) -> None:
+    """
+    Append evaluation trace records to a CSV file. If the file does not exist,
+    the header row will be written first.
+    """
+    if not new_traces:
+        return
+    import csv
+    import os
+    os.makedirs(eval_traces_path.parent, exist_ok=True)
+    file_exists = eval_traces_path.exists() and eval_traces_path.stat().st_size > 0
+    with open(eval_traces_path, "a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
+        if not file_exists:
+            writer.writeheader()
+        for record in new_traces:
+            writer.writerow(record)
+
+
 def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
     """
     Load the final model and tokenizer from cfg.model.checkpoint_dir,
-    run inference on active evaluation probes, log all failed samples,
-    and save them to a structured JSON file.
+    run inference on active evaluation probes, log failed samples to console,
+    and save ALL evaluation probe traces (Pass/Fail) to a CSV file.
     """
-    failures_json_path = cfg.logging.log_dir / "failed_evals.json"
-    if failures_json_path.exists():
-        logger.info(f"Failed evaluations already exist at {failures_json_path}. Skipping redundant final inference.")
-        return
+    eval_traces_path = (
+        getattr(cfg.logging, "eval_traces_file", None)
+        or (cfg.logging.log_dir / "dapt_eval_traces.csv")
+    )
     import os
-    import json
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    from lib.s3_dapt.probes.qa_probe import get_failed_qa_samples
-    from lib.s3_dapt.probes.cloze_probe import get_failed_cloze_samples
-    from lib.s3_dapt.probes.concept_probe import get_failed_concept_samples
+    from lib.s3_dapt.probes.qa_probe import get_qa_probe_traces
+    from lib.s3_dapt.probes.cloze_probe import get_cloze_probe_traces
+    from lib.s3_dapt.probes.concept_probe import get_concept_probe_traces
 
     model_dir = cfg.model.checkpoint_dir
     if not model_dir.exists():
         logger.error(f"Saved model directory not found at {model_dir}. Cannot run final inference.")
         return
 
-    logger.info(f"Loading final model from {model_dir} for final inference and failure logging...")
+    logger.info(f"Loading final model from {model_dir} for final inference and probe evaluation logging...")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -320,38 +332,40 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
         logger.error(f"Failed to load final model or tokenizer from {model_dir}: {e}")
         return
 
-    failed_runs = {}
+    final_traces = []
 
-    # 1. QA Probe Failures
+    # 1. QA Probe Traces
     if cfg.probes.run_qa:
-        logger.info("Running QA probe to collect failed samples...")
+        logger.info("Running QA probe to collect evaluation traces...")
         try:
             qa_batch_size = cfg.probes.qa_batch_size or cfg.optimizer.eval_batch_size
-            qa_failures = get_failed_qa_samples(
+            qa_traces = get_qa_probe_traces(
                 model=model,
                 tokenizer=tokenizer,
                 qa_probe_path=cfg.data.qa_probe_path,
                 device=str(device),
                 batch_size=qa_batch_size,
                 max_length=cfg.probes.qa_max_seq_len,
+                eval_num="final",
             )
-            failed_runs["qa"] = qa_failures
-            logger.info(f"QA Probe: {len(qa_failures)} failures found.")
+            final_traces.extend(qa_traces)
+            qa_failures = [s for s in qa_traces if s.get("Result") == "Fail"]
+            logger.info(f"QA Probe: {len(qa_traces)} total evaluated ({len(qa_failures)} failures found).")
             for idx, failure in enumerate(qa_failures):
                 logger.warning(
-                    f"QA Failure #{idx+1} [Cluster: {failure['cluster']}]:\n"
-                    f"  Question: {failure['question']}\n"
-                    f"  Expected: {failure['expected_text']} (index {failure['expected_idx']})\n"
-                    f"  Predicted: {failure['predicted_text']} (index {failure['predicted_idx']})"
+                    f"QA Failure #{idx+1} [Cluster: {failure.get('cluster', 'unknown')}]:\n"
+                    f"  Question: {failure.get('question', '')}\n"
+                    f"  Expected: {failure.get('expected_text', '')} (index {failure.get('expected_idx', '')})\n"
+                    f"  Predicted: {failure.get('predicted_text', '')} (index {failure.get('predicted_idx', '')})"
                 )
         except Exception as e:
-            logger.error(f"Error during QA probe failure logging: {e}")
+            logger.error(f"Error during QA probe evaluation logging: {e}")
 
-    # 2. Cloze Probe Failures
+    # 2. Cloze Probe Traces
     if cfg.probes.run_cloze:
-        logger.info("Running Cloze probe to collect failed samples...")
+        logger.info("Running Cloze probe to collect evaluation traces...")
         try:
-            term_failures = get_failed_cloze_samples(
+            term_traces = get_cloze_probe_traces(
                 model=model,
                 tokenizer=tokenizer,
                 vocab_cloze_path=cfg.data.cloze_set_path,
@@ -360,25 +374,27 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
                 device=str(device),
                 generation_batch_size=cfg.probes.cloze_gen_batch_size,
                 max_length=cfg.probes.cloze_max_seq_len,
+                eval_num="final",
             )
-            failed_runs["cloze"] = term_failures
-            logger.info(f"Cloze Probe: {len(term_failures)} failures found.")
+            final_traces.extend(term_traces)
+            term_failures = [s for s in term_traces if s.get("Result") == "Fail"]
+            logger.info(f"Cloze Probe: {len(term_traces)} total evaluated ({len(term_failures)} failures found).")
             for idx, failure in enumerate(term_failures):
                 logger.warning(
-                    f"Cloze Failure #{idx+1} [Category: {failure['category']}]:\n"
-                    f"  Prompt: {failure['prompt']}\n"
-                    f"  Target Term: {failure['target_term']}\n"
-                    f"  Completions: {failure['generated_completions']}"
+                    f"Cloze Failure #{idx+1} [Category: {failure.get('category', 'unknown')}]:\n"
+                    f"  Prompt: {failure.get('prompt', '')}\n"
+                    f"  Target Term: {failure.get('target_term', '')}\n"
+                    f"  Completions: {failure.get('generated_completions', [])}"
                 )
         except Exception as e:
-            logger.error(f"Error during Cloze probe failure logging: {e}")
+            logger.error(f"Error during Cloze probe evaluation logging: {e}")
 
-    # 3. Concept Probe Failures
+    # 3. Concept Probe Traces
     if cfg.probes.run_concept:
-        logger.info("Running Concept probe to collect failed samples...")
+        logger.info("Running Concept probe to collect evaluation traces...")
         try:
             # We pass use_bertscore=True because it's the final high-fidelity evaluation
-            ret_failures = get_failed_concept_samples(
+            ret_traces = get_concept_probe_traces(
                 model=model,
                 tokenizer=tokenizer,
                 retrieval_prompts_path=cfg.data.concept_prompts_path,
@@ -390,27 +406,26 @@ def run_inference_and_log_failures(cfg: DAPTConfig) -> None:
                 generation_batch_size=cfg.probes.concept_gen_batch_size,
                 bertscore_batch_size=cfg.probes.concept_bertscore_batch_size,
                 max_length=cfg.probes.concept_max_seq_len,
-                failure_threshold=cfg.gates.concept_threshold
+                failure_threshold=cfg.gates.concept_threshold,
+                eval_num="final",
             )
-            failed_runs["concept"] = ret_failures
-            logger.info(f"Concept Probe: {len(ret_failures)} failures found.")
+            final_traces.extend(ret_traces)
+            ret_failures = [s for s in ret_traces if s.get("Result") == "Fail"]
+            logger.info(f"Concept Probe: {len(ret_traces)} total evaluated ({len(ret_failures)} failures found).")
             for idx, failure in enumerate(ret_failures):
                 logger.warning(
-                    f"Concept Failure #{idx+1} [F1 Score: {failure['score']:.4f}]:\n"
-                    f"  Prompt: {failure['prompt']}\n"
-                    f"  Reference: {failure['reference']}\n"
-                    f"  Generated: {failure['generated']}"
+                    f"Concept Failure #{idx+1} [F1 Score: {failure.get('score', 0.0):.4f}]:\n"
+                    f"  Prompt: {failure.get('prompt', '')}\n"
+                    f"  Reference: {failure.get('reference', '')}\n"
+                    f"  Generated: {failure.get('generated', '')}"
                 )
         except Exception as e:
-            logger.error(f"Error during Concept probe failure logging: {e}")
+            logger.error(f"Error during Concept probe evaluation logging: {e}")
 
     # Save to file
-    failures_json_path = cfg.logging.log_dir / "failed_evals.json"
     try:
-        os.makedirs(cfg.logging.log_dir, exist_ok=True)
-        with open(failures_json_path, "w", encoding="utf-8") as f:
-            json.dump(failed_runs, f, indent=2)
-        logger.info(f"Detailed failed evaluations saved to {failures_json_path}")
+        append_eval_traces_to_csv(eval_traces_path, final_traces)
+        logger.info(f"Detailed evaluation probe traces (Pass/Fail) saved to {eval_traces_path}")
     except Exception as e:
-        logger.error(f"Failed to write failed evaluations JSON file: {e}")
+        logger.error(f"Failed to write evaluation probe traces CSV file: {e}")
 

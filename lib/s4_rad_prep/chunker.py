@@ -90,7 +90,14 @@ def run_chunking(cfg: PipelineConfig) -> List[Chunk]:
 
             doc_chunks = chunk_document(doc_id, text, doc_type, tokenizer, chunk_size, overlap)
             for chunk in doc_chunks:
-                f_out.write(json.dumps(asdict(chunk)) + "\n")
+                chunk_dict = {
+                    "chunk_id": chunk.chunk_id,
+                    "doc_id": chunk.doc_id,
+                    "doc_type": chunk.doc_type,
+                    "text": chunk.text,
+                    "token_count": chunk.token_count
+                }
+                f_out.write(json.dumps(chunk_dict) + "\n")
                 all_chunks.append(chunk)
 
     logger.info(f"Successfully chunked corpus: generated {len(all_chunks)} chunks and saved to {chunks_path}")

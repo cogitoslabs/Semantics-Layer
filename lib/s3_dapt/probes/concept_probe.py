@@ -4,7 +4,7 @@ probes/retrieval_probe.py — Probe 4 - Concept Probe
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 import torch
 import transformers
@@ -48,6 +48,7 @@ def _patched_tokenizer_context():
         transformers.AutoTokenizer.from_pretrained = orig_from_pretrained
 
 from lib.utils.logger import get_logger
+from lib.utils import model_trace
 from lib.s3_dapt.probes.utils import clean_for_match
 from typing import Any
 
@@ -88,6 +89,7 @@ def clear_scorer_cache() -> None:
             torch.cuda.empty_cache()
 
 
+@model_trace
 def generate_response(
     model,
     tokenizer,
@@ -95,6 +97,9 @@ def generate_response(
     max_new_tokens: int,
     device: str = "cuda",
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+    eval_category: str = "Concept",
+    eval_seq_num: Optional[int] = None,
 ) -> str:
     inputs = tokenizer(
         prompt,
@@ -130,6 +135,7 @@ def generate_response(
     return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
 
+@model_trace
 def generate_responses_batch(
     model,
     tokenizer,
@@ -138,6 +144,9 @@ def generate_responses_batch(
     device: str = "cuda",
     batch_size: int = 16,
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+    eval_category: str = "Concept",
+    eval_seq_start: int = 1,
 ) -> List[str]:
     if not prompts:
         return []
@@ -364,6 +373,14 @@ def compute_lexical_f1_batch(hypotheses: List[str], references: List[str]) -> Li
     return f1_scores
 
 
+def format_concept_prompt(prompt_text: str) -> str:
+    """
+    Format concept probe prompt to condition base causal language models
+    to output a direct definition/explanation instead of continuing exam question lists.
+    """
+    return f"Prompt: {prompt_text}\nAnswer:"
+
+
 def eval_concept_precision(
     model,
     tokenizer,
@@ -378,6 +395,7 @@ def eval_concept_precision(
     generation_batch_size: int = 16,
     failure_threshold: float = 0.50,
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
 ) -> Dict[str, Any]:
     """
     Run Probe 4 - Concept Probe and return average precision over retrieval prompts.
@@ -399,15 +417,20 @@ def eval_concept_precision(
 
     model.eval()
 
+    formatted_prompts = [format_concept_prompt(p) for p in prompts]
+
     logger.info(f"Generating {len(prompts)} retrieval responses (greedy, batch_size={generation_batch_size})...")
     hypotheses = generate_responses_batch(
         model=model,
         tokenizer=tokenizer,
-        prompts=prompts,
+        prompts=formatted_prompts,
         max_new_tokens=max_new_tokens,
         device=device,
         batch_size=generation_batch_size,
         max_length=max_length,
+        eval_num=eval_num,
+        eval_category="Concept",
+        eval_seq_start=1,
     )
 
     bertscore_failed = False
@@ -446,16 +469,31 @@ def eval_concept_precision(
         f"low-scoring={len(low_scoring)})"
     )
 
+    eval_traces = []
     failures = []
     for i in range(len(prompts)):
         score = f1_scores[i]
-        if score < failure_threshold:
-            failures.append({
-                "prompt": prompts[i],
-                "reference": references[i],
-                "generated": hypotheses[i],
-                "score": score
-            })
+        is_pass = score >= failure_threshold
+        gen_answer = str(hypotheses[i]) if hypotheses else ""
+        eval_dump = json.dumps({"prompt": prompts[i], "reference": references[i]})
+
+        sample_record = {
+            "Eval #": str(eval_num),
+            "Eval Category": "Concept",
+            "Eval Seq #": i + 1,
+            "Eval": eval_dump,
+            "Generated Answer by the model": gen_answer,
+            "Matching Score": round(float(score), 4),
+            "Result": "Pass" if is_pass else "Fail",
+            "prompt": prompts[i],
+            "reference": references[i],
+            "generated": gen_answer,
+            "score": float(score),
+            "threshold": float(failure_threshold),
+        }
+        eval_traces.append(sample_record)
+        if not is_pass:
+            failures.append(sample_record)
 
     return {
         "precision"         : mean_f1,
@@ -464,9 +502,82 @@ def eval_concept_precision(
         "max_bertscore_f1"  : max_f1,
         "num_samples"       : len(prompts),
         "low_scoring_prompts": low_scoring,
+        "eval_traces"       : eval_traces,
+        "samples"           : eval_traces,
         "failures"          : failures,
         "bertscore_failed"  : bertscore_failed,
     }
+
+
+def get_concept_probe_traces(
+    model,
+    tokenizer,
+    retrieval_prompts_path: Path,
+    retrieval_references_path: Path,
+    bertscore_model: str,
+    max_new_tokens: int,
+    device: str = "cuda",
+    bertscore_batch_size: int = 32,
+    use_bertscore: bool = True,
+    generation_batch_size: int = 16,
+    failure_threshold: float = 0.50,
+    max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+) -> List[Dict[str, Any]]:
+    """
+    Run Probe 4 - Concept Probe and return detailed list of all evaluation traces with Eval # and Result ('Pass' or 'Fail').
+    """
+    result = eval_concept_precision(
+        model=model,
+        tokenizer=tokenizer,
+        retrieval_prompts_path=retrieval_prompts_path,
+        retrieval_references_path=retrieval_references_path,
+        bertscore_model=bertscore_model,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        bertscore_batch_size=bertscore_batch_size,
+        use_bertscore=use_bertscore,
+        generation_batch_size=generation_batch_size,
+        failure_threshold=failure_threshold,
+        max_length=max_length,
+        eval_num=eval_num,
+    )
+    return result["eval_traces"]
+
+
+def get_concept_probe_samples(
+    model,
+    tokenizer,
+    retrieval_prompts_path: Path,
+    retrieval_references_path: Path,
+    bertscore_model: str,
+    max_new_tokens: int,
+    device: str = "cuda",
+    bertscore_batch_size: int = 32,
+    use_bertscore: bool = True,
+    generation_batch_size: int = 16,
+    failure_threshold: float = 0.50,
+    max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+) -> List[Dict[str, Any]]:
+    """
+    Backward-compatible alias for get_concept_probe_traces.
+    """
+    return get_concept_probe_traces(
+        model=model,
+        tokenizer=tokenizer,
+        retrieval_prompts_path=retrieval_prompts_path,
+        retrieval_references_path=retrieval_references_path,
+        bertscore_model=bertscore_model,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        bertscore_batch_size=bertscore_batch_size,
+        use_bertscore=use_bertscore,
+        generation_batch_size=generation_batch_size,
+        failure_threshold=failure_threshold,
+        max_length=max_length,
+        eval_num=eval_num,
+    )
 
 
 def get_failed_concept_samples(
@@ -482,11 +593,12 @@ def get_failed_concept_samples(
     generation_batch_size: int = 16,
     failure_threshold: float = 0.50,
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
 ) -> List[Dict[str, Any]]:
     """
-    Run Probe 4 - Concept Probe and return detailed list of failed samples where score is below the failure_threshold.
+    Backward-compatible alias for get_concept_probe_traces.
     """
-    result = eval_concept_precision(
+    return get_concept_probe_traces(
         model=model,
         tokenizer=tokenizer,
         retrieval_prompts_path=retrieval_prompts_path,
@@ -499,6 +611,6 @@ def get_failed_concept_samples(
         generation_batch_size=generation_batch_size,
         failure_threshold=failure_threshold,
         max_length=max_length,
+        eval_num=eval_num,
     )
-    return result["failures"]
 

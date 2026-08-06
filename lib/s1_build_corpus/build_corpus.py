@@ -23,6 +23,9 @@ def run_corpus_builder(cfg: PipelineConfig) -> None:
     Unified entry point for the corpus builder pipeline.
     Instantiates the storage adapter and corpus builder, then executes the pipeline.
     """
+    # Guarantee pipeline.log is initialized and attached
+    setup_logger("lib", cfg.logging)
+    
     try:
         multiprocessing.set_start_method('spawn', force=True)
     except RuntimeError:
@@ -55,6 +58,49 @@ def try_delete(path: str) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+def strip_running_headers_footers(chunks: list, filename: str) -> None:
+    """
+    Identifies short lines (<80 chars) that appear repeatedly across chunks of a document,
+    and removes them as running headers/footers/boilerplate.
+    Re-encodes and updates chunk.token_count for affected chunks.
+    """
+    if len(chunks) < 3:
+        return
+        
+    from collections import Counter
+    import tiktoken
+    
+    # 1. Count line frequencies across all chunks for this document
+    line_counts = Counter()
+    for chunk in chunks:
+        if not chunk.text:
+            continue
+        for line in chunk.text.split('\n'):
+            stripped = line.strip()
+            if stripped and len(stripped) < 80:
+                line_counts[stripped] += 1
+                
+    # 2. Identify boilerplates/headers
+    num_chunks = len(chunks)
+    threshold = min(15, max(3, int(num_chunks * 0.10)))
+    
+    boilerplates = {line for line, count in line_counts.items() if count >= threshold}
+    
+    if boilerplates:
+        logger.info(f"Identified {len(boilerplates)} running headers/footers for {filename} (threshold={threshold})")
+        # 3. Strip these lines from the chunks and recompute token counts
+        tokenizer = tiktoken.get_encoding("cl100k_base")
+        for chunk in chunks:
+            if not chunk.text:
+                continue
+            lines = chunk.text.split('\n')
+            cleaned_lines = [l for l in lines if l.strip() not in boilerplates]
+            cleaned_text = '\n'.join(cleaned_lines)
+            if cleaned_text != chunk.text:
+                chunk.text = cleaned_text
+                chunk.token_count = len(tokenizer.encode(cleaned_text))
 
 
 class CorpusBuilder:
@@ -154,9 +200,13 @@ class CorpusBuilder:
                             if result.succeeded:
                                 valid_chunks.extend(result.chunks)
                             else:
-                                logger.warning(f"[SKIP CHUNK] {result.filename} | {result.status}")
+                                chunk_desc = f" (chunk {result.chunk_index}, pages {result.page_range[0]}-{result.page_range[1]})" if result.page_range else ""
+                                logger.warning(f"[SKIP CHUNK] {result.filename}{chunk_desc} | {result.status}")
 
                         valid_chunks.sort(key=lambda c: c.chunk_index)
+                        
+                        # Strip document-level running headers/footers
+                        strip_running_headers_footers(valid_chunks, filename)
 
                         for chunk in valid_chunks:
                             total_tokens += chunk.token_count

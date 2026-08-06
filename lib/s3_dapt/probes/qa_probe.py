@@ -426,6 +426,7 @@ def eval_qa_accuracy(
     use_pmi: bool = True,
     use_length_norm: bool = True,
     max_length: int = 512,
+    eval_num: Union[int, str] = 1,
 ) -> QAEvalResults:
     """
     Run Probe 2 - QA probe and return accuracy plus per-cluster diagnostics.
@@ -464,6 +465,7 @@ def eval_qa_accuracy(
     try:
         correct = 0
         cluster_stats: Dict[str, Dict[str, int]] = {}
+        eval_traces = []
         failures = []
 
         # Process in batches
@@ -486,23 +488,35 @@ def eval_qa_accuracy(
                 max_length=max_length,
             )
 
-            for item, predicted in zip(batch_items, predicted_indices):
+            for rel_idx, (item, predicted) in enumerate(zip(batch_items, predicted_indices)):
+                seq_idx = b_idx + rel_idx + 1
                 answer_idx = item["answer_idx"]
                 cluster = item.get("cluster", "unknown")
                 is_correct = int(predicted == answer_idx)
                 correct += is_correct
+                choices = item["choices"]
+                predicted_text = choices[predicted] if predicted < len(choices) else "unknown"
+
+                sample_record = {
+                    "Eval #": str(eval_num),
+                    "Eval Category": "QA",
+                    "Eval Seq #": item.get("seq_num", seq_idx),
+                    "Eval": json.dumps(item),
+                    "Generated Answer by the model": predicted_text,
+                    "Matching Score": 1.0 if is_correct else 0.0,
+                    "Result": "Pass" if is_correct else "Fail",
+                    "question": item["question"],
+                    "choices": choices,
+                    "expected_idx": answer_idx,
+                    "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
+                    "predicted_idx": predicted,
+                    "predicted_text": predicted_text,
+                    "cluster": cluster,
+                }
+                eval_traces.append(sample_record)
 
                 if not is_correct:
-                    choices = item["choices"]
-                    failures.append({
-                        "question": item["question"],
-                        "choices": choices,
-                        "expected_idx": answer_idx,
-                        "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
-                        "predicted_idx": predicted,
-                        "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
-                        "cluster": cluster,
-                    })
+                    failures.append(sample_record)
 
                 if cluster not in cluster_stats:
                     cluster_stats[cluster] = {"correct": 0, "total": 0}
@@ -530,6 +544,8 @@ def eval_qa_accuracy(
             "correct": correct,
             "total": total,
             "per_cluster_accuracy": per_cluster,
+            "eval_traces": eval_traces,
+            "samples": eval_traces,
             "failures": failures,
         }
 
@@ -537,6 +553,65 @@ def eval_qa_accuracy(
         # Restore training mode if it was originally True
         if original_mode:
             model.train()
+
+
+def get_qa_probe_traces(
+    model,
+    tokenizer,
+    qa_probe_path: Path,
+    device: str = "cuda",
+    max_samples: Optional[int] = None,
+    batch_size: int = 32,
+    use_pmi: bool = True,
+    use_length_norm: bool = True,
+    max_length: int = 512,
+    eval_num: Union[int, str] = 1,
+) -> List[Dict[str, Any]]:
+    """
+    Run Probe 2 - QA probe and return list of all evaluation traces with Eval # and Result ('Pass' or 'Fail').
+    """
+    result = eval_qa_accuracy(
+        model=model,
+        tokenizer=tokenizer,
+        qa_probe_path=qa_probe_path,
+        device=device,
+        max_samples=max_samples,
+        batch_size=batch_size,
+        use_pmi=use_pmi,
+        use_length_norm=use_length_norm,
+        max_length=max_length,
+        eval_num=eval_num,
+    )
+    return result["eval_traces"]
+
+
+def get_qa_probe_samples(
+    model,
+    tokenizer,
+    qa_probe_path: Path,
+    device: str = "cuda",
+    max_samples: Optional[int] = None,
+    batch_size: int = 32,
+    use_pmi: bool = True,
+    use_length_norm: bool = True,
+    max_length: int = 512,
+    eval_num: Union[int, str] = 1,
+) -> List[Dict[str, Any]]:
+    """
+    Backward-compatible alias for get_qa_probe_traces.
+    """
+    return get_qa_probe_traces(
+        model=model,
+        tokenizer=tokenizer,
+        qa_probe_path=qa_probe_path,
+        device=device,
+        max_samples=max_samples,
+        batch_size=batch_size,
+        use_pmi=use_pmi,
+        use_length_norm=use_length_norm,
+        max_length=max_length,
+        eval_num=eval_num,
+    )
 
 
 def get_failed_qa_samples(
@@ -549,63 +624,20 @@ def get_failed_qa_samples(
     use_pmi: bool = True,
     use_length_norm: bool = True,
     max_length: int = 512,
+    eval_num: Union[int, str] = 1,
 ) -> List[Dict[str, Any]]:
     """
-    Run Probe 2 - QA probe and return a list of failed samples.
+    Backward-compatible alias for get_qa_probe_traces.
     """
-    # 1. Load and validate QA items
-    qa_items, skipped_json_count = load_qa_items(qa_probe_path, max_samples)
-    if skipped_json_count > 0:
-        logger.warning(f"Skipped {skipped_json_count} malformed JSONL lines in QA probe file.")
-
-    if not qa_items:
-        return []
-
-    valid_items = validate_items(qa_items)
-    if not valid_items:
-        return []
-
-    # Save training mode and set to eval
-    original_mode = model.training
-    model.eval()
-
-    try:
-        failures = []
-
-        # Process in batches
-        for b_idx in range(0, len(valid_items), batch_size):
-            batch_items = valid_items[b_idx : b_idx + batch_size]
-            prompts = []
-            choices_list = []
-            for item in batch_items:
-                prompts.append(f"Question: {item['question']}\nAnswer:")
-                choices_list.append(item["choices"])
-
-            predicted_indices = score_choices_by_logprob(
-                model,
-                tokenizer,
-                prompts,
-                choices_list,
-                device=device,
-                use_pmi=use_pmi,
-                use_length_norm=use_length_norm,
-                max_length=max_length,
-            )
-
-            for item, predicted in zip(batch_items, predicted_indices):
-                answer_idx = item["answer_idx"]
-                if predicted != answer_idx:
-                    choices = item["choices"]
-                    failures.append({
-                        "question": item["question"],
-                        "choices": choices,
-                        "expected_idx": answer_idx,
-                        "expected_text": choices[answer_idx] if answer_idx < len(choices) else "unknown",
-                        "predicted_idx": predicted,
-                        "predicted_text": choices[predicted] if predicted < len(choices) else "unknown",
-                        "cluster": item.get("cluster", "unknown")
-                    })
-        return failures
-    finally:
-        if original_mode:
-            model.train()
+    return get_qa_probe_traces(
+        model=model,
+        tokenizer=tokenizer,
+        qa_probe_path=qa_probe_path,
+        device=device,
+        max_samples=max_samples,
+        batch_size=batch_size,
+        use_pmi=use_pmi,
+        use_length_norm=use_length_norm,
+        max_length=max_length,
+        eval_num=eval_num,
+    )

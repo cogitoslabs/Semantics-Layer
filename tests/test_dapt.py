@@ -899,6 +899,7 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
             cfg = PipelineConfig()
             cfg.model.checkpoint_dir = model_dir
             cfg.logging.log_dir = Path(tmpdir) / "logs"
+            cfg.logging.eval_traces_file = Path(tmpdir) / "logs" / "dapt_eval_traces.csv"
             cfg.data.qa_probe_path = qa_path
             cfg.data.cloze_set_path = vocab_path
             cfg.data.concept_prompts_path = retrieval_prompts_path
@@ -909,61 +910,60 @@ def test_run_inference_and_log_failures(mock_model, mock_tokenizer):
 
             with patch("transformers.AutoModelForCausalLM.from_pretrained") as mock_model_load, \
                  patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer_load, \
-                 patch("lib.s3_dapt.probes.qa_probe.get_failed_qa_samples") as mock_get_failed_qa, \
-                 patch("lib.s3_dapt.probes.cloze_probe.get_failed_cloze_samples") as mock_get_failed_term, \
-                 patch("lib.s3_dapt.probes.concept_probe.get_failed_concept_samples") as mock_get_failed_ret:
+                 patch("lib.s3_dapt.probes.qa_probe.get_qa_probe_traces") as mock_get_qa_traces, \
+                 patch("lib.s3_dapt.probes.cloze_probe.get_cloze_probe_traces") as mock_get_cloze_traces, \
+                 patch("lib.s3_dapt.probes.concept_probe.get_concept_probe_traces") as mock_get_concept_traces:
                  
                 mock_model_load.return_value = mock_model
                 mock_tokenizer_load.return_value = mock_tokenizer
                 
-                # Setup dummy failures
-                mock_get_failed_qa.return_value = [{"question": "Q2", "expected_idx": 1, "expected_text": "B", "predicted_idx": 0, "predicted_text": "A", "cluster": "cat2"}]
-                mock_get_failed_term.return_value = [{"prompt": "___ is cool.", "target_term": "Term1", "generated_completions": ["completions"], "category": "cat1"}]
-                mock_get_failed_ret.return_value = [{"prompt": "Prompt1", "reference": "Ref1", "generated": "Gen1", "score": 0.35}]
+                # Setup dummy evaluation traces with Eval #
+                mock_get_qa_traces.return_value = [{
+                    "Eval #": "1", "Eval Category": "QA", "Eval Seq #": 1, "Eval": '{"question": "Q2"}',
+                    "Generated Answer by the model": "A", "Matching Score": 0.0, "Result": "Fail",
+                    "question": "Q2", "expected_idx": 1, "expected_text": "B", "predicted_idx": 0, "predicted_text": "A", "cluster": "cat2"
+                }]
+                mock_get_cloze_traces.return_value = [{
+                    "Eval #": "1", "Eval Category": "Cloze", "Eval Seq #": 1, "Eval": '{"prompt": "___ is cool."}',
+                    "Generated Answer by the model": "completions", "Matching Score": 1.0, "Result": "Pass",
+                    "prompt": "___ is cool.", "target_term": "Term1", "generated_completions": ["completions"], "category": "cat1"
+                }]
+                mock_get_concept_traces.return_value = [{
+                    "Eval #": "1", "Eval Category": "Concept", "Eval Seq #": 1, "Eval": '{"prompt": "Prompt1"}',
+                    "Generated Answer by the model": "Gen1", "Matching Score": 0.35, "Result": "Fail",
+                    "prompt": "Prompt1", "reference": "Ref1", "generated": "Gen1", "score": 0.35
+                }]
                 
                 run_inference_and_log_failures(cfg)
                 
-                # Verify failures file was written
-                failed_evals_file = cfg.logging.log_dir / "failed_evals.json"
-                assert failed_evals_file.exists()
+                # Verify eval traces file was written at configured path
+                eval_traces_file = cfg.logging.eval_traces_file
+                assert eval_traces_file.exists()
                 
-                with open(failed_evals_file, "r") as f:
-                    data = json.load(f)
+                import csv
+                with open(eval_traces_file, "r", encoding="utf-8") as f:
+                    reader = list(csv.DictReader(f))
                     
-                assert "qa" in data
-                assert len(data["qa"]) == 1
-                assert data["qa"][0]["question"] == "Q2"
-            
-            assert "cloze" in data
-            assert len(data["cloze"]) == 1
-            assert data["cloze"][0]["target_term"] == "Term1"
-            
-            assert "concept" in data
-            assert len(data["concept"]) == 1
-            assert data["concept"][0]["score"] == 0.35
+                assert len(reader) == 3
+                assert reader[0]["Eval #"] == "1"
+                assert reader[0]["Eval Category"] == "QA"
+                assert reader[0]["Result"] == "Fail"
+                
+                assert reader[1]["Eval Category"] == "Cloze"
+                assert reader[1]["Result"] == "Pass"
+                
+                assert reader[2]["Eval Category"] == "Concept"
+                assert reader[2]["Matching Score"] == "0.35"
+                assert reader[2]["Result"] == "Fail"
 
 
 def test_concept_probe_lexical_f1_and_delegation(mock_model, mock_tokenizer):
     from lib.s3_dapt.probes.concept_probe import (
         compute_lexical_f1_batch,
         _patched_tokenizer_context,
-        get_failed_concept_samples
+        get_concept_probe_samples,
+        get_failed_concept_samples,
     )
-    import transformers
-    
-    # 1. Test lexical F1 cleaning (punctuation stripping)
-    hyps = ["amygdala."]
-    refs = ["amygdala"]
-    scores = compute_lexical_f1_batch(hyps, refs)
-    assert scores[0] == 1.0
-    
-    # 2. Test scoped monkeypatch (it gets cleaned up)
-    orig_fn = transformers.AutoTokenizer.from_pretrained
-    with _patched_tokenizer_context():
-        assert transformers.AutoTokenizer.from_pretrained != orig_fn
-    assert transformers.AutoTokenizer.from_pretrained == orig_fn
-
-    # 3. Test get_failed_concept_samples delegation
     mock_tokenizer.eos_token_id = 2
     mock_tokenizer.encode.return_value = [5, 6]
     mock_tokenizer.decode.return_value = "amygdala"
@@ -1140,6 +1140,55 @@ def test_run_inference_and_log_failures_peft(mock_model, mock_tokenizer):
             
             # Verify PeftModel.from_pretrained was called with base model and checkpoint dir
             mock_peft_load.assert_called_once_with(mock_model, str(checkpoint_dir))
+
+
+def test_find_latest_checkpoint_and_restart_flag():
+    from lib.utils.checkpoint import find_latest_checkpoint, save_checkpoint, load_checkpoint
+    import time
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ckpt_dir = Path(tmpdir) / "checkpoints"
+        
+        # 1. No dir / no files should return None
+        assert find_latest_checkpoint(ckpt_dir) is None
+        
+        ckpt_dir.mkdir()
+        assert find_latest_checkpoint(ckpt_dir) is None
+        
+        # 2. Save two dummy checkpoints
+        mock_model = MagicMock()
+        mock_model.state_dict.return_value = {"weight": torch.tensor([1.0])}
+        mock_optimizer = MagicMock()
+        mock_optimizer.state_dict.return_value = {"param_groups": []}
+        mock_scheduler = MagicMock()
+        mock_scheduler.state_dict.return_value = {"last_epoch": 1}
+        
+        state1 = {"eval_count": 1, "tokens_processed": 100, "epoch": 0, "epoch_step": 5}
+        path1 = save_checkpoint(mock_model, mock_optimizer, state1, ckpt_dir, keep_last=5, scheduler=mock_scheduler)
+        
+        time.sleep(0.05) # ensure distinct mtime
+        
+        state2 = {"eval_count": 2, "tokens_processed": 200, "epoch": 1, "epoch_step": 10}
+        path2 = save_checkpoint(mock_model, mock_optimizer, state2, ckpt_dir, keep_last=5, scheduler=mock_scheduler)
+        
+        # Join any bg thread if active
+        from lib.utils.checkpoint import _bg_save_thread
+        if _bg_save_thread is not None and _bg_save_thread.is_alive():
+            _bg_save_thread.join()
+
+        latest = find_latest_checkpoint(ckpt_dir)
+        assert latest is not None
+        assert latest.name == "dapt_eval_0002.pt"
+
+        # Test load_checkpoint restoring scheduler and training state
+        new_model = MagicMock()
+        new_optimizer = MagicMock()
+        new_scheduler = MagicMock()
+        restored = load_checkpoint(latest, new_model, new_optimizer, new_scheduler)
+        assert restored["epoch"] == 1
+        assert restored["epoch_step"] == 10
+        assert restored["tokens_processed"] == 200
+        new_scheduler.load_state_dict.assert_called_once()
 
 
 

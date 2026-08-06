@@ -5,15 +5,15 @@ probes/terminology_probe.py — Probe 3 - Cloze probe
 import json
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-
+from typing import List, Dict, Any, Optional, Union
 import torch
-
 from lib.utils.logger import get_logger
+from lib.utils import model_trace
 
 logger = get_logger("dapt.probe.cloze")
 
 
+@model_trace
 def generate_topk_completions(
     model,
     tokenizer,
@@ -22,6 +22,9 @@ def generate_topk_completions(
     max_new_tokens: int,
     device: str = "cuda",
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+    eval_category: str = "Cloze",
+    eval_seq_num: Optional[int] = None,
 ) -> List[str]:
     inputs = tokenizer(
         prompt,
@@ -92,6 +95,7 @@ def generate_topk_completions(
     return completions
 
 
+@model_trace
 def generate_topk_completions_batch(
     model,
     tokenizer,
@@ -101,6 +105,9 @@ def generate_topk_completions_batch(
     device: str = "cuda",
     batch_size: int = 16,
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+    eval_category: str = "Cloze",
+    eval_seq_start: int = 1,
 ) -> List[List[str]]:
     if not prompts:
         return []
@@ -274,6 +281,7 @@ def eval_cloze_coverage(
     max_samples: Optional[int] = None,
     generation_batch_size: int = 16,
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
 ) -> Dict[str, Any]:
     """
     Run Probe 3 - Cloze probe and return overall and per-category terminology coverage.
@@ -307,8 +315,12 @@ def eval_cloze_coverage(
         device=device,
         batch_size=generation_batch_size,
         max_length=max_length,
+        eval_num=eval_num,
+        eval_category="Cloze",
+        eval_seq_start=1,
     )
 
+    eval_traces = []
     failures = []
     for i, item in enumerate(cloze_items):
         target_term = item["target_term"]
@@ -318,14 +330,27 @@ def eval_cloze_coverage(
         hit = term_found_in_completions(target_term, completions)
         covered += int(hit)
 
+        gen_completions_list = [str(c) for c in completions] if completions else []
+        gen_answer_str = ", ".join(gen_completions_list) if gen_completions_list else ""
+
+        sample_record = {
+            "Eval #": str(eval_num),
+            "Eval Category": "Cloze",
+            "Eval Seq #": item.get("seq_num", i + 1),
+            "Eval": json.dumps(item),
+            "Generated Answer by the model": gen_answer_str,
+            "Matching Score": 1.0 if hit else 0.0,
+            "Result": "Pass" if hit else "Fail",
+            "prompt": item["prompt"],
+            "target_term": target_term,
+            "generated_completions": gen_completions_list,
+            "category": category,
+        }
+        eval_traces.append(sample_record)
+
         if not hit:
             missed_terms.append(target_term)
-            failures.append({
-                "prompt": item["prompt"],
-                "target_term": target_term,
-                "generated_completions": completions,
-                "category": category
-            })
+            failures.append(sample_record)
 
         if category not in category_stats:
             category_stats[category] = {"covered": 0, "total": 0}
@@ -360,8 +385,65 @@ def eval_cloze_coverage(
         "total"        : total,
         "per_category" : per_category,
         "missed_terms" : missed_terms,
+        "eval_traces"  : eval_traces,
+        "samples"      : eval_traces,
         "failures"     : failures,
     }
+
+
+def get_cloze_probe_traces(
+    model,
+    tokenizer,
+    vocab_cloze_path: Path,
+    top_k: int,
+    max_new_tokens: int,
+    device: str = "cuda",
+    generation_batch_size: int = 16,
+    max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+) -> List[Dict[str, Any]]:
+    """
+    Run Probe 3 - Cloze probe and return detailed list of all evaluation traces with Eval # and Result ('Pass' or 'Fail').
+    """
+    result = eval_cloze_coverage(
+        model=model,
+        tokenizer=tokenizer,
+        vocab_cloze_path=vocab_cloze_path,
+        top_k=top_k,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        generation_batch_size=generation_batch_size,
+        max_length=max_length,
+        eval_num=eval_num,
+    )
+    return result["eval_traces"]
+
+
+def get_cloze_probe_samples(
+    model,
+    tokenizer,
+    vocab_cloze_path: Path,
+    top_k: int,
+    max_new_tokens: int,
+    device: str = "cuda",
+    generation_batch_size: int = 16,
+    max_length: int = 256,
+    eval_num: Union[int, str] = 1,
+) -> List[Dict[str, Any]]:
+    """
+    Backward-compatible alias for get_cloze_probe_traces.
+    """
+    return get_cloze_probe_traces(
+        model=model,
+        tokenizer=tokenizer,
+        vocab_cloze_path=vocab_cloze_path,
+        top_k=top_k,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        generation_batch_size=generation_batch_size,
+        max_length=max_length,
+        eval_num=eval_num,
+    )
 
 
 def get_failed_cloze_samples(
@@ -373,11 +455,12 @@ def get_failed_cloze_samples(
     device: str = "cuda",
     generation_batch_size: int = 16,
     max_length: int = 256,
+    eval_num: Union[int, str] = 1,
 ) -> List[Dict[str, Any]]:
     """
-    Run Probe 3 - Cloze probe and return detailed list of failed samples where target term was not covered.
+    Backward-compatible alias for get_cloze_probe_traces.
     """
-    result = eval_cloze_coverage(
+    return get_cloze_probe_traces(
         model=model,
         tokenizer=tokenizer,
         vocab_cloze_path=vocab_cloze_path,
@@ -386,5 +469,5 @@ def get_failed_cloze_samples(
         device=device,
         generation_batch_size=generation_batch_size,
         max_length=max_length,
+        eval_num=eval_num,
     )
-    return result["failures"]

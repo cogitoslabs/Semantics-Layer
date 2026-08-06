@@ -137,15 +137,18 @@ def handle_evaluation_cycle(
     metrics_writer,
     device,
     last_checkpoint_path_ref,
+    scheduler=None,
 ) -> tuple:
     """Run probe evaluations, save progress checkpoint, check gates and log metrics."""
     state["eval_count"] += 1
     state["last_eval_at"] = state["tokens_processed"]
 
     # Save checkpoint
+    save_opt = cfg.model.save_optimizer_state or getattr(cfg.model, "restart_from_checkpoint", False)
     last_checkpoint_path = save_checkpoint(
         model=model,
-        optimizer=optimizer if cfg.model.save_optimizer_state else None,
+        optimizer=optimizer if save_opt else None,
+        scheduler=scheduler if save_opt else None,
         state=state,
         checkpoint_dir=cfg.model.checkpoint_dir,
         keep_last=cfg.model.checkpoint_keep_last,
@@ -171,7 +174,6 @@ def handle_evaluation_cycle(
         run_slow_probes=run_slow,
         use_bertscore=run_slow,
     )
-    state["eval_history"].append(metrics)
 
     # Check convergence gates
     decision, gate_details = check_convergence_gates(
@@ -247,10 +249,10 @@ def run_final_eval(model, tokenizer, cfg, state, metrics_writer, device):
             use_bertscore=True,
         )
         manifest = {
-            "best_eval_id": state["eval_history"][-1]["eval_id"] if state["eval_history"] else 0,
+            "best_eval_id": state["eval_history"][-1].get("eval_id", state["eval_history"][-1].get("eval_count", 0)) if state["eval_history"] else 0,
             "best_checkpoint_path": str(best_ckpt),
             "selected_from": "final_evaluation_run",
-            "metrics": final_metrics["metrics"],
+            "metrics": final_metrics,
         }
         save_json(manifest, cfg.model.best_checkpoint_manifest)
     return best_ckpt

@@ -41,15 +41,27 @@ def rotate_checkpoints(checkpoint_dir: Path, keep_last: int) -> None:
         logger.debug(f"Rotated out checkpoint: {old}")
 
 
+def find_latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
+    """
+    Find the most recent checkpoint (.pt) in checkpoint_dir.
+    Returns None if no checkpoints exist.
+    """
+    if not checkpoint_dir.exists():
+        return None
+    ckpts = sorted(checkpoint_dir.glob("dapt_eval_*.pt"), key=lambda p: p.stat().st_mtime)
+    return ckpts[-1] if ckpts else None
+
+
 def save_checkpoint(
     model,
     optimizer,
     state: Dict[str, Any],
     checkpoint_dir: Path,
     keep_last: int = 5,
+    scheduler=None,
 ) -> Path:
     """
-    Save model weights + optimizer state + training state dict asynchronously.
+    Save model weights + optimizer state + scheduler state + training state dict asynchronously.
     Rotates old checkpoints so at most `keep_last` are retained on disk.
 
     Returns the path of the saved checkpoint.
@@ -68,9 +80,14 @@ def save_checkpoint(
     try:
         model_state_cpu = copy_state_dict_to_cpu(model.state_dict())
         optimizer_state_cpu = copy_state_dict_to_cpu(optimizer.state_dict()) if optimizer is not None else None
+        scheduler_state_cpu = (
+            copy_state_dict_to_cpu(scheduler.state_dict())
+            if scheduler is not None and hasattr(scheduler, "state_dict")
+            else None
+        )
         training_state_cpu = {
             k: v for k, v in state.items()
-            if k not in ("model_state_dict", "optimizer_state_dict")
+            if k not in ("model_state_dict", "optimizer_state_dict", "scheduler_state_dict")
         }
 
         cpu_payload = {
@@ -81,6 +98,8 @@ def save_checkpoint(
         }
         if optimizer_state_cpu is not None:
             cpu_payload["optimizer_state_dict"] = optimizer_state_cpu
+        if scheduler_state_cpu is not None:
+            cpu_payload["scheduler_state_dict"] = scheduler_state_cpu
     except Exception as e:
         logger.warning(f"Failed to clone state dicts to CPU: {e}")
         cpu_payload = None
@@ -95,11 +114,13 @@ def save_checkpoint(
                     "model_state_dict": model.state_dict(),
                     "training_state": {
                         k: v for k, v in state.items()
-                        if k not in ("model_state_dict", "optimizer_state_dict")
+                        if k not in ("model_state_dict", "optimizer_state_dict", "scheduler_state_dict")
                     },
                 }
                 if optimizer is not None:
                     payload["optimizer_state_dict"] = optimizer.state_dict()
+                if scheduler is not None and hasattr(scheduler, "state_dict"):
+                    payload["scheduler_state_dict"] = scheduler.state_dict()
                 torch.save(payload, ckpt_path)
                 logger.info(f"Checkpoint saved synchronously in background: {ckpt_path}")
             except Exception as ex:
@@ -131,9 +152,10 @@ def load_checkpoint(
     ckpt_path: Path,
     model,
     optimizer=None,
+    scheduler=None,
 ) -> Dict[str, Any]:
     """
-    Load model weights (and optionally optimizer state) from a checkpoint.
+    Load model weights (and optionally optimizer/scheduler state) from a checkpoint.
     Returns the training_state dict so the loop can resume.
     """
     global _bg_save_thread
@@ -155,11 +177,21 @@ def load_checkpoint(
 
         model.load_state_dict(payload["model_state_dict"], strict=not is_peft)
         if optimizer is not None and "optimizer_state_dict" in payload:
-            optimizer.load_state_dict(payload["optimizer_state_dict"])
+            try:
+                optimizer.load_state_dict(payload["optimizer_state_dict"])
+            except Exception as ex:
+                logger.warning(f"Could not load optimizer state dict: {ex}")
+        if scheduler is not None and "scheduler_state_dict" in payload:
+            try:
+                if hasattr(scheduler, "load_state_dict"):
+                    scheduler.load_state_dict(payload["scheduler_state_dict"])
+            except Exception as ex:
+                logger.warning(f"Could not load scheduler state dict: {ex}")
         return payload.get("training_state", {})
     except Exception as e:
         logger.warning(f"Failed to load checkpoint from {ckpt_path} (expected if dummy mock file): {e}")
         return {}
+
 
 
 def select_best_checkpoint(
@@ -197,7 +229,7 @@ def select_best_checkpoint(
     pool = plateau_evals if plateau_evals else eval_history
 
     def sort_key(e):
-        metrics = e.get("metrics", {})
+        metrics = e.get("metrics", e)
         if run_qa:
             return metrics.get("qa_accuracy", 0.0)
         elif run_cloze:
@@ -211,26 +243,27 @@ def select_best_checkpoint(
 
     best = max(pool, key=sort_key)
 
-    best_eval_id = best["eval_id"]
+    best_eval_id = best.get("eval_id", best.get("eval_count", 0))
     best_ckpt = checkpoint_dir / f"dapt_eval_{best_eval_id:04d}.pt"
 
+    best_metrics = best.get("metrics", best)
     manifest = {
         "best_eval_id": best_eval_id,
         "best_checkpoint_path": str(best_ckpt),
         "selected_from": "plateau_evals" if plateau_evals else "all_evals (no plateau detected)",
-        "metrics": best["metrics"],
+        "metrics": best_metrics,
     }
     save_json(manifest, manifest_path)
 
     # Format the log message with the primary selection metric
     if run_qa:
-        metric_str = f"QA acc={best['metrics']['qa_accuracy']:.4f}"
+        metric_str = f"QA acc={best_metrics.get('qa_accuracy', 0.0):.4f}"
     elif run_cloze:
-        metric_str = f"Cloze cov={best['metrics']['cloze_coverage']:.4f}"
+        metric_str = f"Cloze cov={best_metrics.get('cloze_coverage', 0.0):.4f}"
     elif run_concept:
-        metric_str = f"Concept prec={best['metrics']['concept_precision']:.4f}"
+        metric_str = f"Concept prec={best_metrics.get('concept_precision', 0.0):.4f}"
     elif run_perplexity:
-        metric_str = f"PPL={best['metrics']['perplexity']:.3f}"
+        metric_str = f"PPL={best_metrics.get('perplexity', 0.0):.3f}"
     else:
         metric_str = "no active metrics"
 

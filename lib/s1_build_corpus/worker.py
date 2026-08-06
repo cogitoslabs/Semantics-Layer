@@ -38,6 +38,8 @@ class ExtractionResult:
     filename: str
     chunks: list[ChunkResult]
     status: str  # "SUCCESS" | "SKIPPED" | "ERROR: <msg>"
+    page_range: Optional[tuple[int, int]] = None
+    chunk_index: Optional[int] = None
 
     @property
     def succeeded(self) -> bool:
@@ -144,9 +146,9 @@ def worker_task(
             conv_result = _docling_converter.convert(pdf_path)
             try:
                 chunk_text = conv_result.document.export_to_markdown()
-                chunk_text = clean_corpus_text(chunk_text)
+                chunk_text = clean_corpus_text(chunk_text, filename)
                 if not chunk_text or len(chunk_text.strip()) < MIN_CONTENT_LENGTH:
-                    return ExtractionResult(filename, [], "SKIPPED")
+                    return ExtractionResult(filename, [], "SKIPPED", chunk_index=0)
 
                 tokens = tokenizer.encode(chunk_text)
                 target_tokens = chunk_size * 400
@@ -206,7 +208,7 @@ def worker_task(
             conv_result = _docling_converter.convert(pdf_path, page_range=(start_page, end_page))
             try:
                 chunk_text = conv_result.document.export_to_markdown()
-                chunk_text = clean_corpus_text(chunk_text)
+                chunk_text = clean_corpus_text(chunk_text, filename)
                 if chunk_text and len(chunk_text.strip()) >= MIN_CONTENT_LENGTH:
                     token_count = len(tokenizer.encode(chunk_text))
                     chunk = ChunkResult(
@@ -217,7 +219,7 @@ def worker_task(
                     )
                     return ExtractionResult(filename, [chunk], "SUCCESS")
                 else:
-                    return ExtractionResult(filename, [], "SKIPPED")
+                    return ExtractionResult(filename, [], "SKIPPED", page_range=(start_page, end_page), chunk_index=c_idx)
             finally:
                 try:
                     if hasattr(conv_result, "input") and conv_result.input and hasattr(conv_result.input, "_backend") and conv_result.input._backend:
@@ -236,7 +238,7 @@ def worker_task(
             conv_result = _docling_converter.convert(pdf_path, page_range=(start, end))
             try:
                 chunk_text = conv_result.document.export_to_markdown()
-                chunk_text = clean_corpus_text(chunk_text)
+                chunk_text = clean_corpus_text(chunk_text, filename)
                 if chunk_text and len(chunk_text.strip()) >= MIN_CONTENT_LENGTH:
                     token_count = len(tokenizer.encode(chunk_text))
                     chunk = ChunkResult(

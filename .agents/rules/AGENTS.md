@@ -2,8 +2,6 @@
 trigger: always_on
 ---
 
-# Aroha
-
 This project is for building SLM thru distillation of Teacher LLMs finetuned on CND projection layer output 
 
 ## Context Files

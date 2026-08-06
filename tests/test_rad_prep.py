@@ -398,6 +398,9 @@ def test_pipeline_end_to_end(test_cfg):
                 assert manifest["status"] == "complete"
                 assert manifest["metrics"]["grounded_trace_count"] == 2
 
+        from lib.utils.logger import close_loggers
+        close_loggers()
+
 
 def test_trace_generator_bedrock(test_cfg):
     test_cfg.rad.teacher_backend = "bedrock"
@@ -411,7 +414,8 @@ def test_trace_generator_bedrock(test_cfg):
         }
     }
 
-    with patch("boto3.client") as mock_boto_client:
+    with patch.dict("os.environ", {"AWS_ACCESS_KEY_ID": "test_id", "AWS_SECRET_ACCESS_KEY": "test_secret"}), \
+         patch("boto3.client") as mock_boto_client:
         mock_client_instance = MagicMock()
         mock_client_instance.converse.return_value = mock_response
         mock_boto_client.return_value = mock_client_instance
@@ -422,3 +426,24 @@ def test_trace_generator_bedrock(test_cfg):
         assert len(traces) == 1
         assert traces[0] == "This is a response from Llama on Bedrock."
         mock_client_instance.converse.assert_called_once()
+
+
+def test_trace_generator_bedrock_missing_credentials(test_cfg):
+    test_cfg.rad.teacher_backend = "aws"
+    with patch.dict("os.environ", {}, clear=True):
+        with pytest.raises(RuntimeError, match="SEVERE ERROR: Missing AWS credentials"):
+            TraceGenerator(test_cfg)
+
+
+def test_trace_generator_bedrock_api_error(test_cfg):
+    test_cfg.rad.teacher_backend = "bedrock"
+    with patch.dict("os.environ", {"AWS_ACCESS_KEY_ID": "test_id", "AWS_SECRET_ACCESS_KEY": "test_secret"}), \
+         patch("boto3.client") as mock_boto_client:
+        mock_client_instance = MagicMock()
+        mock_client_instance.converse.side_effect = Exception("Access Denied / Unable to locate credentials")
+        mock_boto_client.return_value = mock_client_instance
+
+        generator = TraceGenerator(test_cfg)
+        with pytest.raises(RuntimeError, match="SEVERE ERROR: AWS Bedrock API call failed"):
+            generator.backend.generate_batch(["Test prompt"])
+

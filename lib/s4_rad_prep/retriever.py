@@ -37,6 +37,8 @@ class Retriever:
                 if line.strip():
                     self.chunks.append(Chunk(**json.loads(line)))
 
+        self.chunk_id_to_idx = {chunk.chunk_id: idx for idx, chunk in enumerate(self.chunks)}
+
         index_file = Path(cfg.rad.index_dir) / "index.faiss"
         if not index_file.exists():
             raise FileNotFoundError(f"FAISS index not found at {index_file}. Run indexing first.")
@@ -68,10 +70,17 @@ class Retriever:
                     tokenized_corpus = None
 
             if tokenized_corpus is None:
-                logger.info("Initializing BM25: tokenizing chunks (this may take a few moments for large corpora)")
-                tokenized_corpus = [
-                    self.tokenizer.tokenize(chunk.text) for chunk in self.chunks
-                ]
+                logger.info("Initializing BM25: fast batch tokenizing chunks across CPU cores...")
+                chunk_texts = [chunk.text for chunk in self.chunks]
+                if getattr(self.tokenizer, "is_fast", False):
+                    encoded_batch = self.tokenizer(chunk_texts, add_special_tokens=False, return_attention_mask=False)
+                    tokenized_corpus = [
+                        self.tokenizer.convert_ids_to_tokens(ids) for ids in encoded_batch["input_ids"]
+                    ]
+                else:
+                    tokenized_corpus = [
+                        self.tokenizer.tokenize(text) for text in chunk_texts
+                    ]
                 try:
                     logger.info(f"Saving tokenized corpus cache to {cache_file}")
                     with open(cache_file, "w", encoding="utf-8") as f:
@@ -138,8 +147,16 @@ class Retriever:
         tokenized_query = self.tokenizer.tokenize(query)
         bm25_scores = self.bm25.get_scores(tokenized_query)
 
-        # Get top-k indices
-        top_indices = np.argsort(bm25_scores)[::-1][:top_k]
+        k = min(top_k, len(self.chunks))
+        if k == 0:
+            return [], []
+
+        if k < len(bm25_scores):
+            top_partition = np.argpartition(bm25_scores, -k)[-k:]
+            top_indices = top_partition[np.argsort(bm25_scores[top_partition])[::-1]]
+        else:
+            top_indices = np.argsort(bm25_scores)[::-1]
+
         retrieved_chunks = []
         scores = []
         for idx in top_indices:
@@ -164,7 +181,11 @@ class Retriever:
             raise ValueError("BM25 index is not initialized.")
         tokenized_query = self.tokenizer.tokenize(query)
         bm25_scores = self.bm25.get_scores(tokenized_query)
-        sparse_indices = np.argsort(bm25_scores)[::-1][:candidates_count]
+        if candidates_count < len(bm25_scores):
+            sparse_top = np.argpartition(bm25_scores, -candidates_count)[-candidates_count:]
+            sparse_indices = sparse_top[np.argsort(bm25_scores[sparse_top])[::-1]]
+        else:
+            sparse_indices = np.argsort(bm25_scores)[::-1]
         sparse_ranks = {idx: rank + 1 for rank, idx in enumerate(sparse_indices)}
 
         # 3. Reciprocal Rank Fusion
@@ -194,9 +215,21 @@ class Retriever:
     def _compute_cosine_similarities(self, query: str, chunks: List[Chunk]) -> List[float]:
         if not chunks:
             return []
-        query_vector = self.embedder.embed_batch([query])[0]
-        chunk_texts = [chunk.text for chunk in chunks]
-        chunk_vectors = self.embedder.embed_batch(chunk_texts)
-
-        similarities = np.dot(chunk_vectors, query_vector)
-        return [float(sim) for sim in similarities]
+        query_vector = self.embedder.embed_batch([query])[0].astype("float32")
+        try:
+            chunk_vectors = []
+            for chunk in chunks:
+                idx = self.chunk_id_to_idx.get(chunk.chunk_id)
+                if idx is not None and idx < self.index.ntotal:
+                    chunk_vectors.append(self.index.reconstruct(idx))
+                else:
+                    raise ValueError(f"Chunk ID {chunk.chunk_id} not found in index")
+            chunk_matrix = np.vstack(chunk_vectors).astype("float32")
+            similarities = np.dot(chunk_matrix, query_vector)
+            return [float(sim) for sim in similarities]
+        except Exception as e:
+            logger.debug(f"Fast cosine similarity reconstruction failed ({e}), falling back to embedding model")
+            chunk_texts = [chunk.text for chunk in chunks]
+            chunk_vectors = self.embedder.embed_batch(chunk_texts)
+            similarities = np.dot(chunk_vectors, query_vector)
+            return [float(sim) for sim in similarities]

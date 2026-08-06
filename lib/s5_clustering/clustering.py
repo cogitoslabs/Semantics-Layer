@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from dataclasses import asdict
 
-from lib.utils import PipelineConfig
+from lib.utils import PipelineConfig, setup_logger
 from lib.s5_clustering.embedder import run_embedding
 from lib.s5_clustering.clusterer import run_clustering
 from lib.s5_clustering.splitter import run_splitting
@@ -14,9 +14,12 @@ logger = logging.getLogger(__name__)
 
 def run_clustering_pipeline(cfg: PipelineConfig) -> None:
     """
-    Run the Step 4 Corpus Engineering & Micro-Clustering pipeline.
+    Run the Step 5 Corpus Engineering & Micro-Clustering pipeline.
     """
-    logger.info("Starting Phase 1 Step 4: Corpus Engineering & Micro-Clustering Pipeline")
+    # Guarantee pipeline.log is initialized and attached
+    setup_logger("lib", cfg.logging)
+    
+    logger.info("Starting Phase 1 Step 5: Corpus Engineering & Micro-Clustering Pipeline")
     
     # 0. Ensure target output directories exist
     cfg.ensure_dirs()

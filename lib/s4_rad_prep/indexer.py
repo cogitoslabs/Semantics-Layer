@@ -75,42 +75,42 @@ def run_indexing(cfg: PipelineConfig, chunks: Optional[List[Chunk]] = None) -> N
     logger.info(f"Embedding {len(chunks)} chunks with batch size {cfg.rad.embed_batch_size}")
     embedder = DenseEmbedder(cfg.rad.embedding_model)
 
-    all_embeddings = []
-    texts = [chunk.text for chunk in chunks]
+    metadata_file = index_dir / "chunks_metadata.jsonl"
+    logger.info(f"Saving chunk metadata to {metadata_file}")
+
+    index = None
     batch_size = cfg.rad.embed_batch_size
+    total_tokens = 0
 
-    for i in range(0, len(texts), batch_size):
-        batch_texts = texts[i:i + batch_size]
-        batch_embeddings = embedder.embed_batch(batch_texts)
-        all_embeddings.append(batch_embeddings)
+    with open(metadata_file, "w", encoding="utf-8") as f_meta:
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            batch_texts = [c.text for c in batch_chunks]
+            batch_embeddings = embedder.embed_batch(batch_texts).astype("float32")
 
-    embeddings_matrix = np.vstack(all_embeddings).astype("float32")
+            if index is None:
+                dimension = batch_embeddings.shape[1]
+                logger.info(f"Building FAISS IndexFlatIP with dimension {dimension}")
+                index = faiss.IndexFlatIP(dimension)
 
-    dimension = embeddings_matrix.shape[1]
-    logger.info(f"Building FAISS IndexFlatIP with dimension {dimension}")
-    index = faiss.IndexFlatIP(dimension)
-    index.add(embeddings_matrix)
+            index.add(batch_embeddings)
+
+            for chunk in batch_chunks:
+                total_tokens += chunk.token_count
+                meta = {
+                    "chunk_id": chunk.chunk_id,
+                    "doc_id": chunk.doc_id,
+                    "doc_type": chunk.doc_type,
+                    "token_count": chunk.token_count
+                }
+                f_meta.write(json.dumps(meta) + "\n")
 
     index_file = index_dir / "index.faiss"
     logger.info(f"Saving FAISS index to {index_file}")
     faiss.write_index(index, str(index_file))
 
-    # Save parallel chunks metadata (no text, just IDs and doc_type)
-    metadata_file = index_dir / "chunks_metadata.jsonl"
-    logger.info(f"Saving chunk metadata to {metadata_file}")
-    with open(metadata_file, "w", encoding="utf-8") as f:
-        for chunk in chunks:
-            meta = {
-                "chunk_id": chunk.chunk_id,
-                "doc_id": chunk.doc_id,
-                "doc_type": chunk.doc_type,
-                "token_count": chunk.token_count
-            }
-            f.write(json.dumps(meta) + "\n")
-
     # Save index manifest
     manifest_file = index_dir / "index_manifest.json"
-    total_tokens = sum(chunk.token_count for chunk in chunks)
     manifest = {
         "model": cfg.rad.embedding_model,
         "chunk_count": len(chunks),

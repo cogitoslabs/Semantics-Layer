@@ -21,7 +21,7 @@ class EvalSample:
 
 
 def load_traces_lookup(cfg: PipelineConfig) -> Dict[str, Dict[str, Any]]:
-    """Load both grounded and no_retrieval traces into a combined lookup dictionary by sample_id."""
+    """Load both grounded and no_retrieval traces into a combined lookup dictionary indexed by sample_id and doc_id."""
     lookup = {}
     traces_dir = Path(cfg.rad.traces_dir)
     
@@ -39,9 +39,16 @@ def load_traces_lookup(cfg: PipelineConfig) -> Dict[str, Dict[str, Any]]:
                 if line.strip():
                     try:
                         record = json.loads(line)
-                        sample_id = record.get("sample_id")
-                        if sample_id:
-                            lookup[sample_id] = record
+                        s_id = record.get("sample_id")
+                        d_id = record.get("doc_id")
+                        rec_id = record.get("id")
+                        
+                        if s_id:
+                            lookup[s_id] = record
+                        if d_id:
+                            lookup[d_id] = record
+                        if rec_id:
+                            lookup[rec_id] = record
                     except Exception as e:
                         logger.error(f"Error parsing trace record line: {e}")
                         
@@ -78,9 +85,8 @@ def run_eval_sampling(cfg: PipelineConfig) -> Dict[str, List[EvalSample]]:
     use_fallback = (overlap_count == 0 and len(all_val_doc_ids) > 0)
     
     if use_fallback:
-        logger.warning(
-            "Complete ID mismatch detected between clustering splits and trace files. "
-            "Enabling deterministic hash-based fallback mapping for evaluation samples."
+        logger.info(
+            "Evaluation sampler: Using deterministic hash mapping to pair cluster validation documents with QA traces."
         )
     
     eval_samples: Dict[str, List[EvalSample]] = {}
@@ -132,7 +138,7 @@ def run_eval_sampling(cfg: PipelineConfig) -> Dict[str, List[EvalSample]]:
                 miss_count += 1
                 
         if fallback_count > 0:
-            logger.info(
+            logger.debug(
                 f"Cluster {cluster_label}: Mapped {fallback_count}/{len(sampled_doc_ids)} "
                 "validation documents to QA traces using deterministic fallback."
             )

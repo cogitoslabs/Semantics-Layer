@@ -1,5 +1,114 @@
 # Change History
 
+## Status: Completed (Online Probe Check Streamlit Web UI `ui/app.py`)
+
+- Built interactive Streamlit Web Application in [app.py](file:///e:/Projects/cnd/Semantics/ui/app.py) under `ui/` directory.
+- Added 2 primary input controls: **Probe** radio selector (`Cloze Probe` vs `Concept Probe`) and **Prompt** multiline input area.
+- Integrated `@st.cache_resource` to load model & tokenizer once into memory via `PipelineConfig` and `load_model_and_tokenizer`.
+- Connected UI to exact Cloze (`format_cloze_prompt`, `generate_topk_completions`) and Concept (`generate_response`) generation functions.
+- Added Streamlit dependency (`streamlit>=1.47.0`) in [pyproject.toml](file:///e:/Projects/cnd/Semantics/pyproject.toml).
+- Added feature specification in [probe-check-ui.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/probe-check-ui.md).
+- Added unit test suite in [test_ui.py](file:///e:/Projects/cnd/Semantics/tests/test_ui.py).
+- Verified 100% pass rate across entire workspace test suite (**117/117 tests passing**).
+
+---
+
+## Status: Completed (Online Cloze & Concept Probe Prompt Check CLI Scripts)
+
+
+- Created [online_cloze_check.py](file:///e:/Projects/cnd/Semantics/scripts/online_cloze_check.py) and [online_concept_check.py](file:///e:/Projects/cnd/Semantics/scripts/online_concept_check.py) under `scripts/`.
+- Configured scripts to load model and tokenizer automatically using `PipelineConfig` (reading `.env.common` and associated environment files) and `load_model_and_tokenizer`.
+- Supported both interactive prompt sessions and non-interactive `--prompt` (`-p`) CLI arguments.
+- Applied exact cloze probe generation parameters (`generate_topk_completions`, `format_cloze_prompt`, `num_beams=5`, `max_new_tokens=3`) and concept probe generation parameters (`generate_response`, `max_new_tokens=100`).
+- Added feature specification in [online-probe-checks.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/online-probe-checks.md).
+- Added unit test suite in [test_online_checks.py](file:///e:/Projects/cnd/Semantics/tests/test_online_checks.py).
+
+---
+
+## Status: Completed (Model Tracing Decorator `@model_trace` & `MODEL_TRACING` Config)
+
+
+- Implemented `@model_trace` decorator in [model_tracer.py](file:///e:/Projects/cnd/Semantics/lib/utils/model_tracer.py) and exported it in [utils/\_\_init\_\_.py](file:///e:/Projects/cnd/Semantics/lib/utils/__init__.py).
+- Added configuration flags `MODEL_TRACING=False` and `MODEL_TRACE_FILE=logs/dapt_model_traces.csv` to [.env.common](file:///e:/Projects/cnd/Semantics/.env.common), [.env.example](file:///e:/Projects/cnd/Semantics/.env.example), and `LoggingConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py).
+- Decorated model generation functions (`generate_response`, `generate_responses_batch`) in [concept_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/concept_probe.py) and (`generate_topk_completions`, `generate_topk_completions_batch`) in [cloze_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/cloze_probe.py).
+- Added feature specification in [model-tracing.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/model-tracing.md) and unit test suite in [test_model_tracer.py](file:///e:/Projects/cnd/Semantics/tests/test_model_tracer.py).
+- Enhanced `_log_trace_to_csv` in [model_tracer.py](file:///e:/Projects/cnd/Semantics/lib/utils/model_tracer.py) to unroll batch inference calls (`generate_responses_batch`, `generate_topk_completions_batch`) into individual CSV rows per prompt item, preventing giant JSON-array CSV rows.
+- Added `Eval #`, `Eval Category`, and `Eval Seq #` columns to `dapt_model_traces.csv` in [model_tracer.py](file:///e:/Projects/cnd/Semantics/lib/utils/model_tracer.py), aligned with evaluation traces metadata.
+- Verified 100% pass rate across entire workspace test suite (**112/112 tests passing**).
+
+---
+
+## Status: Completed (Evaluation Traces CSV Logging & `EVAL_TRACES_FILE` Config)
+
+- Renamed `EVAL_SAMPLES_FILE` to `EVAL_TRACES_FILE` in [.env.common](file:///e:/Projects/cnd/Semantics/.env.common) and [.env.example](file:///e:/Projects/cnd/Semantics/.env.example).
+- Renamed `eval_samples_file` to `eval_traces_file` in `LoggingConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py), setting default output path to `logs/dapt_eval_traces.csv`.
+- Updated evaluation trace formatting across probe modules ([qa_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/qa_probe.py), [cloze_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/cloze_probe.py), [concept_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/concept_probe.py)) and renamed sample lists / functions to use `eval_traces` (`get_*_probe_traces`).
+- Updated [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) to write evaluation traces to CSV format instead of JSON, adhering to the 7 standardized CSV columns: `Eval #`, `Eval Category`, `Eval Seq #`, `Eval`, `Generated Answer by the model`, `Matching Score`, and `Result`.
+- Added feature specification in [eval-traces-csv.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/eval-traces-csv.md).
+- Added `format_concept_prompt` (`Prompt: {prompt}\nAnswer:`) in [concept_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/concept_probe.py) to condition base causal language models to generate direct concept definitions/explanations instead of rambling or continuing exam question lists.
+- Updated unit test assertions in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py) and verified 100% pass rate across entire workspace test suite (**109/109 tests passing**).
+
+---
+
+## Status: Completed (MinHash LSH Chunk Deduplication in Merge Corpus)
+
+- Implemented zero-dependency `MinHashLSHDeduplicator` module in [minhash_lsh.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/minhash_lsh.py) using 128 64-bit MinHash permutations over word 5-grams and 16 LSH bands of 8 rows each.
+- Added configuration options (`minhash_enabled`, `minhash_jaccard_threshold=0.85`, `minhash_num_perm=128`, `minhash_ngram_size=5`, `minhash_num_bands=16`) to `CorpusBuildConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) and [.env.common](file:///e:/Projects/cnd/Semantics/.env.common).
+- Integrated MinHash LSH deduplication into `run_merge_corpus` in [merge_corpus.py](file:///e:/Projects/cnd/Semantics/lib/s1_build_corpus/merge_corpus.py) to stream, detect, and skip duplicate text chunks across merged corpus files while logging detailed metrics (processed, merged, dropped chunks and tokens).
+- Exported `MinHashLSHDeduplicator` in `lib/s1_build_corpus/__init__.py`.
+- Created feature specification in [minhash-lsh-deduplication.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/minhash-lsh-deduplication.md) and full unit test suite in [test_minhash_lsh.py](file:///e:/Projects/cnd/Semantics/tests/test_minhash_lsh.py).
+- Verified 100% pass rate across entire test suite (**109/109 tests passing**).
+
+---
+
+- Fixed `KeyError: 'global_step'` occurring during initial baseline evaluation before the training loop starts by ensuring `global_step` is initialized in `init_state()` in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) and fallback lookup `state.get("global_step", state.get("steps_completed", 0))` is used in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py).
+- Initialized all required state history arrays (`eval_timestamps`, `tokens_history`, `perplexity_history`, `ppl_history`, `qa_acc_history`, `cloze_cov_history`, `concept_prec_history`) in `init_state()` in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) to prevent secondary `KeyError` crashes.
+- Reconciled `ppl_history` and `perplexity_history` keys across [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py), [gate_logic.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/gate_logic.py), and [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) so perplexity convergence checking correctly tracks evaluation metrics.
+- Added `eval_id` to metrics dictionary output in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) and updated [checkpoint.py](file:///e:/Projects/cnd/Semantics/lib/utils/checkpoint.py) and [training_helpers.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/training_helpers.py) for resilient dictionary lookups.
+- Removed duplicate `state["eval_history"].append(metrics)` calls in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) and [training_helpers.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/training_helpers.py) to prevent metrics from being appended twice per evaluation pass.
+
+---
+
+## Status: Completed (Per-Eval Pass Logging, `Eval #` Field, & `EVAL_SAMPLES_FILE` Config)
+
+- Added `EVAL_SAMPLES_FILE=logs/dapt_eval_samples.json` to [.env.common](file:///e:/Projects/cnd/Semantics/.env.common) and added `eval_samples_file` to `LoggingConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) to make the evaluation samples output path configurable.
+- Enhanced all evaluation probe modules ([qa_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/qa_probe.py), [cloze_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/cloze_probe.py), [concept_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/concept_probe.py)) to accept `eval_num: Union[int, str] = 1` and record `"Eval #": "1"`, `"Eval #": "2"`, `"Eval #": "final"` as the leading attribute in every JSON sample object.
+- Updated `run_all_probes()` in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) to save evaluation sample records for **every evaluation pass** (removing the `use_bertscore` restriction).
+- Implemented cumulative file updating in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) to append evaluation pass records to `cfg.logging.eval_samples_file`, preserving full multi-pass history across training.
+- Updated unit test assertions in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py) verifying 100% test suite pass rate (19/19 tests passing).
+
+---
+
+## Status: Completed (Evaluation Probe Full Sample Logging with `Result: Pass/Fail`)
+
+- Refactored all evaluation probe execution modules ([qa_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/qa_probe.py), [cloze_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/cloze_probe.py), [concept_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/concept_probe.py)) to record 100% of evaluated samples (both Passed and Failed) instead of logging failures only.
+- Added top-level `"Result": "Pass"` or `"Result": "Fail"` attribute to every sample record across QA, Cloze, and Concept probes.
+- Added probe sample getter helpers (`get_qa_probe_samples`, `get_cloze_probe_samples`, `get_concept_probe_samples`) while preserving `get_failed_*` wrappers for full backward compatibility.
+- Updated `eval_runner.py` ([eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py)) to write complete structured probe sample logs to `failed_evals.json` while isolating console warning logs to failures only to maintain clean stdout logs.
+- Expanded unit test coverage in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py), verifying 100% pass rate (19/19 tests passing).
+
+---
+
+## Status: Completed (Evaluation Probe Datasets Data Quality Cleaning)
+
+- Conducted a thorough audit across all DAPT evaluation probe datasets ([retrieval_prompts.json](file:///e:/Projects/cnd/Semantics/evals/dapt/retrieval_prompts.json), [retrieval_references.json](file:///e:/Projects/cnd/Semantics/evals/dapt/retrieval_references.json), [probe_qa.jsonl](file:///e:/Projects/cnd/Semantics/evals/dapt/probe_qa.jsonl), and [vocab_cloze_set.json](file:///e:/Projects/cnd/Semantics/evals/dapt/vocab_cloze_set.json)).
+- Identified root cause of table border pollution (`|----|`) and term/definition concatenation (`Autobiographical memory Long-term memory... |`) resulting from uncleaned raw PDF table extractions.
+- Implemented automated batch cleaner [clean_eval_files.py](file:///e:/Projects/cnd/Semantics/scripts/clean_eval_files.py) to strip raw markdown table borders, repair spaced possessive/contraction apostrophes (`one ' s` → `one's`, `Parkinson ' s` → `Parkinson's`), remove spaces before punctuation (`word .` → `word.`, `(e . g . ,)` → `(e.g.,)`), fix space-padded hyphens (`Cross - modal` → `Cross-modal`), and normalize quotes (`“ word ”` → `“word”`).
+- Verified zero remaining table border artifacts, zero spaced apostrophes, zero spaced punctuation, and 100% test pass rate across unit test suite.
+
+---
+
+## Status: Completed (DAPT Corpus Pretraining Quality Enhancements & Cleaning)
+
+- Implemented comprehensive pretraining corpus cleaning enhancements in [clean_text.py](file:///e:/Projects/cnd/Semantics/lib/utils/clean_text.py) to remove non-prose noise, ASCII control characters, HTML placeholders, PUA font glyphs, ASCII markdown tables, diagram callouts, standalone figure captions (`FIGURE 7.1...`), inline figure references (`(see Figure 4-2)`), Table of Contents (TOC) page-number listings, unheadinged academic reference lists, Internet Archive headers, and publisher metadata.
+- Upgraded `dehyphenate_text` to repair space-padded broken split words (such as `con -form` → `conform`, `motiva -tion` → `motivation`, `evalu -ating` → `evaluating`), eliminating over 7,500 split subwords.
+- Added linear-time split ligature repair in `join_ligatures_dict` to join broken word fragments across PDF text lines without performance bottlenecks.
+- Updated feature specification in [dapt-corpus-pretraining-cleaning.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/dapt-corpus-pretraining-cleaning.md) and expanded unit test suite in [test_dapt_corpus_cleaning.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt_corpus_cleaning.py).
+- Executed in-place corpus cleaning script [clean_existing_corpus.py](file:///e:/Projects/cnd/Semantics/scripts/clean_existing_corpus.py) on `data/dapt/in/domain_dapt_corpus.jsonl`, filtering **1,018,441 non-prose noise tokens (16.90% token reduction)** and dropping 27 non-prose/TOC/citation chunks.
+- Verified **0 ASCII control characters**, **0 PUA glyphs**, **0 short chunks**, **0 duplicate chunks**, and **100% test pass rate (24/24 tests passing)**.
+
+---
+
 ## Status: Completed (Convergence Gate Minimum Pass Enforcement and .gitignore Cleanup)
 
 - Modified `check_convergence_gates` in [gate_logic.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/gate_logic.py) to require at least one full pass through the training corpus (`tokens_processed >= total_corpus_tokens`) before allowing convergence to trigger, preventing early stopping on unrepresentative steps.
@@ -303,11 +412,22 @@
 - Fixed terminology coverage probe ([terminology_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/terminology_probe.py)) by splitting the cloze prompt at the `"___"` placeholder and only passing the prefix to the causal model, enabling next-token prediction to fill the blank correctly instead of generating text at the end of the full sentence.
 - Fixed retrieval precision probe ([retrieval_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/retrieval_probe.py)) by truncating generated hypotheses and reference texts to a safe maximum length of 1024 characters before calculating BERTScore, preventing PyTorch shape mismatch errors caused by extremely long bibliography citations in standard BERT/SciBERT 512-token limit models.
 - Fixed a runtime error in terminology and retrieval evaluation probes where empty inputs resulting from blank cloze splits (e.g. prompts beginning with "___") caused batch sequence length to become 0, leading to a tensor view/reshape crash in the model's self-attention layers. Added fallback safety checks to input token shapes and empty prompt strings, and added unit tests in [test_dapt.py](file:///e:/Projects/CND/Semantics/tests/test_dapt.py).
-- Fixed duplicate log output in the console by setting `logger.propagate = False` on the configured parent loggers in [logger.py](file:///e:/Projects/CND/Semantics/lib/utils/logger.py), preventing log records from propagating up to the root logger's default handlers.
-- Renamed configuration variable `DAPT_BATCH_SIZE` to `TRAIN_BATCH_SIZE` across `.env`, `.env.example`, [config.py](file:///e:/Projects/CND/Semantics/lib/utils/config.py), and [s1_s2.ipynb](file:///e:/Projects/CND/Semantics/notebooks/s1_s2.ipynb) to make it more meaningful.
-- Refactored `eval_qa_accuracy` in [qa_probe.py](file:///e:/Projects/CND/Semantics/lib/s2_dapt/probes/qa_probe.py) to read files exclusively as JSONL line-by-line, adding early-termination optimization for `max_samples` and removing the double-reading JSON array fallback.
+- Fixed duplicate log output in the console by setting `logger.propagate = False` on the configured parent loggers in [logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py), preventing log records from propagating up to the root logger's default handlers.
+- Renamed configuration variable `DAPT_BATCH_SIZE` to `TRAIN_BATCH_SIZE` across `.env`, `.env.example`, [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py), and [s1_s2.ipynb](file:///e:/Projects/cnd/Semantics/notebooks/s1_s2.ipynb) to make it more meaningful.
+- Refactored `eval_qa_accuracy` in [qa_probe.py](file:///e:/Projects/cnd/Semantics/lib/s2_dapt/probes/qa_probe.py) to read files exclusively as JSONL line-by-line, adding early-termination optimization for `max_samples` and removing the double-reading JSON array fallback.
 - Implemented batching generation for terminology probe and retrieval probe evaluations, adding configurable batch sizes (`TERM_COV_GEN_BATCH_SIZE` and `RET_PREC_GEN_BATCH_SIZE`).
 - Fixed shape/dimension mismatch and empty-input handling in generation probes to avoid runtime errors when tokenizing empty inputs or when padding inputs.
-- Implemented final saved model reloading and detailed failure logging at the end of the DAPT training step, logging individual failed samples (for QA, Terminology, and Retrieval probes) and saving a structured summary to `logs/failed_evals.json`. Added corresponding unit test coverage in [test_dapt.py](file:///e:/Projects/CND/Semantics/tests/test_dapt.py).
+- Implemented final saved model reloading and detailed failure logging at the end of the DAPT training step, logging individual failed samples (for QA, Terminology, and Retrieval probes) and saving a structured summary to `logs/failed_evals.json`. Added corresponding unit test coverage in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py).
+
+---
+
+## Status: Completed (Step 4 RAD Prep, Step 5 Clustering, and Step 6 Teacher Benchmarking Refinements)
+
+- Added `AutoFlushingFileHandler` and `flush_loggers()` in [logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/logger.py) to guarantee immediate disk writes to `logs/pipeline.log`. Updated [teacher_benchmarking.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/teacher_benchmarking.py) to invoke `flush_loggers()` on step completion. Added automatic `logs/pipeline.log` syncing to Google Drive in [pipeline.ipynb](file:///e:/Projects/cnd/Semantics/pipeline.ipynb).
+- Refactored hallucination detection in [hallucination_detector.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/hallucination_detector.py) to evaluate sentence entailment against individual context chunks and `ground_truth`, preventing DeBERTa 512-token sequence truncation. Added template exemptions for structural formatting sentences (`\\boxed{}`, `"Based on the context..."`, `"To determine..."`), reducing false positive hallucination rates from 88.27% to 33.88%.
+- Refactored citation extraction and recall evaluation in [citation_accuracy.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/citation_accuracy.py) to support bracketed markers (`[1]`, `[Context 1]`, `[Passage 1]`) and trigger phrases, and evaluated citation recall relative to referenced context passages, increasing citation accuracy from 2.64% to 41.69%.
+- Updated prompt formatting in [benchmark_runner.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/benchmark_runner.py) (`build_benchmark_prompt`) and [trace_generator.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/trace_generator.py) (`format_prompt`) to explicitly instruct teacher models to annotate key statements with bracketed passage citations matching the provided context (`[Context 1]` or `[Passage 1]`). Added corresponding unit test in [test_teacher_benchmarking.py](file:///e:/Projects/cnd/Semantics/tests/test_teacher_benchmarking.py).
+- Dynamic Gate Scaling in RAD Prep: Updated `passed_min_traces` in [rad_prep.py](file:///e:/Projects/cnd/Semantics/lib/s4_rad_prep/rad_prep.py) to use 95% of attempted traces (`grounded_count >= min(cfg.rad.min_traces, int(0.95 * total_attempted))`) as the completion gating requirement.
+- Reduced HDBSCAN noise rate in Step 5: Updated [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) defaults (`hdbscan_min_samples = 2` and `pca_components = 50`) to reduce unclustered boundary noise points.
 
 

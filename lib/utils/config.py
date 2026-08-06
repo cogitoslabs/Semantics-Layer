@@ -186,6 +186,11 @@ class CorpusBuildConfig:
     docling_use_picture_classification: bool = field(default_factory=lambda: get("DOCLING_USE_PICTURE_CLASSIFICATION", False, bool))
     docling_use_picture_description: bool = field(default_factory=lambda: get("DOCLING_USE_PICTURE_DESCRIPTION", False, bool))
     docling_num_threads: int | str = field(default_factory=lambda: get("DOCLING_NUM_THREADS", 4, int))
+    minhash_enabled: bool      = field(default_factory=lambda: get("MINHASH_ENABLED", True, bool))
+    minhash_jaccard_threshold: float = field(default_factory=lambda: get("MINHASH_JACCARD_THRESHOLD", 0.85, float))
+    minhash_num_perm: int       = field(default_factory=lambda: get("MINHASH_NUM_PERM", 128, int))
+    minhash_ngram_size: int     = field(default_factory=lambda: get("MINHASH_NGRAM_SIZE", 5, int))
+    minhash_num_bands: int      = field(default_factory=lambda: get("MINHASH_NUM_BANDS", 16, int))
 
     # Dynamic fields resolved at runtime
     gpu_ids: List[int] = field(default_factory=list, init=False)
@@ -424,6 +429,7 @@ class ModelConfig:
     best_checkpoint_manifest: Path = field(default_factory=lambda: Path(get("BEST_CHECKPOINT_MANIFEST", "logs/best_checkpoint.json")))
     checkpoint_keep_last: int      = field(default_factory=lambda: get("CHECKPOINT_KEEP_LAST", 5, int))
     save_optimizer_state: bool     = field(default_factory=lambda: get("SAVE_OPTIMIZER_STATE", False, bool))
+    restart_from_checkpoint: bool  = field(default_factory=lambda: get("RESTART_TRAINING_FROM_CHECKPOINT", False, bool))
     torch_compile: bool            = field(default_factory=lambda: get("TORCH_COMPILE", True, bool))
 
     # PEFT-DAPT Configuration
@@ -461,6 +467,9 @@ class StorageConfig:
 class LoggingConfig:
     log_dir: Path                  = field(default_factory=lambda: Path(get("LOG_DIR", "logs")))
     metrics_log_file: Path         = field(default_factory=lambda: Path(get("METRICS_LOG_FILE", "logs/dapt_eval_metrics.jsonl")))
+    eval_traces_file: Path         = field(default_factory=lambda: Path(get("EVAL_TRACES_FILE", "logs/dapt_eval_traces.csv")))
+    model_tracing: bool            = field(default_factory=lambda: get("MODEL_TRACING", False, bool))
+    model_trace_file: Path         = field(default_factory=lambda: Path(get("MODEL_TRACE_FILE", "logs/dapt_model_traces.csv")))
     risk_report_path: Path         = field(default_factory=lambda: Path(get("RISK_REPORT_PATH", "logs/dapt_hard_cap_risk_report.json")))
     log_level: str                 = field(default_factory=lambda: get("LOG_LEVEL", "INFO"))
     log_file: str                  = field(default_factory=lambda: get("LOG_FILE", "pipeline.log"))
@@ -504,7 +513,7 @@ class RADPrepConfig:
     retrieval_mode: str            = field(default_factory=lambda: get("RAD_RETRIEVAL_MODE", "hybrid"))  # dense|sparse|hybrid
     top_k: int                     = field(default_factory=lambda: get("RAD_TOP_K", 7, int))
     relevance_threshold: float     = field(default_factory=lambda: get("RAD_RELEVANCE_THRESHOLD", 0.65, float))
-    embed_batch_size: int          = field(default_factory=lambda: get("RAD_EMBED_BATCH_SIZE", 64, int))
+    embed_batch_size: int          = field(default_factory=lambda: get("RAD_EMBED_BATCH_SIZE", 256, int))
 
     # Chunking
     long_form_chunk_tokens: int    = field(default_factory=lambda: get("RAD_LONG_FORM_CHUNK_TOKENS", 512, int))
@@ -518,10 +527,10 @@ class RADPrepConfig:
     teacher_api_url: Optional[str] = field(default_factory=lambda: get("RAD_TEACHER_API_URL", None))
     teacher_api_key: Optional[str] = field(default_factory=lambda: get("RAD_TEACHER_API_KEY", None))
     teacher_max_new_tokens: int    = field(default_factory=lambda: get("RAD_TEACHER_MAX_NEW_TOKENS", 1024, int))
-    teacher_batch_size: int        = field(default_factory=lambda: get("RAD_TEACHER_BATCH_SIZE", 4, int))
+    teacher_batch_size: int        = field(default_factory=lambda: get("RAD_TEACHER_BATCH_SIZE", 16, int))
 
     # Trace filtering
-    trace_min_tokens: int          = field(default_factory=lambda: get("RAD_TRACE_MIN_TOKENS", 200, int))
+    trace_min_tokens: int          = field(default_factory=lambda: get("RAD_TRACE_MIN_TOKENS", 15, int))
     trace_max_tokens: int          = field(default_factory=lambda: get("RAD_TRACE_MAX_TOKENS", 2500, int))
     min_traces: int                = field(default_factory=lambda: get("RAD_MIN_TRACES", 1000, int))
 
@@ -538,12 +547,12 @@ class ClusteringConfig:
     doc_ids_cache_path: Path       = field(default_factory=lambda: Path(get("CLUSTERING_DOC_IDS_CACHE", "data/clustering/doc_ids.json")))
 
     # HDBSCAN
-    hdbscan_min_cluster_size: int  = field(default_factory=lambda: get("HDBSCAN_MIN_CLUSTER_SIZE", 10, int))
-    hdbscan_min_samples: int       = field(default_factory=lambda: get("HDBSCAN_MIN_SAMPLES", 5, int))
+    hdbscan_min_cluster_size: int  = field(default_factory=lambda: get("HDBSCAN_MIN_CLUSTER_SIZE", 6, int))
+    hdbscan_min_samples: int       = field(default_factory=lambda: get("HDBSCAN_MIN_SAMPLES", 2, int))
     hdbscan_metric: str            = field(default_factory=lambda: get("HDBSCAN_METRIC", "cosine"))
     min_clusters: int              = field(default_factory=lambda: get("CLUSTERING_MIN_CLUSTERS", 10, int))
     use_pca: bool                  = field(default_factory=lambda: get("CLUSTERING_USE_PCA", True, bool))
-    pca_components: int            = field(default_factory=lambda: get("CLUSTERING_PCA_COMPONENTS", 10, int))
+    pca_components: int            = field(default_factory=lambda: get("CLUSTERING_PCA_COMPONENTS", 50, int))
 
     # Noise handling
     noise_assignment: str          = field(default_factory=lambda: get("CLUSTERING_NOISE_ASSIGNMENT", "nearest"))
@@ -577,8 +586,8 @@ class TeacherBenchmarkingConfig:
     teacher_backend: str                = field(default_factory=lambda: get("BENCHMARK_TEACHER_BACKEND", ""))
     teacher_batch_size: int             = field(default_factory=lambda: get("BENCHMARK_TEACHER_BATCH_SIZE", 4, int))
     
-    eval_sample_size: int               = field(default_factory=lambda: get("BENCHMARK_EVAL_SAMPLE_SIZE", 200, int))
-    min_eval_samples: int               = field(default_factory=lambda: get("BENCHMARK_MIN_EVAL_SAMPLES", 10, int))
+    eval_sample_size: int               = field(default_factory=lambda: get("BENCHMARK_EVAL_SAMPLE_SIZE", 10, int))
+    min_eval_samples: int               = field(default_factory=lambda: get("BENCHMARK_MIN_EVAL_SAMPLES", 2, int))
     
     enable_calibration: bool            = field(default_factory=lambda: get("BENCHMARK_ENABLE_CALIBRATION", False, bool))
     human_calibration_size: int         = field(default_factory=lambda: get("BENCHMARK_CALIBRATION_SIZE", 200, int))

@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from lib.utils import DAPTConfig
+from lib.utils.checkpoint import find_latest_checkpoint, load_checkpoint
 from lib.s3_dapt.dataset import MemmapDataset
 from lib.s3_dapt.model_utils import load_model_and_tokenizer
 from lib.s3_dapt.evaluation.eval_runner import run_all_probes
@@ -73,6 +74,34 @@ def run_dapt_pipeline_impl(
     metrics_writer = MetricsWriter(cfg.logging.metrics_log_file)
     last_checkpoint_path_ref = [None]
     scaler, autocast_ctx = setup_mixed_precision(device)
+
+    if cfg.model.restart_from_checkpoint:
+        latest_ckpt = find_latest_checkpoint(cfg.model.checkpoint_dir)
+        if latest_ckpt:
+            logger.info(f"RESTART_TRAINING_FROM_CHECKPOINT is True. Resuming from checkpoint: {latest_ckpt}")
+            restored_state = load_checkpoint(
+                ckpt_path=latest_ckpt,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+            )
+            if restored_state:
+                state.update(restored_state)
+                # Keep perplexity_history reference synchronized
+                if "perplexity_history" in restored_state:
+                    state["ppl_history"] = state["perplexity_history"]
+                last_checkpoint_path_ref[0] = latest_ckpt
+                logger.info(
+                    f"Successfully restored checkpoint state: epoch={state.get('epoch', 0)}, "
+                    f"epoch_step={state.get('epoch_step', 0)}, "
+                    f"tokens_processed={state.get('tokens_processed', 0):,}, "
+                    f"global_step={state.get('global_step', 0)}"
+                )
+        else:
+            logger.warning(
+                f"RESTART_TRAINING_FROM_CHECKPOINT is True, but no existing checkpoints were found in {cfg.model.checkpoint_dir}. "
+                "Starting training from scratch on base model."
+            )
 
     run_baseline_eval(model, tokenizer, cfg, state, metrics_writer, device)
 
@@ -171,18 +200,26 @@ def load_dataloader(
 
 
 def init_state(resources: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    perplexity_history: List[float] = []
     state = {
         "tokens_processed" : 0,
         "last_eval_at"     : 0,
+        "last_slow_eval_at": 0,
         "eval_count"       : 0,
-        "perplexity_history" : [],
+        "global_step"      : 0,
+        "steps_completed"  : 0,
+        "epoch"            : 0,
+        "epoch_step"       : 0,
+        "perplexity_history" : perplexity_history,
+        "ppl_history"        : perplexity_history,
         "qa_acc_history"     : [],
         "cloze_cov_history"  : [],
         "concept_prec_history": [],
         "eval_history"       : [],
+        "eval_timestamps"    : [],
+        "tokens_history"     : [],
         "convergence_met"  : False,
         "last_checkpoint"  : None,
-        "steps_completed"  : 0,
     }
     if resources is not None:
         resources["state"] = state
@@ -213,6 +250,10 @@ def run_baseline_eval(
     metrics_writer: MetricsWriter,
     device: torch.device,
 ) -> None:
+    if state.get("eval_count", 0) > 0:
+        logger.info(f"Skipping baseline evaluation (resumed checkpoint already has {state['eval_count']} evaluations logged).")
+        return
+
     logger.info("Running baseline evaluation on the base model...")
     state["eval_count"] += 1
     state["last_eval_at"] = 0
@@ -246,8 +287,7 @@ def run_baseline_eval(
             )
         else:
             raise e
-            
-    state["eval_history"].append(metrics)
+
 
 
 def clear_gpu_cache() -> None:
@@ -274,14 +314,23 @@ def run_training_loop(
     model.train()
     logger.info("Starting pretraining loop...")
     optimizer.zero_grad()
-    step = 0
+    step = state.get("global_step", 0)
+    start_epoch = state.get("epoch", 0)
+    start_step_in_epoch = state.get("epoch_step", 0)
     decision = None
     gate_details = None
 
-    for epoch in range(cfg.corpus.max_corpus_passes):
+    for epoch in range(start_epoch, cfg.corpus.max_corpus_passes):
+        state["epoch"] = epoch
         logger.info(f"\n{'#'*60}\n  Corpus pass {epoch + 1}/{cfg.corpus.max_corpus_passes}\n{'#'*60}")
 
-        for batch in train_dataloader:
+        for batch_idx, batch in enumerate(train_dataloader):
+            # Skip batches if resuming mid-epoch
+            if epoch == start_epoch and batch_idx < start_step_in_epoch:
+                continue
+
+            state["epoch_step"] = batch_idx
+
             # Check hard cap
             if state["tokens_processed"] >= cfg.corpus.hard_stop_tokens:
                 logger.warning("Hard cap token count reached inside epoch loop. Breaking.")
@@ -303,6 +352,7 @@ def run_training_loop(
 
             step += 1
             state["steps_completed"] = step
+            state["global_step"] = step
 
             # Log to WandB at step intervals
             log_wandb_training(cfg, loss_val, optimizer, state)
@@ -318,6 +368,7 @@ def run_training_loop(
                 cfg=cfg,
                 state=state,
                 optimizer=optimizer,
+                scheduler=scheduler,
                 metrics_writer=metrics_writer,
                 device=device,
                 last_checkpoint_path_ref=last_checkpoint_path_ref,
@@ -338,7 +389,8 @@ def run_training_loop(
 
             model.train()
 
-        # End of epoch
+        # Reset start_step_in_epoch for subsequent epochs
+        start_step_in_epoch = 0
         logger.info(f"Completed corpus pass {epoch + 1}. Total tokens: {state['tokens_processed']/1e3:.2f}K")
 
     # 5. Final check if not converged by end of passes
@@ -348,6 +400,7 @@ def run_training_loop(
         cfg=cfg,
         state=state,
         optimizer=optimizer,
+        scheduler=scheduler,
         metrics_writer=metrics_writer,
         device=device,
         last_checkpoint_path_ref=last_checkpoint_path_ref,
@@ -557,6 +610,7 @@ def run_evaluation_cycle(
     metrics_writer: MetricsWriter,
     device: torch.device,
     last_checkpoint_path_ref: List[Optional[Path]],
+    scheduler: Optional[Any] = None,
 ) -> Tuple[Optional[DAPTDecision], Optional[Dict[str, Any]]]:
     try:
         decision, gate_details = handle_evaluation_cycle(
@@ -565,6 +619,7 @@ def run_evaluation_cycle(
             cfg=cfg,
             state=state,
             optimizer=optimizer,
+            scheduler=scheduler,
             metrics_writer=metrics_writer,
             device=device,
             last_checkpoint_path_ref=last_checkpoint_path_ref,
@@ -581,6 +636,7 @@ def run_evaluation_cycle(
                 cfg=cfg,
                 state=state,
                 optimizer=optimizer,
+                scheduler=scheduler,
                 metrics_writer=metrics_writer,
                 device=device,
                 last_checkpoint_path_ref=last_checkpoint_path_ref,
@@ -656,6 +712,7 @@ def handle_final_check(
     last_checkpoint_path_ref: List[Optional[Path]],
     last_decision: Optional[DAPTDecision],
     last_gate_details: Optional[Dict[str, Any]],
+    scheduler: Optional[Any] = None,
 ) -> None:
     logger.warning("Training loop exhausted without a convergence decision. Running final gate check.")
     output_dir = str(cfg.model.checkpoint_dir)
@@ -668,17 +725,19 @@ def handle_final_check(
             cfg=cfg,
             state=state,
             optimizer=optimizer,
+            scheduler=scheduler,
             metrics_writer=metrics_writer,
             device=device,
             last_checkpoint_path_ref=last_checkpoint_path_ref,
         )
 
+    best_ckpt = run_final_eval(model, tokenizer, cfg, state, metrics_writer, device)
+
+    # Save the reloaded best checkpoint to output_dir so output_dir always holds the best model
     os.makedirs(output_dir, exist_ok=True)
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
-    best_ckpt = run_final_eval(model, tokenizer, cfg, state, metrics_writer, device)
-    
     if decision == DAPTDecision.CONVERGED:
         logger.info(f"DAPT training finished. Selected best checkpoint: {best_ckpt}")
     else:

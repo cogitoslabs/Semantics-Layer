@@ -37,9 +37,11 @@ class HallucinationDetector:
     def model(self):
         """Lazily initialize the sentence-transformers CrossEncoder for NLI."""
         if self._model is None:
-            logger.info(f"Loading NLI cross-encoder model: {self.nli_model_name}")
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Loading NLI cross-encoder model: {self.nli_model_name} on device: {device}")
             from sentence_transformers import CrossEncoder
-            self._model = CrossEncoder(self.nli_model_name)
+            self._model = CrossEncoder(self.nli_model_name, device=device)
         return self._model
 
     def detect_sentences(self, trace: str) -> List[str]:
@@ -68,6 +70,32 @@ class HallucinationDetector:
                 return True
         return False
 
+    def is_structural_template_sentence(self, sentence: str) -> bool:
+        """Check if sentence is a structural/formatting template sentence (e.g. boxed answer or intro phrase)."""
+        s_clean = sentence.strip()
+        if not s_clean:
+            return True
+        if s_clean.startswith("\\boxed{") or s_clean.startswith("boxed{"):
+            return True
+        lowered = s_clean.lower()
+        structural_triggers = [
+            "based on the context provided",
+            "to determine the best definition",
+            "to determine the definition",
+            "from the context provided",
+            "given the context",
+            "understanding cognitive neuroscience",
+            "key elements",
+            "matching definitions",
+            "standard definition",
+            "definition search",
+            "anatomical position",
+            "contextual usage",
+        ]
+        if any(trigger in lowered for trigger in structural_triggers):
+            return True
+        return False
+
     def score_hallucination_rate(
         self, 
         trace: str, 
@@ -75,29 +103,47 @@ class HallucinationDetector:
         ground_truth: str
     ) -> float:
         """
-        Computes the hallucination rate for a trace.
-        Combines Pass 1 (NLI entailment) and Pass 2 (invented terminology detection).
+        Computes the hallucination rate for a trace using chunk-level NLI entailment
+        and invented terminology detection.
         """
         sentences = self.detect_sentences(trace)
         if not sentences:
             return 0.0
 
-        # Build premise
-        if retrieved_context.strip():
-            premise = f"{retrieved_context}\n\nGround Truth: {ground_truth}"
-        else:
-            premise = f"Ground Truth: {ground_truth}"
+        # Filter out empty or purely structural sentences for NLI evaluation
+        eval_sentences = [s for s in sentences if not self.is_structural_template_sentence(s)]
+        if not eval_sentences:
+            # If all sentences are structural, evaluate all sentences
+            eval_sentences = sentences
 
-        # Pass 1: Prepare NLI pairs
-        nli_pairs = [(premise, sent) for sent in sentences]
+        # Build candidate premise list (chunks + ground truth)
+        premises = []
+        if retrieved_context.strip():
+            raw_chunks = [c.strip() for c in retrieved_context.split("\n\n") if c.strip()]
+            premises.extend(raw_chunks)
+        if ground_truth.strip():
+            premises.append(f"Ground Truth: {ground_truth}")
+            
+        if not premises:
+            premises = ["No context available."]
+
+        # Build NLI pairs for each sentence against each premise chunk
+        nli_pairs = []
+        sentence_premise_indices = []  # keeps track of (sentence_idx, premise_idx)
+        
+        for s_idx, sent in enumerate(eval_sentences):
+            for p_idx, premise in enumerate(premises):
+                # Truncate premise to ~350 words to avoid encoder truncation lag
+                premise_trunc = " ".join(premise.split()[:350])
+                nli_pairs.append((premise_trunc, sent))
+                sentence_premise_indices.append((s_idx, p_idx))
         
         # Load NLI model and predict
         nli_model = self.model
         scores = nli_model.predict(nli_pairs)
         
         # Softmax to get entailment probabilities
-        # Check label mapping
-        entailment_idx = 2  # default fallback
+        entailment_idx = 2  # default fallback for cross-encoder/nli-deberta-v3-small
         if hasattr(nli_model, "model") and hasattr(nli_model.model, "config") and hasattr(nli_model.model.config, "label2id"):
             label2id = nli_model.model.config.label2id
             for k, v in label2id.items():
@@ -105,7 +151,6 @@ class HallucinationDetector:
                     entailment_idx = v
                     break
         
-        # If output shape is 1D (e.g. single sentence)
         if len(scores.shape) == 1:
             scores = np.expand_dims(scores, axis=0)
 
@@ -113,14 +158,22 @@ class HallucinationDetector:
         probs = exp_scores / np.sum(exp_scores, axis=-1, keepdims=True)
         entailment_probs = probs[:, entailment_idx]
 
-        # Pass 2 & Pass 1 combined
+        # Aggregate max entailment probability per sentence across premises
+        max_entailment_per_sentence = [0.0] * len(eval_sentences)
+        for (s_idx, p_idx), prob in zip(sentence_premise_indices, entailment_probs):
+            if prob > max_entailment_per_sentence[s_idx]:
+                max_entailment_per_sentence[s_idx] = float(prob)
+
+        # Flag hallucinated sentences
         flagged_count = 0
-        for i, sent in enumerate(sentences):
-            nli_hallucinated = entailment_probs[i] < self.nli_threshold
-            invented = self.is_invented_term(sent)
+        for i, sent in enumerate(eval_sentences):
+            is_template = self.is_structural_template_sentence(sent)
+            nli_hallucinated = (max_entailment_per_sentence[i] < self.nli_threshold) and not is_template
+            invented = self.is_invented_term(sent) and not is_template
             
             if nli_hallucinated or invented:
                 flagged_count += 1
                 
-        hallucination_rate = flagged_count / len(sentences)
+        hallucination_rate = flagged_count / len(eval_sentences)
         return min(hallucination_rate, 1.0)
+

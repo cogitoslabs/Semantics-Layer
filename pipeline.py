@@ -10,7 +10,7 @@ from lib.s4_rad_prep import run_rad_prep_pipeline
 from lib.s5_clustering import run_clustering_pipeline
 from lib.s6_teacher_benchmarking import run_teacher_benchmarking
 
-from lib.utils import PipelineConfig
+from lib.utils import PipelineConfig, setup_logger, get_logger
 
 
 if __name__ == "__main__":
@@ -28,37 +28,41 @@ if __name__ == "__main__":
         help="Sub-mode for step s4: index (chunk & index corpus), traces (generate traces), full (index and generate)"
     )
     args = parser.parse_args()
-    print(f"Args step are : {args.step}")
-    
     # Instantiate and validate configuration
     cfg = PipelineConfig()
     cfg.validate()
     cfg.ensure_dirs()
     
+    # Initialize pipeline logging
+    setup_logger("pipeline", cfg.logging)
+    logger = get_logger("pipeline")
+    
+    logger.info(f"Args step are : {args.step}")
+    
     if args.step == "s1" or args.step == "all":
-        print("Initializing corpus building pipeline using Docling parser")
+        logger.info("Initializing corpus building pipeline using Docling parser")
         run_corpus_builder(cfg)
-        print("Fetching general web corpus replay data...")
-        run_replay_corpus(cfg)
-        print("Merging extracted and replay corpora...")
-        run_merge_corpus(cfg)
     if args.step == "s2" or args.step == "all":
-        print("Initializing offline pre-tokenization step")
+        logger.info("Fetching general web corpus replay data...")
+        run_replay_corpus(cfg)
+        logger.info("Merging extracted and replay corpora...")
+        run_merge_corpus(cfg)
+        logger.info("Initializing offline pre-tokenization step")
         run_pretokenization(cfg)
     if args.step == "s3" or args.step == "all":
-        print("Initializing DAPT Continued Pretraining on model: {cfg.model.base_model_name}")
+        logger.info(f"Initializing DAPT Continued Pretraining on model: {cfg.model.base_model_name}")
         run_dapt_pipeline(cfg)
-        print("Running final inference on saved model and logging failed evaluations...")
+        logger.info("Running final inference on saved model and logging failed evaluations...")
         run_inference_and_log_failures(cfg)
     if args.step == "s4" or args.step == "all":
         rad_mode = getattr(args, "rad_mode", "full")
-        print(f"Initializing Retrieval-Augmented Distillation Preparation (RAD Prep) in mode: {rad_mode}")
+        logger.info(f"Initializing Retrieval-Augmented Distillation Preparation (RAD Prep) in mode: {rad_mode}")
         run_rad_prep_pipeline(cfg, rad_mode)
     if args.step == "s5" or args.step == "all":
-        print("Initializing Corpus Engineering & Micro-Clustering (Step 5)")
+        logger.info("Initializing Corpus Engineering & Micro-Clustering (Step 5)")
         run_clustering_pipeline(cfg)
     if args.step == "s6" or args.step == "all":
-        print("Initializing Teacher Benchmarking (Phase 2, Step 2.1)")
+        logger.info("Initializing Teacher Benchmarking (Phase 2, Step 2.1)")
         run_teacher_benchmarking(cfg)
 
 

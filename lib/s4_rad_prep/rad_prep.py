@@ -3,7 +3,7 @@ import logging
 import time
 from pathlib import Path
 
-from lib.utils import PipelineConfig
+from lib.utils import PipelineConfig, setup_logger
 from lib.s4_rad_prep.chunker import run_chunking
 from lib.s4_rad_prep.indexer import run_indexing
 from lib.s4_rad_prep.retriever import Retriever
@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
     """Orchestrate the Step 0.3 Retrieval-Augmented Distillation Preparation (RAD Prep) pipeline."""
+    # Guarantee pipeline.log is initialized and attached
+    setup_logger("lib", cfg.logging)
+    
     logger.info(f"Starting RAD Prep Pipeline in mode: {rad_mode}")
     cfg.ensure_dirs()
 
@@ -24,12 +27,19 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
     discarded_traces_path = logs_dir / "discarded_traces.jsonl"
     phase_manifest_path = logs_dir / "phase_manifest.json"
 
-    # Reset log files if we are starting a trace generation run
+    grounded_path = Path(cfg.rad.traces_dir) / "grounded_traces.jsonl"
+    no_ret_path = Path(cfg.rad.traces_dir) / "no_retrieval_traces.jsonl"
+
+    # Reset log and trace files if we are starting a trace generation run
     if rad_mode in ("full", "traces"):
         if no_retrieval_rates_path.exists():
             no_retrieval_rates_path.unlink()
         if discarded_traces_path.exists():
             discarded_traces_path.unlink()
+        if grounded_path.exists():
+            grounded_path.unlink()
+        if no_ret_path.exists():
+            no_ret_path.unlink()
 
     chunks = None
     if rad_mode in ("full", "index"):
@@ -71,27 +81,11 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
         generator = TraceGenerator(cfg)
 
         # Generate traces
-        generator.generate_traces(samples, retrieved_results, router)
-        router.flush_batch()
+        trace_counts = generator.generate_traces(samples, retrieved_results, router)
 
-        # Calculate statistics for validation gate
-        grounded_path = Path(cfg.rad.traces_dir) / "grounded_traces.jsonl"
-        no_ret_path = Path(cfg.rad.traces_dir) / "no_retrieval_traces.jsonl"
-
-        grounded_count = 0
-        if grounded_path.exists():
-            with open(grounded_path, "r", encoding="utf-8") as f:
-                grounded_count = sum(1 for line in f if line.strip())
-
-        no_ret_count = 0
-        if no_ret_path.exists():
-            with open(no_ret_path, "r", encoding="utf-8") as f:
-                no_ret_count = sum(1 for line in f if line.strip())
-
-        discarded_count = 0
-        if discarded_traces_path.exists():
-            with open(discarded_traces_path, "r", encoding="utf-8") as f:
-                discarded_count = sum(1 for line in f if line.strip())
+        grounded_count = trace_counts["grounded_count"]
+        no_ret_count = trace_counts["no_retrieval_count"]
+        discarded_count = trace_counts["discarded_count"]
 
         total_attempted = grounded_count + no_ret_count + discarded_count
         discarded_rate = discarded_count / total_attempted if total_attempted > 0 else 0.0
@@ -99,7 +93,8 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
         router_stats = router.get_aggregate_stats()
 
         # Check validation gates
-        passed_min_traces = grounded_count >= cfg.rad.min_traces
+        target_min_traces = min(cfg.rad.min_traces, int(0.95 * total_attempted)) if total_attempted > 0 else cfg.rad.min_traces
+        passed_min_traces = grounded_count >= target_min_traces
 
         cluster_no_retrieval_rates = router_stats.get("by_cluster", {})
         passed_cluster_no_ret = True
@@ -124,17 +119,31 @@ def run_rad_prep_pipeline(cfg: PipelineConfig, rad_mode: str = "full") -> None:
                 "discarded_trace_count": discarded_count,
                 "total_attempted": total_attempted,
                 "discarded_rate": discarded_rate,
-                "no_retrieval_stats": router_stats
+                "no_retrieval_stats": router_stats,
             },
             "gates": {
                 "passed_min_traces": passed_min_traces,
                 "passed_cluster_no_ret": passed_cluster_no_ret,
-                "passed_discarded_rate": passed_discarded_rate
-            }
+                "passed_discarded_rate": passed_discarded_rate,
+            },
         }
 
         logger.info(f"Writing phase manifest to {phase_manifest_path}")
         with open(phase_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
-        logger.info(f"RAD Prep pipeline completed trace generation. Status: {status}")
+        # Print formatted summary block to console and pipeline.log
+        logger.info(
+            f"\n"
+            f"================================================================\n"
+            f"  Step 0.3 (RAD Prep) Execution Summary\n"
+            f"================================================================\n"
+            f"  Overall Status          : {status.upper()}\n"
+            f"  Grounded Traces         : {grounded_count} (Gate: >= {target_min_traces} -> {'PASS' if passed_min_traces else 'INCOMPLETE'})\n"
+            f"  No-Retrieval Traces     : {no_ret_count} ({router_stats.get('overall_rate', 0.0):.1%} overall, Gate <= 30% -> {'PASS' if passed_cluster_no_ret else 'WARN'})\n"
+            f"  Discarded Traces        : {discarded_count} ({discarded_rate:.1%} rate, Gate <= 20% -> {'PASS' if passed_discarded_rate else 'WARN'})\n"
+            f"  Total Attempted Samples : {total_attempted}\n"
+            f"  Manifest Output Path    : {phase_manifest_path}\n"
+            f"================================================================\n"
+        )
+

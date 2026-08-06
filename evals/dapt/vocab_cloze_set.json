@@ -1,576 +1,576 @@
 [
   {
-    "prompt": "An approach that aims to understand human cognition by the study of behaviour; a broader definition also includes the study of brain activity and structure . ___",
+    "prompt": "An approach that aims to understand human cognition by the study of behaviour; a broader definition also includes the study of brain activity and structure. ___",
     "target_term": "psychology",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An approach that aims to understand human cognition by combining information from behaviour and the brain . ___",
+    "prompt": "An approach that aims to understand human cognition by combining information from behaviour and the brain. ___",
     "target_term": "neuroscience",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A groove or furrow in the surface of the brain . ___",
+    "prompt": "A groove or furrow in the surface of the brain. ___",
     "target_term": "Sulcus",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Prominent elevated areas or ridges on the brain ’ s surface ( “ gyrus ” is the singular) . ___",
+    "prompt": "Prominent elevated areas or ridges on the brain's surface (“gyrus” is the singular). ___",
     "target_term": "Gyri",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Superior , or towards the top of the brain . ___",
+    "prompt": "Superior, or towards the top of the brain. ___",
     "target_term": "Dorsal",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Inferior , or towards the bottom of the brain . ___",
+    "prompt": "Inferior, or towards the bottom of the brain. ___",
     "target_term": "Ventral",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Anterior , or towards the front of the brain . ___",
+    "prompt": "Anterior, or towards the front of the brain. ___",
     "target_term": "Rostral",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Towards the back of the brain . ___",
+    "prompt": "Towards the back of the brain. ___",
     "target_term": "Posterior",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Situated at the side of the brain . ___",
+    "prompt": "Situated at the side of the brain. ___",
     "target_term": "Lateral",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Situated in the middle of the brain . ___",
+    "prompt": "Situated in the middle of the brain. ___",
     "target_term": "Medial",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Structural alterations within the brain caused by disease or injury . ___",
+    "prompt": "Structural alterations within the brain caused by disease or injury. ___",
     "target_term": "Lesions",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "This involves constructing computer programs that simulate or mimic human cognitive processes . ___",
+    "prompt": "This involves constructing computer programs that simulate or mimic human cognitive processes. ___",
     "target_term": "modelling",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "This involves developing computer programs that produce intelligent outcomes . ___",
+    "prompt": "This involves developing computer programs that produce intelligent outcomes. ___",
     "target_term": "intelligence",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Models in computational cognitive science consisting of interconnected networks of simple units; the networks exhibit learning through experience and specific items of knowledge are distributed across numerous units . ___",
+    "prompt": "Models in computational cognitive science consisting of interconnected networks of simple units; the networks exhibit learning through experience and specific items of knowledge are distributed across numerous units. ___",
     "target_term": "models",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A deficiency in colour vision in which one of the three cone classes is missing . ___",
+    "prompt": "A deficiency in colour vision in which one of the three cone classes is missing. ___",
     "target_term": "Dichromacy",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The illusory perception of the complementary colour to the one that has just been fixated; green is the complementary colour to red and blue is complementary to yellow . ___",
+    "prompt": "The illusory perception of the complementary colour to the one that has just been fixated; green is the complementary colour to red and blue is complementary to yellow. ___",
     "target_term": "afterimage",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The tendency for an object to be perceived as having the same colour under widely varying viewing conditions . ___",
+    "prompt": "The tendency for an object to be perceived as having the same colour under widely varying viewing conditions. ___",
     "target_term": "constancy",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A source of light illuminating a surface or object . ___",
+    "prompt": "A source of light illuminating a surface or object. ___",
     "target_term": "Illuminant",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The rate of change of texture density from the front to the back of a slanting object . ___",
+    "prompt": "The rate of change of texture density from the front to the back of a slanting object. ___",
     "target_term": "gradient",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Objects are perceived to have a given size regardless of the size of the retinal image . ___",
+    "prompt": "Objects are perceived to have a given size regardless of the size of the retinal image. ___",
     "target_term": "constancy",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An illusion in which misperception of one ’ s own bodily size causes the perceived size of objects to be misjudged . ___",
+    "prompt": "An illusion in which misperception of one's own bodily size causes the perceived size of objects to be misjudged. ___",
     "target_term": "effect",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The perceptual organisation of the visual field into a figure (object of central interest) and a ground (less important background) . ___",
+    "prompt": "The perceptual organisation of the visual field into a figure (object of central interest) and a ground (less important background). ___",
     "target_term": "segregation",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The notion that adjacent regions in the visual environment having uniform visual properties (e . g . , colour) are perceived as a single perceptual unit . ___",
+    "prompt": "The notion that adjacent regions in the visual environment having uniform visual properties (e.g., colour) are perceived as a single perceptual unit. ___",
     "target_term": "connectedness",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "More evidence suggesting faces are processed holistically was reported by Richler et al . (2011) using composite faces . Composite faces consist of a top half and a bottom half which may or may not be of the same face . The participants decided whether the top halves of two successive composite faces were the same or different . Performance was worse when the bottom halves of the two composite faces were different . This composite face effect suggests that people are unable to ignore the bottom halves and thus that processing of the composite faces is holistic . ___",
+    "prompt": "More evidence suggesting faces are processed holistically was reported by Richler et al. (2011) using composite faces. Composite faces consist of a top half and a bottom half which may or may not be of the same face. The participants decided whether the top halves of two successive composite faces were the same or different. Performance was worse when the bottom halves of the two composite faces were different. This composite face effect suggests that people are unable to ignore the bottom halves and thus that processing of the composite faces is holistic. ___",
     "target_term": "illusion",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An ___ that is associated with face processing; the term is somewhat misleading given that the ___ is also associated with processing other categories of objects .",
+    "prompt": "An ___ that is associated with face processing; the term is somewhat misleading given that the ___ is also associated with processing other categories of objects.",
     "target_term": "area",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Representations (e . g . , visual images) resembling pictures in that objects within them are organised spatially . ___",
+    "prompt": "Representations (e.g., visual images) resembling pictures in that objects within them are organised spatially. ___",
     "target_term": "representations",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Within Kosslyn ' s theory , a short -term visual memory store . ___",
+    "prompt": "Within Kosslyn's theory, a short-term visual memory store. ___",
     "target_term": "buffer",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "When two different visual stimuli are presented one to each eye , only one stimulus is seen; the seen stimulus alternates over time . ___",
+    "prompt": "When two different visual stimuli are presented one to each eye, only one stimulus is seen; the seen stimulus alternates over time. ___",
     "target_term": "rivalry",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The changing patterns of light on the retina produced by movement of the observer relative to the environment as well as by eye and head movements . ___",
+    "prompt": "The changing patterns of light on the retina produced by movement of the observer relative to the environment as well as by eye and head movements. ___",
     "target_term": "field",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An internal ___ of a motor command (e . g . , to the eyes); it can be used to compare actual with desired movement .",
+    "prompt": "An internal ___ of a motor command (e.g., to the eyes); it can be used to compare actual with desired movement.",
     "target_term": "copy",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Neurons that respond to actions whether performed by oneself or someone else; it is claimed these neurons assist in imitating and understanding others ’ actions . ___",
+    "prompt": "Neurons that respond to actions whether performed by oneself or someone else; it is claimed these neurons assist in imitating and understanding others'actions. ___",
     "target_term": "system",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Failure to detect various changes (e . g . , in objects) in the visual environment . ___",
+    "prompt": "Failure to detect various changes (e.g., in objects) in the visual environment. ___",
     "target_term": "blindness",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Failure to detect an unexpected object appearing in the visual environment . ___",
+    "prompt": "Failure to detect an unexpected object appearing in the visual environment. ___",
     "target_term": "blindness",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A situation in which individuals try to attend to only one source of information while ignoring other stimuli; also known as selective ___ .",
+    "prompt": "A situation in which individuals try to attend to only one source of information while ignoring other stimuli; also known as selective ___.",
     "target_term": "attention",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A situation in which two tasks are performed at the same time; also known as multitasking . ___",
+    "prompt": "A situation in which two tasks are performed at the same time; also known as multitasking. ___",
     "target_term": "attention",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The difficulties involved in attending to one voice when two or more people are speaking at the same time . ___",
+    "prompt": "The difficulties involved in attending to one voice when two or more people are speaking at the same time. ___",
     "target_term": "problem",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Suppose we present participants with two streams of lights (as was done by Eimer and Schröger (1998)) , with one stream of lights being presented to the left and the other to the right . At the same time , we also present participants with two streams of sounds (one to each side) . In one condition , participants detect deviant visual events (e . g . , longer than usual stimuli) presented to one side only . In the other condition , participants detect deviant auditory events in only one stream . ___",
+    "prompt": "Suppose we present participants with two streams of lights (as was done by Eimer and Schröger (1998)), with one stream of lights being presented to the left and the other to the right. At the same time, we also present participants with two streams of sounds (one to each side). In one condition, participants detect deviant visual events (e.g., longer than usual stimuli) presented to one side only. In the other condition, participants detect deviant auditory events in only one stream. ___",
     "target_term": "attention",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Attention to a given spatial location determined by \" automatic \" processes . ___",
+    "prompt": "Attention to a given spatial location determined by \" automatic \" processes. ___",
     "target_term": "attention",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Attention to a stimulus controlled by intentions or goal-directed mechanisms . ___",
+    "prompt": "Attention to a stimulus controlled by intentions or goal-directed mechanisms. ___",
     "target_term": "attention",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The slowing of the response to the second of two stimuli when presented close together in time . ___",
+    "prompt": "The slowing of the response to the second of two stimuli when presented close together in time. ___",
     "target_term": "effect",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Stored units formed from integrating smaller pieces of information . ___",
+    "prompt": "Stored units formed from integrating smaller pieces of information. ___",
     "target_term": "Chunks",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A modality-free , limited capacity , component of working memory . ___",
+    "prompt": "A modality-free, limited capacity, component of working memory. ___",
     "target_term": "executive",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A component of working memory in which speech-based information is processed and stored and subvocal articulation occurs . ___",
+    "prompt": "A component of working memory in which speech-based information is processed and stored and subvocal articulation occurs. ___",
     "target_term": "loop",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A component of working memory used to process visual and spatial information and to store this information briefly . ___",
+    "prompt": "A component of working memory used to process visual and spatial information and to store this information briefly. ___",
     "target_term": "sketchpad",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A component of working memory; it is essentially passive and stores integrated information briefly . ___",
+    "prompt": "A component of working memory; it is essentially passive and stores integrated information briefly. ___",
     "target_term": "buffer",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Rapid repetition of a simple sound (e . g . , “ the the the ” ) , w hich uses the articulatory control process of the phonological loop . ___",
+    "prompt": "Rapid repetition of a simple sound (e.g., “the the the”), w hich uses the articulatory control process of the phonological loop. ___",
     "target_term": "suppression",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A ___ on which participants have to name the ink colours in which colour words are printed; performance is slowed when the to-be-named colour (e . g . , green) conflicts with the colour word (e . g . , RED) .",
+    "prompt": "A ___ on which participants have to name the ink colours in which colour words are printed; performance is slowed when the to-be-named colour (e.g., green) conflicts with the colour word (e.g., RED).",
     "target_term": "task",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An assessment of how much information can be processed and stored at the same time; individuals with high ___ have higher intelligence and more attentional control .",
+    "prompt": "An assessment of how much information can be processed and stored at the same time; individuals with high ___ have higher intelligence and more attentional control.",
     "target_term": "capacity",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The largest number of sentences read for comprehension from which an individual can recall all the final words over 50% of the time . ___",
+    "prompt": "The largest number of sentences read for comprehension from which an individual can recall all the final words over 50% of the time. ___",
     "target_term": "span",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The maximum number of items (arithmetical questions + words) for which an individual can recall all the words more than 50% of the time . ___",
+    "prompt": "The maximum number of items (arithmetical questions + words) for which an individual can recall all the words more than 50% of the time. ___",
     "target_term": "span",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The ability to use knowledge , skills and experience . ___",
+    "prompt": "The ability to use knowledge, skills and experience. ___",
     "target_term": "intelligence",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Learning complex information without conscious awareness of what has been learned . ___",
+    "prompt": "Learning complex information without conscious awareness of what has been learned. ___",
     "target_term": "learning",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "On learning tasks , participants try to guess the next stimulus (inclusion condition) or avoid guessing the next stimulus accurately (exclusion condition); the difference between the two conditions indicates the amount of explicit learning . ___",
+    "prompt": "On learning tasks, participants try to guess the next stimulus (inclusion condition) or avoid guessing the next stimulus accurately (exclusion condition); the difference between the two conditions indicates the amount of explicit learning. ___",
     "target_term": "procedure",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "It forms part of the basal ganglia and is located in the upper part of the brainstem and the inferior part of the cerebral hemispheres . ___",
+    "prompt": "It forms part of the basal ganglia and is located in the upper part of the brainstem and the inferior part of the cerebral hemispheres. ___",
     "target_term": "Striatum",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A progressive disorder involving damage to the basal ganglia; the symptoms include muscle rigidity , limb tremor and mask -like facial expression . ___",
+    "prompt": "A progressive disorder involving damage to the basal ganglia; the symptoms include muscle rigidity, limb tremor and mask-like facial expression. ___",
     "target_term": "disease",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Reduced long-term memory caused by instructions to forget information that had been presented for learning . ___",
+    "prompt": "Reduced long-term memory caused by instructions to forget information that had been presented for learning. ___",
     "target_term": "forgetting",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A condition caused by brain damage in which there is severe impairment of long-term memory . ___",
+    "prompt": "A condition caused by brain damage in which there is severe impairment of long-term memory. ___",
     "target_term": "Amnesia",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Disorders caused by brain damage in which semantic memory is disrupted for certain semantic categories . ___",
+    "prompt": "Disorders caused by brain damage in which semantic memory is disrupted for certain semantic categories. ___",
     "target_term": "deficits",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Vivid and detailed ___ of dramatic events (e . g . , 9/11) .",
+    "prompt": "Vivid and detailed ___ of dramatic events (e.g., 9/11).",
     "target_term": "memories",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An exceptional ability to remember the events of one ’ s own life . ___",
+    "prompt": "An exceptional ability to remember the events of one's own life. ___",
     "target_term": "syndrome",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A tendency for eyewitness memory to be distorted by the eyewitness ' s prior expectations . ___",
+    "prompt": "A tendency for eyewitness memory to be distorted by the eyewitness's prior expectations. ___",
     "target_term": "bias",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Participants presented with a string of letters decide rapidly whether it forms a word . ___",
+    "prompt": "Participants presented with a string of letters decide rapidly whether it forms a word. ___",
     "target_term": "task",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A target letter is more readily detected in a letter string when the string forms a word than when it does not . ___",
+    "prompt": "A target letter is more readily detected in a letter string when the string forms a word than when it does not. ___",
     "target_term": "effect",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "With reference to a target word , the number of words that can be formed by changing one of its letters . ___",
+    "prompt": "With reference to a target word, the number of words that can be formed by changing one of its letters. ___",
     "target_term": "neighbours",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The finding that word recognition is facilitated by the prior presentation of a semantically related word . ___",
+    "prompt": "The finding that word recognition is facilitated by the prior presentation of a semantically related word. ___",
     "target_term": "priming",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Rapid eye movements separated by eye fixations lasting about 250 milliseconds . ___",
+    "prompt": "Rapid eye movements separated by eye fixations lasting about 250 milliseconds. ___",
     "target_term": "Saccades",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A sound intermediate between two phonemes is perceived as being one or other of the phonemes . ___",
+    "prompt": "A sound intermediate between two phonemes is perceived as being one or other of the phonemes. ___",
     "target_term": "perception",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A word (especially pronoun) whose referent is a previously mentioned noun or noun phrase . ___",
+    "prompt": "A word (especially pronoun) whose referent is a previously mentioned noun or noun phrase. ___",
     "target_term": "Anaphor",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Abstract words possessing syntactic and semantic features but not phonological ones . ___",
+    "prompt": "Abstract words possessing syntactic and semantic features but not phonological ones. ___",
     "target_term": "Lemmas",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The process of translating a word ’ s meaning into its sound representation during speech production . ___",
+    "prompt": "The process of translating a word's meaning into its sound representation during speech production. ___",
     "target_term": "Lexicalisation",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Severe problems in the comprehension and/or production of language caused by brain damage . ___",
+    "prompt": "Severe problems in the comprehension and/or production of language caused by brain damage. ___",
     "target_term": "Aphasia",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A form of ___ involving non-fluent speech and grammatical errors .",
+    "prompt": "A form of ___ involving non-fluent speech and grammatical errors.",
     "target_term": "aphasia",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A form of ___ involving fluent speech with many content words missing and impaired comprehension .",
+    "prompt": "A form of ___ involving fluent speech with many content words missing and impaired comprehension.",
     "target_term": "aphasia",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A condition caused by brain damage in which there is an impaired ability to name objects . ___",
+    "prompt": "A condition caused by brain damage in which there is an impaired ability to name objects. ___",
     "target_term": "Anomia",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A store in which graphemic information about the individual letters in a word is held immediately prior to spelling the word . ___",
+    "prompt": "A store in which graphemic information about the individual letters in a word is held immediately prior to spelling the word. ___",
     "target_term": "buffer",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A condition caused by brain damage in which familiar words can be spelled reasonably well but non-words cannot . ___",
+    "prompt": "A condition caused by brain damage in which familiar words can be spelled reasonably well but non-words cannot. ___",
     "target_term": "dysgraphia",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A condition caused by brain damage in which there is poor spelling of irregular words , reasonable spelling of regular words and some success in spelling non-words . ___",
+    "prompt": "A condition caused by brain damage in which there is poor spelling of irregular words, reasonable spelling of regular words and some success in spelling non-words. ___",
     "target_term": "dysgraphia",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A stage of problem solving in which the problem is put to one side for some time; it is claimed to facilitate problem solving . ___",
+    "prompt": "A stage of problem solving in which the problem is put to one side for some time; it is claimed to facilitate problem solving. ___",
     "target_term": "Incubation",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The inflexible focus on the usual function(s) of an object in problem solving . ___",
+    "prompt": "The inflexible focus on the usual function(s) of an object in problem solving. ___",
     "target_term": "fixedness",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The tendency to use a familiar problem-solving strategy that has proved successful in the past even when it is not appropriate . ___",
+    "prompt": "The tendency to use a familiar problem-solving strategy that has proved successful in the past even when it is not appropriate. ___",
     "target_term": "set",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An abstract description of all the possible states that can occur within a given problem . ___",
+    "prompt": "An abstract description of all the possible states that can occur within a given problem. ___",
     "target_term": "space",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Rules of thumb that are cognitively undemanding and often produce approximately accurate answers . ___",
+    "prompt": "Rules of thumb that are cognitively undemanding and often produce approximately accurate answers. ___",
     "target_term": "Heuristics",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A computational procedure providing a specified set of steps to problem solution . ___",
+    "prompt": "A computational procedure providing a specified set of steps to problem solution. ___",
     "target_term": "Algorithm",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A heuristic method for solving problems based on creating a subgoal to reduce the difference between the current state and the goal state . ___",
+    "prompt": "A heuristic method for solving problems based on creating a subgoal to reduce the difference between the current state and the goal state. ___",
     "target_term": "analysis",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A simple heuristic used by problem solvers in which they focus on making moves that will apparently put them closer to the goal . ___",
+    "prompt": "A simple heuristic used by problem solvers in which they focus on making moves that will apparently put them closer to the goal. ___",
     "target_term": "climbing",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A heuristic or rule of thumb in which slow progress towards problem solution triggers a change of strategy . ___",
+    "prompt": "A heuristic or rule of thumb in which slow progress towards problem solution triggers a change of strategy. ___",
     "target_term": "monitoring",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Someone who is economical with their time and effort when performing a thinking task . ___",
+    "prompt": "Someone who is economical with their time and effort when performing a thinking task. ___",
     "target_term": "miser",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "This form of ___ involves the learner being provided with informative feedback and having the chance to correct his/her errors .",
+    "prompt": "This form of ___ involves the learner being provided with informative feedback and having the chance to correct his/her errors.",
     "target_term": "practice",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Used by experts to store relevant information rapidly in long-term ___ and to access it through retrieval cues in working ___ .",
+    "prompt": "Used by experts to store relevant information rapidly in long-term ___ and to access it through retrieval cues in working ___.",
     "target_term": "memory",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "An assessment of the probability of a given event occurred based on incomplete information . ___",
+    "prompt": "An assessment of the probability of a given event occurred based on incomplete information. ___",
     "target_term": "Judgement",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Making a selection from various options; if full information is unavailable , judgement is required . ___",
+    "prompt": "Making a selection from various options; if full information is unavailable, judgement is required. ___",
     "target_term": "making",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The relative frequency of an event within a given population . ___",
+    "prompt": "The relative frequency of an event within a given population. ___",
     "target_term": "information",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The assumption that an object or individual belongs to a specified category because it is representative (typical) of that category . ___",
+    "prompt": "The assumption that an object or individual belongs to a specified category because it is representative (typical) of that category. ___",
     "target_term": "heuristic",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The mistaken assumption that the probability of a conjunction of two events is greater than the probability of one of them . ___",
+    "prompt": "The mistaken assumption that the probability of a conjunction of two events is greater than the probability of one of them. ___",
     "target_term": "fallacy",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The rule of thumb that the frequencies of events can be estimated accurately by the subjective ease with which they can be retrieved . ___",
+    "prompt": "The rule of thumb that the frequencies of events can be estimated accurately by the subjective ease with which they can be retrieved. ___",
     "target_term": "heuristic",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Using one ’ s emotional responses to influence rapid judgements or decisions . ___",
+    "prompt": "Using one's emotional responses to influence rapid judgements or decisions. ___",
     "target_term": "heuristic",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Using the knowledge that only one out of two objects is recognised as the basis for making a judgement . ___",
+    "prompt": "Using the knowledge that only one out of two objects is recognised as the basis for making a judgement. ___",
     "target_term": "heuristic",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The rule of thumb that only customers who have purchased goods fairly recently remain active customers . ___",
+    "prompt": "The rule of thumb that only customers who have purchased goods fairly recently remain active customers. ___",
     "target_term": "heuristic",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The greater sensitivity to potential losses than potential gains shown by most people engaged in decision making . ___",
+    "prompt": "The greater sensitivity to potential losses than potential gains shown by most people engaged in decision making. ___",
     "target_term": "aversion",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The finding that decisions can be influenced by situational aspects (e . g . , problem wording) irrelevant to good decision making . ___",
+    "prompt": "The finding that decisions can be influenced by situational aspects (e.g., problem wording) irrelevant to good decision making. ___",
     "target_term": "effect",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A ___ed preference for risking harm through inaction compared to risking harm through action .",
+    "prompt": "A ___ed preference for risking harm through inaction compared to risking harm through action.",
     "target_term": "bias",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A rule of thumb used by scientists in which unexpected findings are used to develop new hypotheses and lines of research . ___",
+    "prompt": "A rule of thumb used by scientists in which unexpected findings are used to develop new hypotheses and lines of research. ___",
     "target_term": "heuristic",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The tendency on the Wason selection task to select cards matching the items explicitly mentioned in the rule . ___",
+    "prompt": "The tendency on the Wason selection task to select cards matching the items explicitly mentioned in the rule. ___",
     "target_term": "bias",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "In informal reasoning , the tendency to evaluate statements in terms of one ' s own beliefs or to generate reasons or arguments supporting those beliefs . ___",
+    "prompt": "In informal reasoning, the tendency to evaluate statements in terms of one's own beliefs or to generate reasons or arguments supporting those beliefs. ___",
     "target_term": "bias",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The claim that an innocuous first step will lead to an undesirable outcome; sometimes regarded as a fallacy . ___",
+    "prompt": "The claim that an innocuous first step will lead to an undesirable outcome; sometimes regarded as a fallacy. ___",
     "target_term": "argument",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Non - verbal reasoning ability applied to novel problems . ___",
+    "prompt": "Non-verbal reasoning ability applied to novel problems. ___",
     "target_term": "intelligence",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "A part of the brain strongly associated with several emotions including fear; it is located towards the front of the temporal lobe . ___",
+    "prompt": "A part of the brain strongly associated with several emotions including fear; it is located towards the front of the temporal lobe. ___",
     "target_term": "Amygdala",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "The ability of brain-damaged patients to discriminate among different emotional stimuli in spite of the absence of conscious perception . ___",
+    "prompt": "The ability of brain-damaged patients to discriminate among different emotional stimuli in spite of the absence of conscious perception. ___",
     "target_term": "blindsight",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Support for the “ do - it - yourself principle ” was obtained by Eich and Metcalfe (1989) . At learning , participants were assigned to read (e . g . , river - valley) or generate (e . g . , river - v \\_\\_\\_\\_ ) conditions . In the generate condition , they completed the second word in each pair during learning and so engaged in effortful processing . The mood - state - dependent effect was four times greater in the generate condition . ___",
+    "prompt": "Support for the “do-it-yourself principle” was obtained by Eich and Metcalfe (1989). At learning, participants were assigned to read (e.g., river-valley) or generate (e.g., river - v \\_\\_\\_\\_) conditions. In the generate condition, they completed the second word in each pair during learning and so engaged in effortful processing. The mood-state-dependent effect was four times greater in the generate condition. ___",
     "target_term": "memory",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Sensitivity to bodily stimuli at the conscious or non-conscious level . ___",
+    "prompt": "Sensitivity to bodily stimuli at the conscious or non-conscious level. ___",
     "target_term": "Interoception",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Judgements based on moral rules and/or obligations when resolving moral dilemmas . ___",
+    "prompt": "Judgements based on moral rules and/or obligations when resolving moral dilemmas. ___",
     "target_term": "judgements",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Judgements based on practical and pragmatic considerations when resolving moral dilemmas . ___",
+    "prompt": "Judgements based on practical and pragmatic considerations when resolving moral dilemmas. ___",
     "target_term": "judgements",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Training typically designed to reduce attentional bias and/or interpretive bias . ___",
+    "prompt": "Training typically designed to reduce attentional bias and/or interpretive bias. ___",
     "target_term": "modification",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Word having a single spelling but two or more different meanings (e . g . , bank , patient) . ___",
+    "prompt": "Word having a single spelling but two or more different meanings (e.g., bank, patient). ___",
     "target_term": "Homograph",
     "category": "cognitive_psychology"
   },
   {
-    "prompt": "Complex , goal-directed hand movements that the patient does not initiate voluntarily and cannot interpret . ___",
+    "prompt": "Complex, goal-directed hand movements that the patient does not initiate voluntarily and cannot interpret. ___",
     "target_term": "syndrome",
     "category": "cognitive_psychology"
   }

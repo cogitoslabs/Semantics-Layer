@@ -13,6 +13,13 @@ from typing import Any, Dict, Optional
 from .config import LoggingConfig
 
 
+class AutoFlushingFileHandler(logging.FileHandler):
+    """FileHandler that automatically flushes log entries to disk immediately after each write."""
+    def emit(self, record: logging.LogRecord) -> None:
+        super().emit(record)
+        self.flush()
+
+
 def setup_logger(
     name: str,
     cfg: LoggingConfig,
@@ -47,7 +54,7 @@ def setup_logger(
             ch_p.setFormatter(formatter)
             parent_logger.addHandler(ch_p)
 
-            fh_p = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+            fh_p = AutoFlushingFileHandler(log_file, mode="a", encoding="utf-8")
             fh_p.setLevel(numeric_level)
             fh_p.setFormatter(formatter)
             parent_logger.addHandler(fh_p)
@@ -72,7 +79,7 @@ def setup_logger(
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
-        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+        fh = AutoFlushingFileHandler(log_file, mode="a", encoding="utf-8")
         fh.setLevel(numeric_level)
         fh.setFormatter(formatter)
         logger.addHandler(fh)
@@ -83,6 +90,31 @@ def setup_logger(
 def get_logger(name: str = "dapt.convergence") -> logging.Logger:
     """Retrieve an already-configured logger by name."""
     return logging.getLogger(name)
+
+
+def flush_loggers() -> None:
+    """Flush all file handlers attached to 'dapt', 'lib', 'pipeline' and root loggers."""
+    for logger_name in ["dapt", "lib", "pipeline", ""]:
+        l = logging.getLogger(logger_name)
+        for h in l.handlers:
+            try:
+                h.flush()
+            except Exception:
+                pass
+
+
+def close_loggers() -> None:
+    """Close and remove all file handlers attached to 'dapt', 'lib', 'pipeline' and root loggers."""
+    flush_loggers()
+    for logger_name in ["dapt", "lib", "pipeline", ""]:
+        l = logging.getLogger(logger_name)
+        handlers_to_remove = []
+        for h in l.handlers:
+            if isinstance(h, logging.FileHandler):
+                h.close()
+                handlers_to_remove.append(h)
+        for h in handlers_to_remove:
+            l.removeHandler(h)
 
 
 class MetricsWriter:

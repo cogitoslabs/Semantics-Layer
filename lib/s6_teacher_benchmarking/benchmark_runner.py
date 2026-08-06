@@ -54,7 +54,8 @@ def build_benchmark_prompt(question: str, ground_truth: str, retrieved_context: 
     else:
         return (
             "[SYSTEM]: You are a neuroscientist. Reason step-by-step using the provided context. "
-            "Cite specific passages where applicable. Wrap your final answer inside \\boxed{}.\n\n"
+            "Annotate key statements with bracketed passage citations matching the provided context (e.g. [Context 1] or [Passage 1]). "
+            "Wrap your final answer inside \\boxed{}.\n\n"
             f"[CONTEXT]: {retrieved_context}\n"
             f"[QUESTION]: {question}\n"
             f"[GROUND TRUTH]: {ground_truth}"
