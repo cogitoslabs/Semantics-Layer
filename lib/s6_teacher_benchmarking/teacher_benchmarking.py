@@ -4,7 +4,7 @@ from typing import Dict, List, Any, Optional
 from lib.utils import PipelineConfig, setup_logger, flush_loggers
 from lib.s6_teacher_benchmarking.eval_sampler import run_eval_sampling
 from lib.s6_teacher_benchmarking.benchmark_runner import run_benchmark_generation_and_scoring
-from lib.s6_teacher_benchmarking.reasoning_judge import run_cohen_kappa_evaluation
+from lib.s6_teacher_benchmarking.metric_eval_judge import run_cohen_kappa_evaluation
 from lib.s6_teacher_benchmarking.benchmark_reporter import run_benchmark_reporting
 
 logger = logging.getLogger(__name__)

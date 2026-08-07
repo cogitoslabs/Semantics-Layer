@@ -8,10 +8,8 @@ from transformers import AutoTokenizer
 
 from lib.utils import PipelineConfig
 from lib.s6_teacher_benchmarking.eval_sampler import EvalSample
-from lib.s6_teacher_benchmarking.answer_accuracy import score_answer_accuracy
-from lib.s6_teacher_benchmarking.citation_accuracy import score_citation_accuracy
-from lib.s6_teacher_benchmarking.hallucination_detector import HallucinationDetector
-from lib.s6_teacher_benchmarking.reasoning_judge import ReasoningJudge
+from lib.s6_teacher_benchmarking.metric_eval_judge import MetricEvalJudge
+from lib.s6_teacher_benchmarking.failure_logger import BenchmarkFailureLogger
 
 logger = logging.getLogger(__name__)
 
@@ -46,39 +44,32 @@ def build_benchmark_prompt(question: str, ground_truth: str, retrieved_context: 
     """Format prompt for the candidate teacher model."""
     if no_retrieval:
         return (
-            "[SYSTEM]: You are a neuroscientist. Reason step-by-step using only your knowledge. "
-            "Wrap your final answer inside \\boxed{}.\n\n"
+            "[SYSTEM]: You are an expert neuroscientist. Answer the question using step-by-step reasoning.\n\n"
+            "INSTRUCTIONS:\n"
+            "1. Provide a step-by-step scientific explanation.\n"
+            "2. At the end of your response, state your final concise answer wrapped inside \\boxed{answer}.\n"
+            "   Do NOT include extra introductory text or citations inside the \\boxed{} block.\n\n"
             "[NO CONTEXT AVAILABLE]\n"
-            f"[QUESTION]: {question}\n"
-            f"[GROUND TRUTH]: {ground_truth}"
+            f"[QUESTION]: {question}"
         )
     else:
+        # Format context chunks into explicitly numbered passages (cap at top 5 to prevent context over-population)
+        passages = [p.strip() for p in retrieved_context.split("\n\n") if p.strip()][:5]
+        if len(passages) > 1:
+            formatted_context = "\n\n".join(f"[Passage {i+1}]: {p}" for i, p in enumerate(passages))
+        else:
+            formatted_context = f"[Passage 1]: {retrieved_context.strip()}"
+
         return (
-            "[SYSTEM]: You are a neuroscientist. Reason step-by-step using the provided context. "
-            "Annotate key statements with bracketed passage citations matching the provided context (e.g. [Context 1] or [Passage 1]). "
-            "Wrap your final answer inside \\boxed{}.\n\n"
-            f"[CONTEXT]: {retrieved_context}\n"
-            f"[QUESTION]: {question}\n"
-            f"[GROUND TRUTH]: {ground_truth}"
+            "[SYSTEM]: You are an expert neuroscientist. Answer the question using the provided context passages.\n\n"
+            "INSTRUCTIONS:\n"
+            "1. Reason step-by-step using facts from the context passages.\n"
+            "2. Annotate key statements with bracketed passage citations matching the provided passages (e.g. [Passage 1] or [Passage 2]) or direct quotes.\n"
+            "3. At the end of your response, state your final concise answer wrapped inside \\boxed{answer}.\n"
+            "   Do NOT include citations or extra introductory text inside the \\boxed{} block.\n\n"
+            f"[CONTEXT PASSAGES]:\n{formatted_context}\n\n"
+            f"[QUESTION]: {question}"
         )
-
-
-def load_qa_choices(qa_samples_path: Path) -> Dict[str, List[str]]:
-    """Loads and maps question text to choices list for multiple-choice resolution."""
-    choices_map = {}
-    if qa_samples_path.exists():
-        try:
-            with open(qa_samples_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        data = json.loads(line)
-                        question = data.get("question")
-                        choices = data.get("choices")
-                        if question and choices:
-                            choices_map[question.strip().lower()] = [str(c) for c in choices]
-        except Exception as e:
-            logger.error(f"Error loading QA choices from {qa_samples_path}: {e}")
-    return choices_map
 
 
 def run_benchmark_generation_and_scoring(
@@ -89,22 +80,19 @@ def run_benchmark_generation_and_scoring(
 ) -> List[Dict[str, Any]]:
     """
     Orchestrates the evaluation loop: For each teacher model and cluster,
-    generates responses on evaluation samples, evaluates using the 4 scoring submodules,
+    generates responses on evaluation samples, evaluates using MetricEvalJudge,
     and returns a list of BenchmarkRecord dictionaries.
     """
-    logger.info("Initializing scorers...")
-    hallucination_detector = HallucinationDetector(cfg)
-    reasoning_judge = ReasoningJudge(cfg, backend=judge_backend_override)
-    
-    # Load choices for MC accuracy check
-    qa_samples_path = Path(cfg.rad.qa_samples_path)
-    choices_map = load_qa_choices(qa_samples_path)
+    logger.info("Initializing MetricEvalJudge and failure logger...")
+    metric_judge = MetricEvalJudge(cfg, backend=judge_backend_override)
+    failure_logger = BenchmarkFailureLogger(cfg, reset=True)
     
     # Load student tokenizer for token counting
     logger.info(f"Loading student tokenizer '{cfg.model.base_model_name}' for token counting...")
     student_tokenizer = AutoTokenizer.from_pretrained(cfg.model.base_model_name)
     
     records = []
+    seq_num = 0
     
     for teacher in cfg.benchmarking.candidate_teachers:
         logger.info(f"Starting benchmarking for teacher model: {teacher}")
@@ -141,40 +129,59 @@ def run_benchmark_generation_and_scoring(
                 batch_results = backend.generate_batch(batch_prompts)
                 traces.extend(batch_results)
                 
-            # 3. Score traces
-            for sample, trace in zip(samples, traces):
-                # Retrieve MC choices if question matches
-                choices = choices_map.get(sample.question.strip().lower(), None)
+            # 3. Score traces using MetricEvalJudge
+            for sample, prompt, trace in zip(samples, prompts, traces):
+                seq_num += 1
                 
-                # Answer Accuracy
-                ans_acc = score_answer_accuracy(trace, sample.ground_truth, choices)
-                
-                # Reasoning Quality (LLM-as-judge)
-                judge_result = reasoning_judge.score_reasoning_quality(
+                eval_res = metric_judge.evaluate_trace(
                     sample_id=sample.sample_id,
                     cluster_label=cluster_label,
                     question=sample.question,
+                    ground_truth=sample.ground_truth,
                     retrieved_context=sample.retrieved_context,
-                    trace=trace
-                )
-                if judge_result is not None:
-                    res_quality, _ = judge_result
-                else:
-                    res_quality = None
-                    
-                # Citation Accuracy
-                cit_prec, cit_rec, cit_acc = score_citation_accuracy(
                     trace=trace,
-                    retrieved_context=sample.retrieved_context,
-                    no_retrieval=sample.no_retrieval,
-                    min_overlap=cfg.benchmarking.citation_min_overlap
+                    no_retrieval=sample.no_retrieval
                 )
                 
-                # Hallucination Rate
-                hal_rate = hallucination_detector.score_hallucination_rate(
-                    trace=trace,
+                if eval_res is not None:
+                    ans_acc = eval_res["answer_accuracy"]
+                    res_quality = eval_res["reasoning_quality"]
+                    cit_prec = eval_res["citation_precision"]
+                    cit_rec = eval_res["citation_recall"]
+                    cit_acc = eval_res["citation_accuracy"]
+                    hal_rate = eval_res["hallucination_rate"]
+                else:
+                    ans_acc = 0.0
+                    res_quality = None
+                    cit_prec = None
+                    cit_rec = None
+                    cit_acc = None
+                    hal_rate = 1.0
+                
+                # Check and log failures for any metrics that fell below thresholds
+                failure_logger.check_and_log_failures(
+                    seq_num=seq_num,
+                    teacher=teacher,
+                    sample_id=sample.sample_id,
+                    cluster_label=cluster_label,
+                    question=sample.question,
+                    ground_truth=sample.ground_truth,
                     retrieved_context=sample.retrieved_context,
-                    ground_truth=sample.ground_truth
+                    prompt=prompt,
+                    response=trace,
+                    answer_accuracy=ans_acc,
+                    reasoning_quality=res_quality,
+                    citation_accuracy=cit_acc,
+                    hallucination_rate=hal_rate,
+                    no_retrieval=sample.no_retrieval,
+                    judge_prompt=eval_res.get("judge_prompt") if eval_res else getattr(metric_judge, "last_prompt", None),
+                    judge_response=eval_res.get("judge_response") if eval_res else getattr(metric_judge, "last_response", None),
+                    explanations={
+                        "answer_explanation": eval_res.get("answer_explanation", "") if eval_res else "",
+                        "reasoning_explanation": eval_res.get("reasoning_explanation", "") if eval_res else "",
+                        "citation_explanation": eval_res.get("citation_explanation", "") if eval_res else "",
+                        "hallucination_explanation": eval_res.get("hallucination_explanation", "") if eval_res else "",
+                    } if eval_res else None
                 )
                 
                 # Token count of generated trace
@@ -198,3 +205,4 @@ def run_benchmark_generation_and_scoring(
                 records.append(record)
                 
     return records
+

@@ -578,3 +578,24 @@ def test_dim_reducer_invalid_method(test_cfg):
         apply_dimensionality_reduction(embeddings, test_cfg)
     assert "Unsupported dim_reduction_method" in str(excinfo.value)
 
+
+def test_merge_similar_clusters():
+    from lib.s5_clustering.clusterer import merge_similar_clusters
+    
+    # 6 points across 3 initial clusters:
+    # Cluster 0 and 1 are almost identical (vector 1.0 along dim 0)
+    # Cluster 2 is distinct (vector 1.0 along dim 1)
+    embeddings = np.zeros((6, 10), dtype=np.float32)
+    embeddings[0:2, 0] = 1.0   # Cluster 0
+    embeddings[2:4, 0] = 0.99  # Cluster 1 (cosine sim to cluster 0 > 0.99)
+    embeddings[4:6, 1] = 1.0   # Cluster 2 (orthogonal)
+    
+    labels = np.array([0, 0, 1, 1, 2, 2])
+    
+    merged_labels = merge_similar_clusters(embeddings, labels, similarity_threshold=0.85)
+    
+    # Cluster 0 and 1 should be merged into label 0, cluster 2 becomes label 1
+    assert merged_labels[0] == merged_labels[2]
+    assert len(set(merged_labels)) == 2
+
+

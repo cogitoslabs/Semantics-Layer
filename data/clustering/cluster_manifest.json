@@ -3,17 +3,19 @@
   "embedding_model": "all-mpnet-base-v2",
   "dim_reduction_method": "umap",
   "total_docs": 1586,
-  "noise_docs": 227,
-  "noise_fraction": 0.1431,
-  "total_clusters": 94,
+  "noise_docs": 202,
+  "noise_fraction": 0.1274,
+  "total_clusters": 22,
   "cluster_sizes": {
-    "min": 6,
-    "max": 58,
-    "mean": 16.9,
-    "median": 13.0,
-    "std": 10.6
+    "min": 26,
+    "max": 179,
+    "mean": 72.1,
+    "median": 66.5,
+    "std": 38.7
   },
-  "capped_min_count": 86,
+  "capped_min_count": 2,
   "capped_max_count": 0,
-  "warnings": []
+  "warnings": [
+    "Fewer micro-clusters than expected: 22 < 50 threshold."
+  ]
 }

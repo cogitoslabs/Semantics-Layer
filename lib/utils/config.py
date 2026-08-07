@@ -559,12 +559,16 @@ class ClusteringConfig:
     umap_n_neighbors: int          = field(default_factory=lambda: get("UMAP_N_NEIGHBORS", 15, int))
     umap_min_dist: float           = field(default_factory=lambda: get("UMAP_MIN_DIST", 0.0, float))
     umap_metric: str               = field(default_factory=lambda: get("UMAP_METRIC", "cosine"))
-    hdbscan_min_cluster_size: int  = field(default_factory=lambda: get("HDBSCAN_MIN_CLUSTER_SIZE", 6, int))
-    hdbscan_min_samples: int       = field(default_factory=lambda: get("HDBSCAN_MIN_SAMPLES", 2, int))
+    hdbscan_min_cluster_size: int  = field(default_factory=lambda: get("HDBSCAN_MIN_CLUSTER_SIZE", 25, int))
+    hdbscan_min_samples: int       = field(default_factory=lambda: get("HDBSCAN_MIN_SAMPLES", 5, int))
     hdbscan_metric: str            = field(default_factory=lambda: get("HDBSCAN_METRIC", "cosine"))
     min_clusters: int              = field(default_factory=lambda: get("CLUSTERING_MIN_CLUSTERS", 10, int))
     use_pca: bool                  = field(default_factory=lambda: get("CLUSTERING_USE_PCA", True, bool))
     pca_components: int            = field(default_factory=lambda: get("CLUSTERING_PCA_COMPONENTS", 50, int))
+
+    # Hierarchical Cluster Merging
+    enable_cluster_merging: bool   = field(default_factory=lambda: get("CLUSTERING_ENABLE_MERGE", False, bool))
+    cluster_merge_threshold: float = field(default_factory=lambda: get("CLUSTERING_MERGE_THRESHOLD", 0.92, float))
 
     # Noise handling
     noise_assignment: str          = field(default_factory=lambda: get("CLUSTERING_NOISE_ASSIGNMENT", "nearest"))
@@ -593,7 +597,7 @@ class TeacherBenchmarkingConfig:
     judge_model_name: str               = field(default_factory=lambda: get("BENCHMARK_JUDGE_MODEL", ""))
     judge_api_url: Optional[str]        = field(default_factory=lambda: get("BENCHMARK_JUDGE_API_URL", None))
     judge_api_key: Optional[str]        = field(default_factory=lambda: get("BENCHMARK_JUDGE_API_KEY", None))
-    judge_max_new_tokens: int           = field(default_factory=lambda: get("BENCHMARK_JUDGE_MAX_NEW_TOKENS", 256, int))
+    judge_max_new_tokens: int           = field(default_factory=lambda: get("BENCHMARK_JUDGE_MAX_NEW_TOKENS", 512, int))
     
     # Teacher generation backend & settings
     teacher_backend: str                = field(default_factory=lambda: get_with_fallback("BENCHMARK_TEACHER_BACKEND", "RAD_TEACHER_BACKEND", "hf_local"))
@@ -606,14 +610,13 @@ class TeacherBenchmarkingConfig:
     
     eval_sample_size: int               = field(default_factory=lambda: get("BENCHMARK_EVAL_SAMPLE_SIZE", 10, int))
     min_eval_samples: int               = field(default_factory=lambda: get("BENCHMARK_MIN_EVAL_SAMPLES", 2, int))
+    max_eval_clusters: int              = field(default_factory=lambda: get("BENCHMARK_MAX_EVAL_CLUSTERS", 0, int))
     
     enable_calibration: bool            = field(default_factory=lambda: get("BENCHMARK_ENABLE_CALIBRATION", False, bool))
     human_calibration_size: int         = field(default_factory=lambda: get("BENCHMARK_CALIBRATION_SIZE", 200, int))
     human_labels_path: Optional[Path]   = field(default_factory=lambda: Path(get("BENCHMARK_HUMAN_LABELS_PATH", "")) if get("BENCHMARK_HUMAN_LABELS_PATH", "") else None)
     
-    hallucination_nli_threshold: float  = field(default_factory=lambda: get("BENCHMARK_HALLUCINATION_NLI_THRESHOLD", 0.5, float))
-    citation_min_overlap: float         = field(default_factory=lambda: get("BENCHMARK_CITATION_MIN_OVERLAP", 0.30, float))
-    nli_model: str                      = field(default_factory=lambda: get("BENCHMARK_NLI_MODEL", "cross-encoder/nli-deberta-v3-small"))
+    hallucination_threshold: float      = field(default_factory=lambda: get("BENCHMARK_HALLUCINATION_THRESHOLD", 0.25, float))
     
     output_dir: Path                    = field(default_factory=lambda: Path(get("BENCHMARKING_OUTPUT_DIR", "data/benchmarking")))
     scores_path: Path                   = field(default_factory=lambda: Path(get("BENCHMARKING_SCORES_PATH", "data/benchmarking/scores.jsonl")))
@@ -747,10 +750,8 @@ class PipelineConfig:
             errors.append(f"BENCHMARK_EVAL_SAMPLE_SIZE must be >= 1, got {self.benchmarking.eval_sample_size}")
         if self.benchmarking.min_eval_samples < 1:
             errors.append(f"BENCHMARK_MIN_EVAL_SAMPLES must be >= 1, got {self.benchmarking.min_eval_samples}")
-        if not (0.0 <= self.benchmarking.citation_min_overlap <= 1.0):
-            errors.append(f"BENCHMARK_CITATION_MIN_OVERLAP must be in [0,1], got {self.benchmarking.citation_min_overlap}")
-        if not (0.0 <= self.benchmarking.hallucination_nli_threshold <= 1.0):
-            errors.append(f"BENCHMARK_HALLUCINATION_NLI_THRESHOLD must be in [0,1], got {self.benchmarking.hallucination_nli_threshold}")
+        if not (0.0 <= self.benchmarking.hallucination_threshold <= 1.0):
+            errors.append(f"BENCHMARK_HALLUCINATION_THRESHOLD must be in [0,1], got {self.benchmarking.hallucination_threshold}")
 
         if errors:
             raise ValueError("Config validation failed:\n" + "\n".join(f"  • {e}" for e in errors))

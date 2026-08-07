@@ -42,9 +42,13 @@ class CrossEncoderReranker:
             ).to(self.device)
 
             use_autocast = self.device.startswith("cuda")
+            autocast_ctx = (
+                torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+                if hasattr(torch, "amp") else torch.cuda.amp.autocast(dtype=torch.float16)
+            )
             with torch.no_grad():
                 if use_autocast:
-                    with torch.cuda.amp.autocast(dtype=torch.float16):
+                    with autocast_ctx:
                         outputs = self.model(**inputs)
                 else:
                     outputs = self.model(**inputs)

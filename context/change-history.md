@@ -1,5 +1,17 @@
 # Change History
 
+## Status: Completed (Improving Teacher Evaluation with LLM-as-a-Judge)
+
+- Implemented unified LLM-as-a-Judge evaluation module in [metric_eval_judge.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/metric_eval_judge.py) (`MetricEvalJudge`) evaluating Answer Accuracy, Reasoning Quality, Citation Accuracy, and Hallucination Rate in a single pass with explanations for every metric.
+- Refactored candidate teacher trace evaluation loop in [benchmark_runner.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/benchmark_runner.py) to score responses via `MetricEvalJudge`. Capped context passages to top-5 in `build_benchmark_prompt` to prevent context over-population degeneration.
+- Increased teacher generation token limit (`BENCHMARK_TEACHER_MAX_NEW_TOKENS=1024`) in [.env.example](file:///e:/Projects/cnd/Semantics/.env.example) and [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py) to prevent mid-sentence response truncation.
+- Cleaned up obsolete heuristic modules (`answer_accuracy.py`, `citation_accuracy.py`, `hallucination_detector.py`, `reasoning_judge.py`) and removed dead config parameters (`nli_model`, `citation_min_overlap`). Updated `PipelineConfig.validate()` to validate `BENCHMARK_HALLUCINATION_THRESHOLD`.
+- Enhanced [failure_logger.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/failure_logger.py) to capture judge explanations alongside numerical scores when metrics fail or fall below thresholds.
+- Created feature specification in [teacher-eval-llm-judge.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/teacher-eval-llm-judge.md) and updated documentation in [S6_TEACHER_BENCHMARKING.md](file:///e:/Projects/cnd/Semantics/docs/S6_TEACHER_BENCHMARKING.md).
+- Updated unit test suite in [test_teacher_benchmarking.py](file:///e:/Projects/cnd/Semantics/tests/test_teacher_benchmarking.py).
+
+---
+
 ## Status: Completed (Refactored Dimensionality Reduction in Step 5)
 
 - Implemented modular dimensionality reduction module [dim_reducer.py](file:///e:/Projects/cnd/Semantics/lib/s5_clustering/dim_reducer.py) supporting UMAP, PCA, and Pass-through strategies with automatic small-corpus fallback handling.

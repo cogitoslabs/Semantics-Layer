@@ -24,6 +24,73 @@ class ClusterAssignment:
     assigned_by: str      # "hdbscan" | "nearest_centroid" | "dropped"
 
 
+def merge_similar_clusters(
+    raw_embeddings: np.ndarray,
+    labels: np.ndarray,
+    similarity_threshold: float = 0.85
+) -> np.ndarray:
+    """
+    Hierarchically merges clusters whose L2-normalized centroids in 768D raw embedding space
+    have cosine similarity >= similarity_threshold.
+    """
+    unique_labels = sorted([int(l) for l in np.unique(labels) if l != -1])
+    if len(unique_labels) <= 1:
+        return labels
+
+    # Normalize raw 768D embeddings if not already normalized
+    norms = np.linalg.norm(raw_embeddings, axis=1, keepdims=True)
+    norms[norms == 0] = 1e-12
+    norm_raw = raw_embeddings / norms
+
+    # Compute centroids for each active cluster in 768D space
+    label_to_centroid = {}
+    for cid in unique_labels:
+        c_mask = (labels == cid)
+        centroid = np.mean(norm_raw[c_mask], axis=0)
+        c_norm = np.linalg.norm(centroid)
+        if c_norm > 0:
+            centroid = centroid / c_norm
+        label_to_centroid[cid] = centroid
+
+    # Build union-find / label map for cluster merging
+    label_map = {cid: cid for cid in unique_labels}
+
+    for i in range(len(unique_labels)):
+        cid1 = unique_labels[i]
+        for j in range(i + 1, len(unique_labels)):
+            cid2 = unique_labels[j]
+            root1 = label_map[cid1]
+            root2 = label_map[cid2]
+            if root1 == root2:
+                continue
+
+            sim = float(np.dot(label_to_centroid[root1], label_to_centroid[root2]))
+            if sim >= similarity_threshold:
+                # Merge root2 into root1
+                for key in label_map:
+                    if label_map[key] == root2:
+                        label_map[key] = root1
+
+    # Remap merged roots to contiguous cluster IDs (0, 1, 2, ...)
+    unique_roots = sorted(list(set(label_map.values())))
+    root_to_new_id = {root: new_id for new_id, root in enumerate(unique_roots)}
+
+    new_labels = np.full_like(labels, -1)
+    for idx, l in enumerate(labels):
+        if l != -1:
+            target_root = label_map[l]
+            new_labels[idx] = root_to_new_id[target_root]
+
+    merged_count = len(unique_labels) - len(unique_roots)
+    if merged_count > 0:
+        logger.info(
+            f"Cluster merging (768D space): Consolidated {len(unique_labels)} clusters into {len(unique_roots)} clusters "
+            f"(merged {merged_count} similar clusters with cosine similarity >= {similarity_threshold})."
+        )
+
+    return new_labels
+
+
 def run_clustering(cfg: PipelineConfig, embeddings: np.ndarray, doc_ids: List[str]) -> List[ClusterAssignment]:
     """
     Perform HDBSCAN clustering on embeddings after applying dimensionality reduction.
@@ -62,6 +129,14 @@ def run_clustering(cfg: PipelineConfig, embeddings: np.ndarray, doc_ids: List[st
             metric=clustering_metric
         )
         labels = clusterer.fit_predict(clustering_embeddings)
+
+    # Perform cluster consolidation merging in 768D raw embedding space if enabled
+    if cfg.clustering.enable_cluster_merging:
+        labels = merge_similar_clusters(
+            raw_embeddings=embeddings,
+            labels=labels,
+            similarity_threshold=cfg.clustering.cluster_merge_threshold
+        )
     
     # Identify unique clusters (excluding noise -1)
     unique_labels = [int(l) for l in np.unique(labels) if l != -1]

@@ -91,7 +91,12 @@ def run_eval_sampling(cfg: PipelineConfig) -> Dict[str, List[EvalSample]]:
     
     eval_samples: Dict[str, List[EvalSample]] = {}
     
-    for cluster_label, cluster_info in sorted(clusters.items()):
+    cluster_items = sorted(clusters.items())
+    if cfg.benchmarking.max_eval_clusters > 0:
+        logger.info(f"Evaluation sampler: Limiting cluster sampling to top {cfg.benchmarking.max_eval_clusters} clusters.")
+        cluster_items = cluster_items[:cfg.benchmarking.max_eval_clusters]
+    
+    for cluster_label, cluster_info in cluster_items:
         cluster_id = str(cluster_info.get("cluster_id"))
         val_doc_ids = cluster_info.get("val_doc_ids", [])
         
