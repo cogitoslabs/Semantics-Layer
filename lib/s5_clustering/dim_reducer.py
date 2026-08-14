@@ -31,10 +31,10 @@ def apply_dimensionality_reduction(
     n_docs, orig_dim = embeddings.shape
     raw_method = cfg.clustering.dim_reduction_method.lower().strip()
     
-    # Handle backwards compatibility with use_pca=False
-    if not cfg.clustering.use_pca and "CLUSTERING_DIM_REDUCTION_METHOD" not in os.environ and raw_method == "umap":
+    # Handle backwards compatibility with use_pca=False when method is pca
+    if not cfg.clustering.use_pca and raw_method == "pca":
         method = "none"
-        logger.info("use_pca=False specified without explicit CLUSTERING_DIM_REDUCTION_METHOD. Disabling reduction.")
+        logger.info("use_pca=False specified. Disabling PCA reduction.")
     else:
         method = raw_method
 

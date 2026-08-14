@@ -522,14 +522,20 @@ def test_dim_reducer_umap(test_cfg):
     test_cfg.clustering.umap_n_components = 5
     test_cfg.clustering.umap_n_neighbors = 10
 
-    reduced, meta = apply_dimensionality_reduction(embeddings, test_cfg)
-    assert reduced.shape == (25, 5)
-    assert meta["method"] == "umap"
-    assert meta["reduced_dim"] == 5
-    assert meta["fallback_triggered"] is False
-    # Check L2 normalized
-    norms = np.linalg.norm(reduced, axis=1)
-    np.testing.assert_allclose(norms, 1.0, rtol=1e-4)
+    mock_umap_module = MagicMock()
+    mock_reducer = MagicMock()
+    mock_reducer.fit_transform.side_effect = lambda x: x[:, :5]
+    mock_umap_module.UMAP.return_value = mock_reducer
+
+    with patch.dict("sys.modules", {"umap": mock_umap_module}):
+        reduced, meta = apply_dimensionality_reduction(embeddings, test_cfg)
+        assert reduced.shape == (25, 5)
+        assert meta["method"] == "umap"
+        assert meta["reduced_dim"] == 5
+        assert meta["fallback_triggered"] is False
+        # Check L2 normalized
+        norms = np.linalg.norm(reduced, axis=1)
+        np.testing.assert_allclose(norms, 1.0, rtol=1e-4)
 
 
 def test_dim_reducer_pca(test_cfg):

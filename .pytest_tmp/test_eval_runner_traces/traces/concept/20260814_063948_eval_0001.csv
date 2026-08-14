@@ -1,2 +1,0 @@
-eval_num,seq_num,prompt,target_answer,model_output,matching_score,result,category,checkpoint_name,timestamp
-1,1,Prompt1,ConceptDef1,ConceptDef1,1.0,Pass,Concept,eval_1,2026-08-14T06:39:48.444957+00:00

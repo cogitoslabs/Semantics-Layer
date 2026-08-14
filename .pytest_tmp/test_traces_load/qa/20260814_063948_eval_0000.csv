@@ -1,2 +1,0 @@
-eval_num,seq_num,prompt,target_answer,model_output,matching_score,result,category,checkpoint_name,timestamp
-0,1,P1,T1,M1,0.95,Pass,cat1,eval_0,2026-08-14T06:39:48.412934+00:00

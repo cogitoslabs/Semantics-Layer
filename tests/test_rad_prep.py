@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 import numpy as np
+import torch
 import faiss
 
 from lib.utils import PipelineConfig
@@ -33,6 +34,17 @@ class SimpleMockTokenizer:
 
     def tokenize(self, text):
         return text.split()
+
+    def __call__(self, text, *args, **kwargs):
+        from transformers import BatchEncoding
+        if isinstance(text, str):
+            n = 1
+        else:
+            n = len(text)
+        return BatchEncoding({
+            "input_ids": torch.ones((n, 4), dtype=torch.long),
+            "attention_mask": torch.ones((n, 4), dtype=torch.long),
+        })
 
 
 
@@ -208,7 +220,7 @@ def test_relevance_threshold_gate(test_cfg):
 def test_no_retrieval_router(test_cfg):
     with tempfile.TemporaryDirectory() as tmpdir:
         log_file = Path(tmpdir) / "no_retrieval_rates.jsonl"
-        router = NoRetrievalRouter(log_file)
+        router = NoRetrievalRouter(log_file, min_passed_chunks=2)
 
         decision1 = router.route_sample("s1", "cognitive", passed_chunks=1)
         assert decision1.no_retrieval is True
@@ -253,6 +265,7 @@ def test_hybrid_fusion(test_cfg):
             mock_tok_class.return_value = SimpleMockTokenizer()
 
             test_cfg.rad.retrieval_mode = "hybrid"
+            test_cfg.rad.use_reranker = False
             test_cfg.rad.relevance_threshold = 0.1
             retriever = Retriever(test_cfg)
             result = retriever.retrieve("hippocampal motor control")
@@ -322,57 +335,57 @@ def test_trace_prompt_generator(test_cfg):
 
 def test_pipeline_end_to_end(test_cfg):
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_path = Path(tmpdir)
-        test_cfg.rad.retrieval_corpus_path = tmp_path / "retrieval_corpus.jsonl"
-        test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
-        test_cfg.rad.index_dir = tmp_path / "index"
-        test_cfg.rad.traces_dir = tmp_path / "traces"
-        test_cfg.rad.qa_samples_path = tmp_path / "probe_qa.jsonl"
-        test_cfg.logging.log_dir = tmp_path / "logs"
+        try:
+            tmp_path = Path(tmpdir)
+            test_cfg.rad.use_reranker = False
+            test_cfg.rad.retrieval_corpus_path = tmp_path / "retrieval_corpus.jsonl"
+            test_cfg.rad.chunks_path = tmp_path / "chunks.jsonl"
+            test_cfg.rad.index_dir = tmp_path / "index"
+            test_cfg.rad.traces_dir = tmp_path / "traces"
+            test_cfg.rad.qa_samples_path = tmp_path / "probe_qa.jsonl"
+            test_cfg.logging.log_dir = tmp_path / "logs"
 
-        # Write mock corpus
-        with open(test_cfg.rad.retrieval_corpus_path, "w") as f:
-            f.write(json.dumps({"text": "the human brain consists of cortex and cerebellum", "doc_type": "long_form", "doc_id": "d1"}) + "\n")
-            f.write(json.dumps({"text": "neural networks learn patterns from data representations", "doc_type": "abstract", "doc_id": "d2"}) + "\n")
+            # Write mock corpus
+            with open(test_cfg.rad.retrieval_corpus_path, "w") as f:
+                f.write(json.dumps({"text": "the human brain consists of cortex and cerebellum", "doc_type": "long_form", "doc_id": "d1"}) + "\n")
+                f.write(json.dumps({"text": "neural networks learn patterns from data representations", "doc_type": "abstract", "doc_id": "d2"}) + "\n")
 
-        # Write mock QA samples
-        with open(test_cfg.rad.qa_samples_path, "w") as f:
-            f.write(json.dumps({"question": "cortex cerebellum location?", "answer": "brain", "cluster": "neuro"}) + "\n")
-            f.write(json.dumps({"choices": ["neural", "blood"], "answer_idx": 0, "question": "network representation?", "cluster": "cs"}) + "\n")
+            # Write mock QA samples
+            with open(test_cfg.rad.qa_samples_path, "w") as f:
+                f.write(json.dumps({"question": "cortex cerebellum location?", "answer": "brain", "cluster": "neuro"}) + "\n")
+                f.write(json.dumps({"choices": ["neural", "blood"], "answer_idx": 0, "question": "network representation?", "cluster": "cs"}) + "\n")
 
-        # Mock tokenizers and embeddings
-        with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
-             patch("lib.s4_rad_prep.indexer.DenseEmbedder") as mock_embedder_class, \
-             patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_ret_embedder_class:
+            # Mock tokenizers and embeddings
+            with patch("transformers.AutoTokenizer.from_pretrained") as mock_tok_class, \
+                 patch("lib.s4_rad_prep.indexer.DenseEmbedder") as mock_embedder_class, \
+                 patch("lib.s4_rad_prep.retriever.DenseEmbedder") as mock_ret_embedder_class:
 
-            mock_tok = SimpleMockTokenizer()
-            mock_tok_class.return_value = mock_tok
+                mock_tok = SimpleMockTokenizer()
+                mock_tok_class.return_value = mock_tok
 
-            mock_emb = MagicMock()
-            mock_emb.embed_batch.side_effect = lambda texts: np.tile(
-                np.array([1.0, 0.0, 0.0, 0.0], dtype="float32"), (len(texts), 1)
-            )
-            mock_embedder_class.return_value = mock_emb
-            mock_ret_embedder_class.return_value = mock_emb
+                mock_emb = MagicMock()
+                mock_emb.embed_batch.side_effect = lambda texts, **kwargs: np.tile(
+                    np.array([1.0, 0.0, 0.0, 0.0], dtype="float32"), (len(texts), 1)
+                )
+                mock_embedder_class.return_value = mock_emb
+                mock_ret_embedder_class.return_value = mock_emb
 
-            from lib.s4_rad_prep import run_rad_prep_pipeline
-            run_rad_prep_pipeline(test_cfg)
+                from lib.s4_rad_prep import run_rad_prep_pipeline
+                run_rad_prep_pipeline(test_cfg)
 
-
-            # Check all artifacts
-            assert test_cfg.rad.chunks_path.exists()
-            assert (test_cfg.rad.index_dir / "index.faiss").exists()
-            assert (test_cfg.rad.traces_dir / "grounded_traces.jsonl").exists()
-            assert (test_cfg.logging.log_dir / "rad_prep" / "phase_manifest.json").exists()
-            
-            with open(test_cfg.logging.log_dir / "rad_prep" / "phase_manifest.json", "r") as f:
-                manifest = json.load(f)
-                assert manifest["status"] == "complete"
-                assert manifest["metrics"]["grounded_trace_count"] == 2
-
-
-        from lib.utils.logger import close_loggers
-        close_loggers()
+                # Check all artifacts
+                assert test_cfg.rad.chunks_path.exists()
+                assert (test_cfg.rad.index_dir / "index.faiss").exists()
+                assert (test_cfg.rad.traces_dir / "grounded_traces.jsonl").exists()
+                assert (test_cfg.logging.log_dir / "rad_prep" / "phase_manifest.json").exists()
+                
+                with open(test_cfg.logging.log_dir / "rad_prep" / "phase_manifest.json", "r") as f:
+                    manifest = json.load(f)
+                    assert manifest["status"] == "complete"
+                    assert manifest["metrics"]["grounded_trace_count"] == 2
+        finally:
+            from lib.utils.logger import close_loggers
+            close_loggers()
 
 
 def test_trace_generator_bedrock(test_cfg):
@@ -437,13 +450,15 @@ def test_bge_large_dense_embedder():
          patch("transformers.AutoModel.from_pretrained") as mock_model:
 
         tok_instance = MagicMock()
-        tok_instance.return_value = {
+        from transformers import BatchEncoding
+        tok_instance.return_value = BatchEncoding({
             "input_ids": torch.tensor([[1, 2, 3]]),
             "attention_mask": torch.tensor([[1, 1, 1]])
-        }
+        })
         mock_tok.return_value = tok_instance
         model_instance = MagicMock()
         model_instance.return_value = mock_outputs
+        model_instance.to.return_value = model_instance
         mock_model.return_value = model_instance
 
         embedder = DenseEmbedder("bge-large", device="cpu")
@@ -482,13 +497,15 @@ def test_dense_embedder_backward_compatibility():
          patch("transformers.AutoModel.from_pretrained") as mock_model:
 
         tok_instance = MagicMock()
-        tok_instance.return_value = {
+        from transformers import BatchEncoding
+        tok_instance.return_value = BatchEncoding({
             "input_ids": torch.tensor([[1, 2, 3]]),
             "attention_mask": torch.tensor([[1, 1, 1]])
-        }
+        })
         mock_tok.return_value = tok_instance
         model_instance = MagicMock()
         model_instance.return_value = mock_outputs
+        model_instance.to.return_value = model_instance
         mock_model.return_value = model_instance
 
         embedder_bio = DenseEmbedder("biolinkbert", device="cpu")
@@ -516,14 +533,16 @@ def test_cross_encoder_reranker():
          patch("transformers.AutoModelForSequenceClassification.from_pretrained") as mock_model:
 
         tok_instance = MagicMock()
-        tok_instance.return_value = {
+        from transformers import BatchEncoding
+        tok_instance.return_value = BatchEncoding({
             "input_ids": torch.tensor([[1, 2], [3, 4]]),
             "attention_mask": torch.tensor([[1, 1], [1, 1]])
-        }
+        })
         mock_tok.return_value = tok_instance
 
         model_instance = MagicMock()
         model_instance.return_value = mock_outputs
+        model_instance.to.return_value = model_instance
         mock_model.return_value = model_instance
 
         reranker = CrossEncoderReranker("BAAI/bge-reranker-large", device="cpu", batch_size=32)

@@ -25,6 +25,6 @@ wandb
 # Data
 data/
 
-
-
-
+# Testing
+.pytest_cache/
+.pytest_tmp/
