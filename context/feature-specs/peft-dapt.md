@@ -14,7 +14,6 @@ This specification defines the additions and changes required in the configurati
 3. **Model Loading & Wrapping**: Integrate PEFT (`get_peft_model`) in `lib/s3_dapt/model_utils.py` to wrap the base causal LM with adapters when `PEFT_DAPT` is enabled.
 4. **Optimizer Optimization**: Adjust `init_optimizer_scheduler` in `lib/s3_dapt/training_helpers.py` to only pass trainable parameters to the optimizer (yielding significant VRAM savings).
 5. **Checkpoint Loading**: Update the checkpoint loader in `lib/utils/checkpoint.py` to support non-strict loading when a `PeftModel` is used (since base weights are frozen and not stored in checkpoints).
-6. **Inference & Log Failures Loader**: Modify `run_inference_and_log_failures` in `lib/s3_dapt/evaluation/eval_runner.py` to correctly load base model + adapter weights when `PEFT_DAPT` is enabled.
 
 ---
 
@@ -43,8 +42,3 @@ In `lib/s3_dapt/training_helpers.py`:
 In `lib/utils/checkpoint.py`:
 - When loading a checkpoint, check if `model` is an instance of `peft.PeftModel`.
 - If it is, call `model.load_state_dict(payload["model_state_dict"], strict=False)`.
-
-### 5. Final Failure Logging
-In `lib/s3_dapt/evaluation/eval_runner.py`:
-- When running `run_inference_and_log_failures`, check if `cfg.model.peft_dapt` is `True`.
-- If so, load the base model from `cfg.model.base_model_name` first, and then load the adapter weights using `PeftModel.from_pretrained(base_model, model_dir)`.

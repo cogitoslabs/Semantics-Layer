@@ -5,7 +5,6 @@ import argparse
 from lib.s1_build_corpus import run_corpus_builder, run_replay_corpus, run_merge_corpus
 from lib.s2_pretokenize import run_pretokenization
 from lib.s3_dapt import run_dapt_pipeline
-from lib.s3_dapt.evaluation.eval_runner import run_inference_and_log_failures
 from lib.s4_rad_prep import run_rad_prep_pipeline
 from lib.s5_clustering import run_clustering_pipeline
 from lib.s6_teacher_benchmarking import run_teacher_benchmarking
@@ -48,8 +47,6 @@ if __name__ == "__main__":
     if args.step == "s3" or args.step == "all":
         logger.info(f"Initializing DAPT Continued Pretraining on model: {cfg.model.base_model_name}")
         run_dapt_pipeline(cfg)
-        logger.info("Running final inference on saved model and logging failed evaluations...")
-        run_inference_and_log_failures(cfg)
     if args.step == "s4" or args.step == "all":
         logger.info("Initializing Retrieval-Augmented Distillation Preparation (RAD Prep)")
         run_rad_prep_pipeline(cfg)

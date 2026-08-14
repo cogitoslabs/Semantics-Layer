@@ -1,5 +1,17 @@
 # Change History
 
+## Status: Completed (Online Probe Checker UI Layout & Side-by-Side Model Comparison)
+
+- Streamlined UI in [online_probes.py](file:///e:/Projects/cnd/Semantics/ui/online_probes.py) by removing redundant top page title, caption banners, and the "Model Output" subheader to maximize clean vertical alignment and viewing area.
+- Moved Probe selection (`Cloze Probe`, `QA Probe`, `Concept Probe`) and Checkpoint selection into dedicated dropdown selectboxes in the sidebar.
+- Placed "Question / Prompt" and "Generate Response" button horizontally side-by-side using Streamlit columns.
+- Implemented side-by-side dual-column output rendering comparing predictions from the **Base Model** against the **Selected Checkpoint** with uniform header styling and aligned output cards.
+- Created reusable `render_probe_output` helper with uniform row heights for candidate choices and completions.
+- Updated feature specification in [probe-check-ui.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/probe-check-ui.md).
+- Updated unit test suite in [test_ui.py](file:///e:/Projects/cnd/Semantics/tests/test_ui.py) with 100% pass rate (**8/8 tests passing**).
+
+---
+
 ## Status: Completed (Improving Teacher Evaluation with LLM-as-a-Judge)
 
 - Implemented unified LLM-as-a-Judge evaluation module in [metric_eval_judge.py](file:///e:/Projects/cnd/Semantics/lib/s6_teacher_benchmarking/metric_eval_judge.py) (`MetricEvalJudge`) evaluating Answer Accuracy, Reasoning Quality, Citation Accuracy, and Hallucination Rate in a single pass with explanations for every metric.

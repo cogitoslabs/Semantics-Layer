@@ -1,6 +1,6 @@
 """
-online_probes.py — Streamlit Web UI for Online Probe Checks (Cloze Probe & Concept Probe)
-Supports evaluating Base Model or saved DAPT Checkpoints.
+online_probes.py — Streamlit Web UI for Online Probe Checks (Cloze Probe, QA Probe & Concept Probe)
+Supports side-by-side comparison between Base Model and saved DAPT Checkpoints.
 """
 
 import sys
@@ -116,70 +116,96 @@ def run_probe_logic(
         }
 
 
+def render_probe_output(result: Dict[str, Any]) -> None:
+    """Render probe results formatted for UI display."""
+    if result["type"] == "cloze":
+        st.markdown(f"**Top-{result['top_k']} Cloze Completions:**")
+        for idx, comp in enumerate(result["completions"], 1):
+            st.info(f"**[{idx}]** {comp}")
+
+        with st.expander("View Formatted Few-Shot Prompt"):
+            st.code(result["formatted_prompt"], language="text")
+
+    elif result["type"] == "qa":
+        pred_letter = chr(65 + result["predicted_idx"])
+        st.success(f"**Predicted Answer (Choice {pred_letter}):** {result['predicted_choice']}")
+        
+        st.markdown("**Candidate Choice Rankings:**")
+        for idx, choice in enumerate(result["choices"]):
+            letter = chr(65 + idx)
+            if idx == result["predicted_idx"]:
+                st.markdown(f"🔹 **Choice {letter} (Selected):** `{choice}`")
+            else:
+                st.markdown(f"▫️ **Choice {letter}:** {choice}")
+
+        with st.expander("View Formatted QA Prompt"):
+            st.code(result["formatted_prompt"], language="text")
+
+    else:
+        st.markdown("**Generated Response:**")
+        st.success(result["response"])
+
+
 def main():
     st.set_page_config(
-        page_title="Semantics Online Probe Checker",
+        page_title="Online Probe Checker",
         page_icon="🧠",
-        layout="centered",
+        layout="wide",
     )
 
     st.markdown(
         """
         <style>
             .block-container {
-                padding-top: 1rem !important;
+                padding-top: 1.5rem !important;
                 padding-bottom: 1rem !important;
+            }
+            h3 {
+                margin-top: 0.2rem !important;
+                margin-bottom: 0.5rem !important;
+                font-size: 1.35rem !important;
             }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    st.title("Probe Checker")
-    st.caption("Evaluate real-time completions for Cloze, QA, and Concept probes using Base or Checkpoint models.")
-
     cfg_tmp = PipelineConfig()
     checkpoints = list_available_checkpoints(cfg_tmp.model.checkpoint_dir)
+    ckpt_options = [ckpt.name for ckpt in checkpoints]
 
-    st.sidebar.header("Model Selection")
-    model_source = st.sidebar.radio(
-        "Model Source",
-        ["Base Model", "Checkpoint"],
-        help="Select whether to evaluate the Base Model or a specific DAPT Checkpoint.",
-    )
-
-    selected_ckpt_filename = None
-    if model_source == "Checkpoint":
-        if not checkpoints:
-            st.sidebar.warning(f"No checkpoint files (`dapt_eval_*.pt`) found in `{cfg_tmp.model.checkpoint_dir}`. Defaulting to Base Model.")
-            model_source = "Base Model"
-        else:
-            options = [ckpt.name for ckpt in checkpoints]
-            selected_ckpt_filename = st.sidebar.selectbox(
-                "Available Checkpoints",
-                options,
-                help="Select a specific evaluation checkpoint file.",
-            )
-
-    # Load model and config
-    with st.spinner("Loading model and tokenizer..."):
-        model, tokenizer, cfg, device = load_cached_model(model_source, selected_ckpt_filename)
-
-    st.sidebar.markdown("---")
-    st.sidebar.header("Model Information")
-    st.sidebar.write(f"**Loaded Source**: `{model_source}`")
-    if selected_ckpt_filename:
-        st.sidebar.write(f"**Checkpoint File**: `{selected_ckpt_filename}`")
-    st.sidebar.write(f"**Base Model**: `{cfg.model.base_model_name}`")
-
-    # Main Inputs: Probe selection
-    probe_type = st.radio(
+    # Sidebar: Probe and Checkpoint selection
+    st.sidebar.header("Configuration")
+    probe_type = st.sidebar.selectbox(
         "Probe",
         ["Cloze Probe", "QA Probe", "Concept Probe"],
-        horizontal=True,
         help="Select Cloze Probe (fill-in-the-blank), QA Probe (multiple choice scoring), or Concept Probe (freeform response)",
     )
 
+    selected_ckpt_filename = None
+    if ckpt_options:
+        selected_ckpt_filename = st.sidebar.selectbox(
+            "Checkpoint",
+            ckpt_options,
+            help="Select a checkpoint to compare against the Base Model.",
+        )
+    else:
+        st.sidebar.selectbox(
+            "Checkpoint",
+            ["(No checkpoints found)"],
+            disabled=True,
+            help=f"No checkpoints found in `{cfg_tmp.model.checkpoint_dir}`",
+        )
+
+    st.sidebar.markdown("---")
+    st.sidebar.header("Model Information")
+    st.sidebar.write(f"**Base Model**: `{cfg_tmp.model.base_model_name}`")
+    if selected_ckpt_filename:
+        st.sidebar.write(f"**Selected Checkpoint**: `{selected_ckpt_filename}`")
+    else:
+        st.sidebar.write("**Selected Checkpoint**: `None`")
+
+    # Main Area: Prompt & Action
     if probe_type == "Cloze Probe":
         default_prompt = "A neurotransmitter involved in reward and motivation is ___."
     elif probe_type == "QA Probe":
@@ -187,12 +213,16 @@ def main():
     else:
         default_prompt = "Explain the functional role of the hippocampus in memory consolidation."
 
-    user_prompt = st.text_area(
-        "Question / Prompt",
-        value=default_prompt,
-        height=100,
-        placeholder="Enter your prompt or question here...",
-    )
+    col_prompt, col_btn = st.columns([5, 1], vertical_alignment="bottom")
+    with col_prompt:
+        user_prompt = st.text_area(
+            "Question / Prompt",
+            value=default_prompt,
+            height=100,
+            placeholder="Enter your prompt or question here...",
+        )
+    with col_btn:
+        generate_clicked = st.button("Generate Response", type="primary", use_container_width=True)
 
     qa_choices = []
     if probe_type == "QA Probe":
@@ -206,51 +236,55 @@ def main():
             choice_d = st.text_input("Choice D", value="Medulla oblongata")
         qa_choices = [choice_a, choice_b, choice_c, choice_d]
 
-    if st.button("Generate Model Response", type="primary", use_container_width=True):
+    if generate_clicked:
         if not user_prompt.strip():
             st.warning("Please enter a valid prompt.")
             return
 
-        with st.spinner("Generating output from model..."):
-            result = run_probe_logic(
+        # 1. Base Model Inference
+        with st.spinner("Generating output from Base Model..."):
+            base_model, base_tok, cfg, device = load_cached_model("Base Model", None)
+            base_result = run_probe_logic(
                 probe_type=probe_type,
                 prompt=user_prompt.strip(),
-                model=model,
-                tokenizer=tokenizer,
+                model=base_model,
+                tokenizer=base_tok,
                 cfg=cfg,
                 device=device,
                 choices=qa_choices if probe_type == "QA Probe" else None,
             )
 
-        st.subheader("Model Output")
-        if result["type"] == "cloze":
-            st.markdown(f"**Top-{result['top_k']} Cloze Completions:**")
-            for idx, comp in enumerate(result["completions"], 1):
-                st.info(f"**[{idx}]** {comp}")
+        # 2. Checkpoint Model Inference (if available)
+        ckpt_result = None
+        if selected_ckpt_filename:
+            with st.spinner(f"Generating output from Checkpoint ({selected_ckpt_filename})..."):
+                ckpt_model, ckpt_tok, cfg, device = load_cached_model("Checkpoint", selected_ckpt_filename)
+                ckpt_result = run_probe_logic(
+                    probe_type=probe_type,
+                    prompt=user_prompt.strip(),
+                    model=ckpt_model,
+                    tokenizer=ckpt_tok,
+                    cfg=cfg,
+                    device=device,
+                    choices=qa_choices if probe_type == "QA Probe" else None,
+                )
 
-            with st.expander("View Formatted Few-Shot Prompt"):
-                st.code(result["formatted_prompt"], language="text")
+        # 3. Render side-by-side output columns without redundant top title
+        st.markdown("---")
+        col_base_out, col_ckpt_out = st.columns(2)
 
-        elif result["type"] == "qa":
-            pred_letter = chr(65 + result["predicted_idx"])
-            st.success(f"**Predicted Answer (Choice {pred_letter}):** {result['predicted_choice']}")
-            
-            st.markdown("**Candidate Choice Rankings:**")
-            for idx, choice in enumerate(result["choices"]):
-                letter = chr(65 + idx)
-                if idx == result["predicted_idx"]:
-                    st.info(f"**Choice {letter} (Selected):** {choice}")
-                else:
-                    st.write(f"**Choice {letter}:** {choice}")
+        with col_base_out:
+            st.subheader("Base Model")
+            render_probe_output(base_result)
 
-            with st.expander("View Formatted QA Prompt"):
-                st.code(result["formatted_prompt"], language="text")
-
-        else:
-            st.markdown("**Generated Response:**")
-            st.success(result["response"])
+        with col_ckpt_out:
+            if selected_ckpt_filename and ckpt_result:
+                st.subheader(f"Checkpoint ({selected_ckpt_filename})")
+                render_probe_output(ckpt_result)
+            else:
+                st.subheader("Selected Checkpoint")
+                st.info("No checkpoint available or selected.")
 
 
 if __name__ == "__main__":
     main()
-

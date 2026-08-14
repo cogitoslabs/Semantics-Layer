@@ -75,7 +75,7 @@ Semantics/
 ├── models/                  # Staged base model weights, PEFT-LoRA adapters, and checkpoint outputs
 ├── scripts/                 # Maintenance, dataset conversion, and utility scripts
 ├── tests/                   # Automated Pytest unit and integration test suites
-└── ui/                      # Streamlit/Gradio user interfaces for probe monitoring and inspection
+└── ui/                      # Streamlit web UI for interactive probe inspection (online_probes.py)
 ```
 
 ---
@@ -143,6 +143,21 @@ cfg.optimizer.train_batch_size = 8
 # 3. Execute step
 run_dapt_pipeline(cfg)
 ```
+
+### Interactive Online Probe UI (`ui/online_probes.py`)
+
+Launch the Streamlit web interface to interactively test and evaluate probe completions in real time:
+
+```bash
+streamlit run ui/online_probes.py
+```
+
+**Key UI Capabilities:**
+- **Dynamic Model Selection**: Select between the base student model (e.g. `Qwen/Qwen3-0.6B`) or any saved training checkpoint (`dapt_eval_*.pt` in `models/checkpoints/`) loaded dynamically into memory with caching.
+- **Cloze Probe (Fill-in-the-Blank)**: Test neuroscience terminology recall; displays Top-$k$ completions and formatted few-shot prompt context.
+- **QA Probe (Multiple Choice)**: Evaluate multiple-choice questions with log-probability scoring across candidate answer choices (A, B, C, D) and rankings.
+- **Concept Probe (Freeform Generation)**: Test open-ended conceptual explanations and definitions with configurable token length.
+- **Prompt Inspection**: Inspect the exact formatted prompts and token sequences dispatched to the model in collapsible expanders.
 
 ### Running Automated Test Suites (`pytest`)
 

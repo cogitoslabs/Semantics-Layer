@@ -1,22 +1,28 @@
 # Feature Specification: Online Probe Check Web UI
 
 ## Overview
-A Streamlit web application located at `ui/online_probes.py` providing an interactive UI for evaluating models (Base Model or DAPT Checkpoints) against Cloze and Concept probes.
+A Streamlit web application located at `ui/online_probes.py` providing an interactive UI for real-time comparison between Base Model and fine-tuned DAPT Checkpoint outputs across Cloze, QA, and Concept probes.
 
-## Requirements
-1. **Model Selection**:
-   - **Model Source**: Choice between `Base Model` and `Checkpoint`.
-   - **Checkpoint Selection**: When `Checkpoint` is selected, dynamically scan `cfg.model.checkpoint_dir` for available checkpoints (`dapt_eval_*.pt`).
-   - **Checkpoint Loading**: Load base model & tokenizer via `load_model_and_tokenizer(cfg, device)` and restore weights using `load_checkpoint(checkpoint_path, model)`.
-   - **Caching**: Use `@st.cache_resource` parameterized by model source and checkpoint selection to prevent redundant reloading.
+## Requirements & Modifications
+1. **Header Layout**:
+   - Clean interface without top title or caption banners to maximize screen real estate.
+   - Set page layout to `wide` for side-by-side comparison.
 
-2. **Probe Logic & Inputs**:
-   - **Probe Selection**: `Cloze Probe` or `Concept Probe`.
-   - **Prompt**: Multiline text input for the test prompt.
+2. **Sidebar Controls**:
+   - **Probe Selection**: Dropdown (`st.sidebar.selectbox`) allowing selection between `Cloze Probe`, `QA Probe`, and `Concept Probe`.
+   - **Checkpoint Selection**: Dropdown (`st.sidebar.selectbox`) scanning and listing available DAPT checkpoints (`dapt_eval_*.pt`).
+   - **Model Information**: Displays base model name, selected checkpoint, and compute device.
 
-3. **Execution & Generation**:
-   - **Cloze Probe**: Calls `format_cloze_prompt` and `generate_topk_completions`.
-   - **Concept Probe**: Calls `generate_response`.
+3. **Prompt & Action Layout**:
+   - "Question / Prompt" input area placed side-by-side with the "Generate Response" action button using horizontal layout columns.
+   - For QA Probe, answer choices (A, B, C, D) are configured cleanly under the prompt area.
 
-4. **Output Rendering**:
-   - Displays formatted outputs, active model information, device, and probe results cleanly.
+4. **Dual-Column Model Comparison**:
+   - Automatically executes inference on both the **Base Model** and the **Selected Checkpoint**.
+   - Output displayed in two side-by-side columns:
+     - **Column 1**: Output from Base Model.
+     - **Column 2**: Output from Selected Checkpoint.
+   - Uses unified output rendering for Cloze completions, QA choice predictions, and Concept generation.
+
+5. **Resource Caching**:
+   - Retains `@st.cache_resource` for efficient model loading and switching across base and checkpoint states.

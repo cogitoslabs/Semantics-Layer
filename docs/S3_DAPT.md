@@ -37,7 +37,6 @@ This module implements **Step 3 (Domain Adaptive Pretraining — DAPT)** of the 
 2. **Best Checkpoint Manifest**: `cfg.model.best_checkpoint_manifest` (`logs/best_checkpoint.json`) — Manifest recording the top-performing checkpoint path, evaluation scores, and global step count.
 3. **Evaluation Metrics Log**: `cfg.logging.metrics_log_file` (`logs/dapt_eval_metrics.jsonl`) — Line-delimited JSON log capturing step-by-step training loss, perplexity, QA accuracy, cloze coverage, concept precision, and gate decision states.
 4. **Hard-Cap Risk Report**: `cfg.storage.risk_report_path` (`logs/dapt_hard_cap_risk_report.json`) — Risk assessment report generated if training reaches hard-cap limits without convergence.
-5. **Inference Failure Traces**: `logs/failed_inferences.jsonl` — Detailed diagnostic logs of failed probe QA items generated during post-training validation (`run_inference_and_log_failures`).
 
 ---
 
@@ -93,11 +92,10 @@ All parameters are defined in `lib/utils/config.py` under `DAPTConfig` (`cfg.mod
   - `handle_evaluation_cycle(...)`: Executes probe evaluation suite, updates metrics logs, checks convergence gates, updates `best_checkpoint.json`, and manages checkpoint retention.
   - `run_final_eval(...)`: Executes final evaluation run upon convergence or training completion.
 
-### 5. `evaluation/eval_runner.py` (`run_all_probes` & `run_inference_and_log_failures`)
-- **Role**: Multi-probe evaluation execution and post-training failure logging.
+### 5. `evaluation/eval_runner.py` (`run_all_probes`)
+- **Role**: Multi-probe evaluation execution during training intervals.
 - **Functions & Classes**:
   - `run_all_probes(model, tokenizer, cfg, ...)`: Sequentially executes Probes A, B, C, and D, logging individual probe metrics and updating evaluation history.
-  - `run_inference_and_log_failures(cfg)`: Loads the trained checkpoint, runs inference across QA probe items, identifies misclassified questions, and writes failure logs to `logs/failed_inferences.jsonl`.
 
 ### 6. `evaluation/gate_logic.py` (`check_convergence_gates` & `handle_hard_cap`)
 - **Role**: Convergence decision engine and hard-cap remediation router.
@@ -146,8 +144,6 @@ flowchart TD
         O -->|CONTINUE| Q[Save Interval Checkpoint & Resume Training]
         O -->|HARD_CAP| R[Generate Risk Report & Trigger Remediation]
     end
-
-    P --> S[Run Final Inference & Log Failed Cases]
 ```
 
 ### Detailed Functional Walkthrough
@@ -163,4 +159,3 @@ flowchart TD
    - **`CONVERGED`**: If Primary Gate A (QA Accuracy $\ge 0.70$), Primary Gate B (Perplexity plateau), and Secondary Gate (Cloze coverage $\ge 0.65$ OR Concept precision $\ge 0.60$) are all met, training halts, saving `best_checkpoint.json` and model weights.
    - **`CONTINUE`**: If gates are not yet satisfied and token hard-cap is not reached, evaluation metrics are logged to `dapt_eval_metrics.jsonl`, a checkpoint is saved, and training resumes.
    - **`HARD_CAP`**: If the token hard-cap limit is reached without full convergence, `handle_hard_cap` writes a structured risk report (`dapt_hard_cap_risk_report.json`) detailing remediation recommendations.
-5. **Post-Training Validation & Diagnostic Trace**: Upon completing training, `run_inference_and_log_failures` loads the best checkpoint, runs inference across QA probe items, and logs misclassified questions to `logs/failed_inferences.jsonl` for error analysis.
