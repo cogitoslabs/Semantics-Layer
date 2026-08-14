@@ -1,11 +1,13 @@
 # Change History
 
-## Status: Build in Progress (Evaluation Trace Logging & UI Viewer)
+## Status: Completed (Evaluation Trace Logging & UI Viewer)
 
-- In progress: Implementing modular `lib/utils/trace_logger.py` for per-probe CSV trace saving and cross-checkpoint trace comparison.
-- In progress: Integrating partitioned trace logging (`logs/traces/cloze/`, `logs/traces/qa/`, `logs/traces/concept/`) in `lib/s3_dapt/evaluation/eval_runner.py`.
-- In progress: Building interactive Streamlit Trace Log viewer in `ui/trace_log.py`.
-- In progress: Adding comprehensive unit tests in `tests/test_trace_logger.py` and `tests/test_trace_log_ui.py`.
+- Implemented modular `TraceLogger` in [trace_logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/trace_logger.py) with partitioned CSV saving (`logs/traces/[eval_name]/[timestamp]_[checkpoint].csv`), cross-checkpoint trace comparison (`compare_traces`), and listing utilities (`list_trace_runs`, `load_traces`).
+- Integrated partitioned evaluation trace logging in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) across Cloze, QA, and Concept probes.
+- Built interactive Streamlit Trace Log viewer in [trace_log.py](file:///e:/Projects/cnd/Semantics/ui/trace_log.py) supporting eval probe selection, timestamp/checkpoint run filtering, base-model baseline comparison, changed-output filtering, interactive pagination, and side-by-side output card comparisons with visual score badges and diff highlights.
+- Created feature specification in [eval-trace-logging.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/eval-trace-logging.md).
+- Added comprehensive unit test suites in [test_trace_logger.py](file:///e:/Projects/cnd/Semantics/tests/test_trace_logger.py) and [test_trace_log_ui.py](file:///e:/Projects/cnd/Semantics/tests/test_trace_log_ui.py).
+- Verified **100% test pass rate across all 146 workspace unit tests** (**146/146 passing**).
 
 ---
 
