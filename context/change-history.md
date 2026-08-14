@@ -1,5 +1,23 @@
 # Change History
 
+## Status: Build in Progress (Evaluation Trace Logging & UI Viewer)
+
+- In progress: Implementing modular `lib/utils/trace_logger.py` for per-probe CSV trace saving and cross-checkpoint trace comparison.
+- In progress: Integrating partitioned trace logging (`logs/traces/cloze/`, `logs/traces/qa/`, `logs/traces/concept/`) in `lib/s3_dapt/evaluation/eval_runner.py`.
+- In progress: Building interactive Streamlit Trace Log viewer in `ui/trace_log.py`.
+- In progress: Adding comprehensive unit tests in `tests/test_trace_logger.py` and `tests/test_trace_log_ui.py`.
+
+---
+
+## Status: Design Completed (Evaluation Trace Logging & UI Viewer)
+
+- Created detailed feature design specification in [eval-trace-logging.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/eval-trace-logging.md).
+- Designed partitioned trace logging system writing structured CSVs under `logs/traces/[eval_name]/[timestamp].csv` for Cloze, QA, and Concept probes.
+- Designed modular `TraceLogger` utility in `lib/utils/trace_logger.py` with deterministic `seq_num` tracking for cross-checkpoint diffing.
+- Designed interactive Streamlit Trace Viewer in `ui/trace_log.py` supporting probe filtering, chronological timestamp selection, changed-output filtering, and side-by-side Base vs Checkpoint card comparisons.
+
+---
+
 ## Status: Completed (Online Probe Checker UI Layout & Side-by-Side Model Comparison)
 
 - Streamlined UI in [online_probes.py](file:///e:/Projects/cnd/Semantics/ui/online_probes.py) by removing redundant top page title, caption banners, and the "Model Output" subheader to maximize clean vertical alignment and viewing area.

@@ -1,0 +1,4 @@
+Eval #,Eval Category,Eval Seq #,Eval,Generated Answer by the model,Matching Score,Result
+1,QA,1,"{""question"": ""Q1""}",Ans1,1.0,Pass
+1,Cloze,1,"{""prompt"": ""P1""}",Term1,1.0,Pass
+1,Concept,1,"{""prompt"": ""Prompt1""}",ConceptDef1,1.0,Pass

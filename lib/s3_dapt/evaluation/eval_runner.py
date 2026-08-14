@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from lib.utils import DAPTConfig
+from lib.utils.trace_logger import save_probe_traces_csv
 from lib.s3_dapt.probes.qa_probe         import eval_qa_accuracy, get_qa_probe_samples
 from lib.s3_dapt.probes.perplexity_probe import eval_perplexity
 from lib.s3_dapt.probes.cloze_probe import eval_cloze_coverage, get_cloze_probe_samples
@@ -226,14 +227,54 @@ def run_all_probes(
         getattr(cfg.logging, "eval_traces_file", None)
         or (cfg.logging.log_dir / "dapt_eval_traces.csv")
     )
+    trace_dir = cfg.logging.log_dir / "traces"
+
+    qa_traces = qa_result.get("eval_traces", qa_result.get("samples", [])) if cfg.probes.run_qa else []
+    cloze_traces = term_result.get("eval_traces", term_result.get("samples", [])) if cfg.probes.run_cloze else []
+    concept_traces = ret_result.get("eval_traces", ret_result.get("samples", [])) if cfg.probes.run_concept else []
 
     current_pass_traces = []
-    if cfg.probes.run_qa:
-        current_pass_traces.extend(qa_result.get("eval_traces", qa_result.get("samples", [])))
-    if cfg.probes.run_cloze:
-        current_pass_traces.extend(term_result.get("eval_traces", term_result.get("samples", [])))
-    if cfg.probes.run_concept:
-        current_pass_traces.extend(ret_result.get("eval_traces", ret_result.get("samples", [])))
+    if qa_traces:
+        current_pass_traces.extend(qa_traces)
+        try:
+            save_probe_traces_csv(
+                category="qa",
+                eval_num=state["eval_count"],
+                traces=qa_traces,
+                checkpoint_name=f"eval_{state['eval_count']}",
+                base_dir=trace_dir,
+                timestamp_str=metrics["timestamp"],
+            )
+        except Exception as e:
+            logger.error(f"Failed to write QA probe traces CSV: {e}")
+
+    if cloze_traces:
+        current_pass_traces.extend(cloze_traces)
+        try:
+            save_probe_traces_csv(
+                category="cloze",
+                eval_num=state["eval_count"],
+                traces=cloze_traces,
+                checkpoint_name=f"eval_{state['eval_count']}",
+                base_dir=trace_dir,
+                timestamp_str=metrics["timestamp"],
+            )
+        except Exception as e:
+            logger.error(f"Failed to write Cloze probe traces CSV: {e}")
+
+    if concept_traces:
+        current_pass_traces.extend(concept_traces)
+        try:
+            save_probe_traces_csv(
+                category="concept",
+                eval_num=state["eval_count"],
+                traces=concept_traces,
+                checkpoint_name=f"eval_{state['eval_count']}",
+                base_dir=trace_dir,
+                timestamp_str=metrics["timestamp"],
+            )
+        except Exception as e:
+            logger.error(f"Failed to write Concept probe traces CSV: {e}")
 
     try:
         append_eval_traces_to_csv(eval_traces_path, current_pass_traces)
