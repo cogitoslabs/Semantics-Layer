@@ -115,3 +115,31 @@ def run_pretokenization(
     np.save(output_bin_path, token_arr)
     logger.info(f"Successfully saved {len(token_arr):,} training tokens to {output_bin_path}")
 
+    # Save companion metadata JSON
+    from datetime import datetime, timezone
+    meta_path = Path(cfg.data.pretokenized_meta_path)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+
+    vocab_size = getattr(tokenizer, "vocab_size", len(tokenizer))
+    try:
+        total_vocab = len(tokenizer)
+    except Exception:
+        total_vocab = vocab_size
+
+    metadata = {
+        "base_model_name": base_model_name,
+        "tokenizer_class": tokenizer.__class__.__name__,
+        "vocab_size": total_vocab,
+        "eos_token_id": eos_id,
+        "train_tokens_count": int(len(token_arr)),
+        "val_tokens_count": int(len(val_token_arr)),
+        "train_doc_count": processed_train_docs,
+        "val_doc_count": val_count,
+        "val_ratio": val_ratio,
+        "seed": cfg.misc.seed,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+    logger.info(f"Saved pre-tokenization metadata to {meta_path} (model: {base_model_name}, vocab_size: {total_vocab:,})")
+

@@ -223,19 +223,18 @@ def run_all_probes(
     )
 
     # ── Compile and save all evaluation probe traces for EVERY evaluation pass ──
-    eval_traces_path = (
-        getattr(cfg.logging, "eval_traces_file", None)
-        or (cfg.logging.log_dir / "dapt_eval_traces.csv")
-    )
     trace_dir = cfg.logging.log_dir / "traces"
+
+    # Track evaluation run ID across the training run (timestamp of the first eval)
+    if "eval_run_id" not in state or not state["eval_run_id"]:
+        state["eval_run_id"] = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    eval_run_id = state["eval_run_id"]
 
     qa_traces = qa_result.get("eval_traces", qa_result.get("samples", [])) if cfg.probes.run_qa else []
     cloze_traces = term_result.get("eval_traces", term_result.get("samples", [])) if cfg.probes.run_cloze else []
     concept_traces = ret_result.get("eval_traces", ret_result.get("samples", [])) if cfg.probes.run_concept else []
 
-    current_pass_traces = []
     if qa_traces:
-        current_pass_traces.extend(qa_traces)
         try:
             save_probe_traces_csv(
                 category="qa",
@@ -243,13 +242,13 @@ def run_all_probes(
                 traces=qa_traces,
                 checkpoint_name=f"eval_{state['eval_count']}",
                 base_dir=trace_dir,
+                run_id=eval_run_id,
                 timestamp_str=metrics["timestamp"],
             )
         except Exception as e:
             logger.error(f"Failed to write QA probe traces CSV: {e}")
 
     if cloze_traces:
-        current_pass_traces.extend(cloze_traces)
         try:
             save_probe_traces_csv(
                 category="cloze",
@@ -257,13 +256,13 @@ def run_all_probes(
                 traces=cloze_traces,
                 checkpoint_name=f"eval_{state['eval_count']}",
                 base_dir=trace_dir,
+                run_id=eval_run_id,
                 timestamp_str=metrics["timestamp"],
             )
         except Exception as e:
             logger.error(f"Failed to write Cloze probe traces CSV: {e}")
 
     if concept_traces:
-        current_pass_traces.extend(concept_traces)
         try:
             save_probe_traces_csv(
                 category="concept",
@@ -271,49 +270,14 @@ def run_all_probes(
                 traces=concept_traces,
                 checkpoint_name=f"eval_{state['eval_count']}",
                 base_dir=trace_dir,
+                run_id=eval_run_id,
                 timestamp_str=metrics["timestamp"],
             )
         except Exception as e:
             logger.error(f"Failed to write Concept probe traces CSV: {e}")
 
-    try:
-        append_eval_traces_to_csv(eval_traces_path, current_pass_traces)
-        logger.info(f"Detailed evaluation probe traces (Pass/Fail, Eval #{state['eval_count']}) saved to {eval_traces_path}")
-    except Exception as e:
-        logger.error(f"Failed to write evaluation probe traces CSV file: {e}")
-
     # Clear cached scorers to reclaim VRAM
     clear_scorer_cache()
 
     return metrics
-
-
-CSV_FIELDNAMES = [
-    "Eval #",
-    "Eval Category",
-    "Eval Seq #",
-    "Eval",
-    "Generated Answer by the model",
-    "Matching Score",
-    "Result",
-]
-
-
-def append_eval_traces_to_csv(eval_traces_path: Path, new_traces: List[Dict[str, Any]]) -> None:
-    """
-    Append evaluation trace records to a CSV file. If the file does not exist,
-    the header row will be written first.
-    """
-    if not new_traces:
-        return
-    import csv
-    import os
-    os.makedirs(eval_traces_path.parent, exist_ok=True)
-    file_exists = eval_traces_path.exists() and eval_traces_path.stat().st_size > 0
-    with open(eval_traces_path, "a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
-        if not file_exists:
-            writer.writeheader()
-        for record in new_traces:
-            writer.writerow(record)
 

@@ -65,6 +65,24 @@ def load_ppl_corpus(
     # Load from NumPy array directly
     token_ids = np.load(ppl_corpus_path).tolist()
 
+    if tokenizer is not None and token_ids:
+        vocab_size = getattr(tokenizer, "vocab_size", None)
+        try:
+            total_vocab = len(tokenizer)
+        except Exception:
+            total_vocab = vocab_size
+
+        if total_vocab:
+            # Check maximum token ID in sample slice
+            sample_slice = token_ids[:min(len(token_ids), 20000)]
+            max_id = max(sample_slice) if sample_slice else 0
+            if max_id >= total_vocab:
+                raise ValueError(
+                    f"Token ID {max_id} in {ppl_corpus_path} exceeds tokenizer vocab size ({total_vocab}). "
+                    f"The pre-tokenized validation corpus does not match the active model's tokenizer. "
+                    f"Please re-run pre-tokenization with 'python pipeline.py --step s2'."
+                )
+
     if len(token_ids) > max_tokens:
         logger.info(
             f"Truncating PPL corpus from {len(token_ids)/1e6:.1f}M to {max_tokens/1e6:.1f}M tokens"

@@ -1,10 +1,40 @@
 # Change History
 
+## Status: Completed (Evaluation Trace SQLite Database & Error Categorization UI)
+
+- Implemented standalone SQLite database storage layer in [trace_db.py](file:///e:/Projects/cnd/Semantics/lib/utils/trace_db.py) with dedicated tables (`cloze_traces`, `qa_traces`, `concept_traces`) indexed by composite primary key `(run_id, checkpoint, seq_num)`, where Base Model baseline is assigned `checkpoint = 0`.
+- Created standalone CLI ingestion script in [load_traces_to_db.py](file:///e:/Projects/cnd/Semantics/scripts/load_traces_to_db.py) to parse and load all/latest evaluation trace CSV logs from `logs/traces/` into `logs/traces.db`.
+- Integrated SQLite database backend directly into Streamlit viewer in [trace_log.py](file:///e:/Projects/cnd/Semantics/ui/trace_log.py) with automatic startup sync and manual sync trigger.
+- Refactored UI sidebar selection into 3 distinct, cascading dropdowns: **Run ID**, **Base Model / Reference** (corresponding to the selected Run ID), and **Selected Checkpoint** (corresponding to the selected Run ID) with auto-defaulting to baseline and latest checkpoint.
+- Added interactive Error Categorization workflow with dynamic dropdown selectbox populated from distinct categories in the database, custom category input, notes capture, and immediate SQLite persistence.
+- Added sidebar Error Category filter to filter evaluation traces by assigned error categories.
+- Added `trace_db_path` to `LoggingConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py), [.env](file:///e:/Projects/cnd/Semantics/.env), and [.env.example](file:///e:/Projects/cnd/Semantics/.env.example).
+- Updated training evaluation pipeline in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) and [trace_logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/trace_logger.py) to save all evaluation traces partitioned by session run ID under `logs/traces/[runid]/[probe]/eval_XXXX.csv`, where `runid` is the timestamp of the first evaluation pass in that training run.
+- Updated database parser and SQLite loader in [trace_db.py](file:///e:/Projects/cnd/Semantics/lib/utils/trace_db.py) to automatically recognize and recursively ingest traces from `logs/traces/[runid]/[probe]/eval_XXXX.csv`.
+- Removed redundant legacy monolithic CSV logging (`logs/dapt_eval_traces.csv` / `append_eval_traces_to_csv`) in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) to eliminate duplicate trace writes.
+- Created feature specification in [trace-db-error-categorization.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/trace-db-error-categorization.md).
+- Added comprehensive unit test suite in [test_trace_db.py](file:///e:/Projects/cnd/Semantics/tests/test_trace_db.py) and verified **100% test pass rate across all 156 workspace unit tests** (**156/156 passing**).
+
+---
+
+## Status: Completed (Pre-tokenization Metadata Validation Check)
+
+- Added companion metadata generation (`pretokenized_metadata.json`) in [pretokenize.py](file:///e:/Projects/cnd/Semantics/lib/s2_pretokenize/pretokenize.py) recording `base_model_name`, `tokenizer_class`, `vocab_size`, token counts, and doc counts.
+- Added `pretokenized_meta_path` to `DataConfig` in [config.py](file:///e:/Projects/cnd/Semantics/lib/utils/config.py), [.env](file:///e:/Projects/cnd/Semantics/.env), and [.env.example](file:///e:/Projects/cnd/Semantics/.env.example).
+- Implemented `verify_pretokenized_metadata` in [training_helpers.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/training_helpers.py) and integrated it in [dapt.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/dapt.py) to validate that pre-tokenized token arrays match the active training model/tokenizer before starting training.
+- Added token ID range validation in [perplexity_probe.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/probes/perplexity_probe.py) (`load_ppl_corpus`) against tokenizer vocabulary bounds.
+- Created feature specification in [pretokenization-metadata-check.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/pretokenization-metadata-check.md).
+- Added comprehensive unit tests in [test_dapt.py](file:///e:/Projects/cnd/Semantics/tests/test_dapt.py) verifying metadata writing, matching model validation, mismatch detection, and out-of-bounds token ID detection.
+- Verified **100% test pass rate across all 149 workspace unit tests** (**149/149 passing**).
+
+---
+
 ## Status: Completed (Evaluation Trace Logging & UI Viewer)
 
 - Implemented modular `TraceLogger` in [trace_logger.py](file:///e:/Projects/cnd/Semantics/lib/utils/trace_logger.py) with partitioned CSV saving (`logs/traces/[eval_name]/[timestamp]_[checkpoint].csv`), cross-checkpoint trace comparison (`compare_traces`), and listing utilities (`list_trace_runs`, `load_traces`).
 - Integrated partitioned evaluation trace logging in [eval_runner.py](file:///e:/Projects/cnd/Semantics/lib/s3_dapt/evaluation/eval_runner.py) across Cloze, QA, and Concept probes.
 - Built interactive Streamlit Trace Log viewer in [trace_log.py](file:///e:/Projects/cnd/Semantics/ui/trace_log.py) supporting eval probe selection, timestamp/checkpoint run filtering, base-model baseline comparison, changed-output filtering, interactive pagination, and side-by-side output card comparisons with visual score badges and diff highlights.
+- Enhanced Trace Log UI layout: streamlined metric cards and title font sizes for space efficiency, fixed prompt box font colors for high-contrast dark/light mode readability, and updated right column header to "Checkpoint Output".
 - Created feature specification in [eval-trace-logging.md](file:///e:/Projects/cnd/Semantics/context/feature-specs/eval-trace-logging.md).
 - Added comprehensive unit test suites in [test_trace_logger.py](file:///e:/Projects/cnd/Semantics/tests/test_trace_logger.py) and [test_trace_log_ui.py](file:///e:/Projects/cnd/Semantics/tests/test_trace_log_ui.py).
 - Verified **100% test pass rate across all 146 workspace unit tests** (**146/146 passing**).

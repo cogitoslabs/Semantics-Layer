@@ -192,23 +192,31 @@ def save_probe_traces_csv(
     traces: List[Dict[str, Any]],
     checkpoint_name: str = "",
     base_dir: Union[str, Path] = "logs/traces",
+    run_id: Optional[str] = None,
     timestamp_str: Optional[str] = None,
 ) -> Path:
     """
     Save list of evaluation traces into a dedicated per-probe timestamped CSV file.
     
-    Path format: {base_dir}/{normalized_category}/{timestamp}_eval_{eval_num}.csv
+    Path format:
+      If run_id is provided: {base_dir}/{run_id}/{normalized_category}/eval_{eval_num:04d}.csv
+      Otherwise: {base_dir}/{normalized_category}/{timestamp}_eval_{eval_num:04d}.csv
     """
     norm_category = normalize_category_name(category)
-    target_dir = Path(base_dir) / norm_category
-    target_dir.mkdir(parents=True, exist_ok=True)
-
     now = datetime.now(timezone.utc)
     ts_file = now.strftime("%Y%m%d_%H%M%S")
     ts_iso = timestamp_str or now.isoformat()
 
     eval_str = f"{int(eval_num):04d}" if str(eval_num).isdigit() else str(eval_num)
-    filename = f"{ts_file}_eval_{eval_str}.csv"
+
+    if run_id:
+        target_dir = Path(base_dir) / str(run_id).strip() / norm_category
+        filename = f"eval_{eval_str}.csv"
+    else:
+        target_dir = Path(base_dir) / norm_category
+        filename = f"{ts_file}_eval_{eval_str}.csv"
+
+    target_dir.mkdir(parents=True, exist_ok=True)
     output_path = target_dir / filename
 
     normalized_records = [
@@ -253,16 +261,18 @@ def list_trace_files(
     category: str,
     base_dir: Union[str, Path] = "logs/traces",
 ) -> List[Path]:
-    """Scan category directory and return list of trace CSV files sorted newest first."""
+    """Scan directory and return list of trace CSV files for a probe category sorted newest first."""
     norm_category = normalize_category_name(category)
-    cat_dir = Path(base_dir) / norm_category
-    if not cat_dir.exists():
+    base_path = Path(base_dir)
+    if not base_path.exists():
         return []
     
-    files = list(cat_dir.glob("*.csv"))
-    # Sort newest first based on filename timestamp or st_mtime
-    files.sort(key=lambda p: (p.name, p.stat().st_mtime), reverse=True)
-    return files
+    # Check direct category folder and nested run_id/category folders
+    nested_files = list(base_path.rglob(f"{norm_category}/*.csv"))
+    flat_files = [f for f in base_path.rglob("*.csv") if f.parent.name == norm_category or f"{norm_category}_" in f.name or f"_{norm_category}." in f.name]
+    all_files = list({str(f): f for f in (nested_files + flat_files)}.values())
+    all_files.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+    return all_files
 
 
 def load_trace_file(file_path: Union[str, Path]) -> pd.DataFrame:
@@ -301,16 +311,19 @@ def compute_trace_diff(
         return pd.DataFrame()
     
     if base_df.empty:
-        # Fallback when no baseline is available
+        # Fallback when no baseline is available (Single Checkpoint View)
         res = target_df.copy()
-        res["prompt_display"] = res["prompt"]
-        res["target_answer_display"] = res["target_answer"]
-        res["base_output"] = "(No baseline available)"
-        res["base_score"] = 0.0
-        res["base_result"] = "N/A"
-        res["target_output"] = res["model_output"]
-        res["target_score"] = res["matching_score"]
-        res["target_result"] = res["result"]
+        res["prompt_display"] = res["prompt"] if "prompt" in res.columns else ""
+        res["target_answer_display"] = res["target_answer"] if "target_answer" in res.columns else ""
+        res["category_display"] = res["category"] if "category" in res.columns else ""
+        res["model_output_base"] = "(No baseline available)"
+        res["matching_score_base"] = 0.0
+        res["result_base"] = "N/A"
+        res["model_output_target"] = res["model_output"] if "model_output" in res.columns else ""
+        res["matching_score_target"] = res["matching_score"] if "matching_score" in res.columns else 0.0
+        res["result_target"] = res["result"] if "result" in res.columns else "N/A"
+        res["error_category_target"] = res["error_category"] if "error_category" in res.columns else ""
+        res["notes_target"] = res["notes"] if "notes" in res.columns else ""
         res["is_output_changed"] = True
         res["is_result_changed"] = False
         res["delta_status"] = "Single Checkpoint"
@@ -318,14 +331,17 @@ def compute_trace_diff(
 
     if target_df.empty:
         res = base_df.copy()
-        res["prompt_display"] = res["prompt"]
-        res["target_answer_display"] = res["target_answer"]
-        res["base_output"] = res["model_output"]
-        res["base_score"] = res["matching_score"]
-        res["base_result"] = res["result"]
-        res["target_output"] = "(No checkpoint data)"
-        res["target_score"] = 0.0
-        res["target_result"] = "N/A"
+        res["prompt_display"] = res["prompt"] if "prompt" in res.columns else ""
+        res["target_answer_display"] = res["target_answer"] if "target_answer" in res.columns else ""
+        res["category_display"] = res["category"] if "category" in res.columns else ""
+        res["model_output_base"] = res["model_output"] if "model_output" in res.columns else ""
+        res["matching_score_base"] = res["matching_score"] if "matching_score" in res.columns else 0.0
+        res["result_base"] = res["result"] if "result" in res.columns else "N/A"
+        res["model_output_target"] = "(No checkpoint data)"
+        res["matching_score_target"] = 0.0
+        res["result_target"] = "N/A"
+        res["error_category_target"] = res["error_category"] if "error_category" in res.columns else ""
+        res["notes_target"] = res["notes"] if "notes" in res.columns else ""
         res["is_output_changed"] = False
         res["is_result_changed"] = False
         res["delta_status"] = "Baseline Only"

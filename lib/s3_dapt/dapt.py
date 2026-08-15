@@ -17,6 +17,7 @@ from lib.s3_dapt.evaluation.eval_runner import run_all_probes
 from lib.s3_dapt.training_helpers import (
     setup_training_environment,
     verify_eval_files,
+    verify_pretokenized_metadata,
     init_optimizer_scheduler,
     handle_evaluation_cycle,
     run_final_eval,
@@ -68,6 +69,7 @@ def run_dapt_pipeline_impl(
     setup_training_environment(cfg, device)
     model, tokenizer = init_model_and_tokenizer(cfg, device)
     verify_eval_files(cfg)
+    verify_pretokenized_metadata(cfg, tokenizer)
     train_dataloader = load_dataloader(cfg, device, resources)
     optimizer, scheduler = init_optimizer_scheduler(cfg, model, len(train_dataloader))
     state = init_state(resources)   

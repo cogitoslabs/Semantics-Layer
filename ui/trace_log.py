@@ -1,33 +1,42 @@
 """
-ui/trace_log.py — Streamlit Web Application for Evaluation Trace Log Inspection & Comparison
+ui/trace_log.py — Streamlit Web Application for Evaluation Trace Inspection & Error Categorization
 
-Allows interactive browsing and side-by-side comparison of evaluation probe completions
-between baseline and fine-tuned checkpoints across Cloze, QA, and Concept probes.
+Connects directly to the SQLite database (logs/traces.db) with automatic CSV sync.
+Allows interactive browsing, cross-checkpoint diff comparison, dynamic error categorization,
+and failure taxonomy tagging across Cloze, QA, and Concept probes.
 """
 
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure root directory is on sys.path
 root_dir = Path(__file__).resolve().parent.parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 
+import importlib
 import pandas as pd
 import streamlit as st
 
-from lib.utils.config import PipelineConfig
-from lib.utils.trace_logger import (
-    compute_trace_diff,
-    format_file_label,
-    list_trace_categories,
-    list_trace_files,
-    load_trace_file,
-    normalize_category_name,
-    parse_eval_num_from_filename,
-)
+import lib.utils.trace_db
+import lib.utils.trace_logger
+importlib.reload(lib.utils.trace_db)
+importlib.reload(lib.utils.trace_logger)
 
+from lib.utils.config import PipelineConfig
+from lib.utils.trace_db import (
+    get_distinct_error_categories,
+    init_trace_db,
+    list_db_runs,
+    list_db_checkpoints_for_run,
+    list_db_runs_and_checkpoints,
+    load_probe_traces_from_db,
+    normalize_probe_name,
+    sync_all_traces_to_db,
+    update_trace_annotation,
+)
+from lib.utils.trace_logger import compute_trace_diff
 
 
 def main():
@@ -40,63 +49,77 @@ def main():
     st.markdown(
         """
         <style>
+            header[data-testid="stHeader"] {
+                background: transparent !important;
+                height: 2.5rem !important;
+            }
             .block-container {
-                padding-top: 1.5rem !important;
-                padding-bottom: 1.5rem !important;
+                padding-top: 2.8rem !important;
+                padding-bottom: 1.2rem !important;
             }
-            .metric-card {
-                background: #f8f9fa;
-                border: 1px solid #e9ecef;
-                border-radius: 8px;
-                padding: 12px 16px;
-                text-align: center;
+            [data-testid="stMetricValue"] {
+                font-size: 1.35rem !important;
             }
-            .trace-header-card {
-                background: #ffffff;
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                padding: 16px;
-                margin-bottom: 16px;
+            [data-testid="stMetricLabel"] {
+                font-size: 0.8rem !important;
+                font-weight: 600;
             }
-            .output-card {
-                border-radius: 8px;
-                padding: 16px;
-                height: 100%;
+            [data-testid="stMetricDelta"] {
+                font-size: 0.75rem !important;
+            }
+            [data-testid="stMetric"] {
+                padding: 2px 4px !important;
+            }
+            hr {
+                margin: 0.5rem 0 !important;
             }
             .badge-pass {
                 background-color: #d1e7dd;
                 color: #0f5132;
-                padding: 4px 8px;
+                padding: 3px 8px;
                 border-radius: 4px;
                 font-weight: 600;
+                font-size: 0.85rem;
             }
             .badge-fail {
                 background-color: #f8d7da;
                 color: #842029;
-                padding: 4px 8px;
+                padding: 3px 8px;
                 border-radius: 4px;
                 font-weight: 600;
+                font-size: 0.85rem;
             }
             .badge-improved {
                 background-color: #d1e7dd;
                 color: #0f5132;
-                padding: 4px 8px;
+                padding: 3px 8px;
                 border-radius: 4px;
                 font-weight: 700;
+                font-size: 0.85rem;
             }
             .badge-regressed {
                 background-color: #f8d7da;
                 color: #842029;
-                padding: 4px 8px;
+                padding: 3px 8px;
                 border-radius: 4px;
                 font-weight: 700;
+                font-size: 0.85rem;
             }
             .badge-neutral {
                 background-color: #e2e3e5;
                 color: #41464b;
-                padding: 4px 8px;
+                padding: 3px 8px;
                 border-radius: 4px;
                 font-weight: 600;
+                font-size: 0.85rem;
+            }
+            .badge-category {
+                background-color: #ede9fe;
+                color: #5b21b6;
+                padding: 3px 8px;
+                border-radius: 4px;
+                font-weight: 600;
+                font-size: 0.85rem;
             }
         </style>
         """,
@@ -105,87 +128,147 @@ def main():
 
     cfg = PipelineConfig()
     trace_base_dir = cfg.logging.log_dir / "traces"
+    trace_db_path = cfg.logging.trace_db_path
+
+    # Initialize SQLite database schema
+    init_trace_db(trace_db_path)
+
+    # Auto-sync trace CSV files to SQLite on startup
+    if "db_synced" not in st.session_state:
+        sync_all_traces_to_db(trace_base_dir, trace_db_path)
+        st.session_state["db_synced"] = True
 
     # Sidebar setup
     st.sidebar.title("Trace Log Browser")
-    st.sidebar.markdown("Inspect and compare evaluation probe predictions.")
+    st.sidebar.markdown("Inspect, compare, and categorize evaluation probe predictions.")
 
-    # 1. Category selector
-    categories = ["Cloze", "QA", "Concept"]
-    selected_category = st.sidebar.selectbox("Evaluation Probe", categories, index=0)
-    norm_cat = normalize_category_name(selected_category)
-
-    # 2. Find available trace files
-    trace_files = list_trace_files(norm_cat, base_dir=trace_base_dir)
-
-    if not trace_files:
-        st.sidebar.warning(f"No trace logs found for `{selected_category}` in `{trace_base_dir / norm_cat}`.")
-        st.info(
-            f"### No `{selected_category}` Traces Available\n\n"
-            f"Traces are automatically saved during evaluation passes (`eval_runner.py`).\n\n"
-            f"Expected trace directory: `{trace_base_dir / norm_cat}`"
-        )
-        return
-
-    # Map files to readable labels
-    file_map = {f: format_file_label(f) for f in trace_files}
-    file_options = list(file_map.keys())
-
-    # 3. Checkpoint Selector (Default to most recent)
-    selected_target_file = st.sidebar.selectbox(
-        "Selected Checkpoint Trace",
-        file_options,
-        format_func=lambda f: file_map[f],
-        index=0,
-        help="Select evaluation cycle to inspect (ordered newest to oldest).",
-    )
-
-    # 4. Baseline Selector (Default to earliest / eval_0)
-    baseline_options = [None] + file_options
-    
-    # Auto-select earliest or eval_0
-    default_base_idx = 0
-    if len(file_options) > 1:
-        # Find file with smallest eval number or oldest timestamp
-        earliest_file = min(file_options, key=lambda f: (parse_eval_num_from_filename(f.name), f.stat().st_mtime))
-        try:
-            default_base_idx = baseline_options.index(earliest_file)
-        except ValueError:
-            default_base_idx = len(baseline_options) - 1
-
-    def format_base_label(f):
-        if f is None:
-            return "(None - Single Checkpoint View)"
-        return file_map.get(f, str(f))
-
-    selected_base_file = st.sidebar.selectbox(
-        "Base Model / Reference Trace",
-        baseline_options,
-        format_func=format_base_label,
-        index=default_base_idx,
-        help="Select baseline trace to compare against.",
-    )
+    # Manual Sync Button
+    if st.sidebar.button("🔄 Sync Traces from Logs", help="Reload all trace CSVs into SQLite database"):
+        counts = sync_all_traces_to_db(trace_base_dir, trace_db_path)
+        total_synced = sum(counts.values())
+        st.sidebar.success(f"Synced {total_synced:,} records across probes!")
+        st.rerun()
 
     st.sidebar.markdown("---")
 
-    # 5. Filters
+    # 1. Probe selector
+    categories = ["QA", "Cloze", "Concept"]
+    selected_category = st.sidebar.selectbox("Evaluation Probe", categories, index=0)
+    norm_probe = normalize_probe_name(selected_category)
+
+    # 2. Query available Run IDs for the selected probe
+    available_runs = list_db_runs(norm_probe, db_path=trace_db_path)
+
+    if not available_runs:
+        st.sidebar.warning(f"No traces found in database for `{selected_category}`.")
+        st.info(
+            f"### No `{selected_category}` Traces in Database\n\n"
+            f"Run evaluations or ingest trace logs via:\n"
+            f"```bash\npython scripts/load_traces_to_db.py\n```\n\n"
+            f"Database file: `{trace_db_path}`"
+        )
+        return
+
+    run_label_map = {r["run_id"]: r["label"] for r in available_runs}
+    run_ids = [r["run_id"] for r in available_runs]
+
+    # Dropdown 1: Run ID
+    selected_run_id = st.sidebar.selectbox(
+        "Run ID",
+        run_ids,
+        format_func=lambda rid: run_label_map.get(rid, rid),
+        index=0,
+        help="Select evaluation run session.",
+    )
+
+    # Query checkpoints available for the selected Run ID
+    available_checkpoints = list_db_checkpoints_for_run(
+        probe=norm_probe,
+        run_id=selected_run_id,
+        db_path=trace_db_path,
+    )
+
+    if not available_checkpoints:
+        st.sidebar.warning(f"No checkpoints found for Run ID `{selected_run_id}`.")
+        return
+
+    ckpt_map = {c["checkpoint"]: c for c in available_checkpoints}
+    ckpt_numbers = [c["checkpoint"] for c in available_checkpoints]
+
+    # Dropdown 2: Base Model / Reference (corresponding to Run ID)
+    ref_options = [None] + ckpt_numbers
+    default_base_idx = 0
+    base_candidates = [c["checkpoint"] for c in available_checkpoints if c["is_base"]]
+    if base_candidates:
+        default_base_idx = ref_options.index(base_candidates[0])
+    elif len(ckpt_numbers) > 1:
+        default_base_idx = 1  # earliest checkpoint
+
+    def format_base_option(c):
+        if c is None:
+            return "(None - Single Checkpoint View)"
+        return ckpt_map[c]["label"]
+
+    selected_base_ckpt = st.sidebar.selectbox(
+        "Base Model / Reference",
+        ref_options,
+        format_func=format_base_option,
+        index=default_base_idx,
+        help="Select baseline reference checkpoint corresponding to selected Run ID.",
+    )
+
+    # Dropdown 3: Checkpoint (corresponding to Run ID)
+    default_target_idx = len(ckpt_numbers) - 1  # newest checkpoint
+    selected_target_ckpt = st.sidebar.selectbox(
+        "Selected Checkpoint",
+        ckpt_numbers,
+        format_func=lambda c: ckpt_map[c]["label"],
+        index=default_target_idx,
+        help="Select checkpoint corresponding to selected Run ID to evaluate.",
+    )
+
+    target_info = {
+        "run_id": selected_run_id,
+        "checkpoint": selected_target_ckpt,
+        "checkpoint_name": ckpt_map[selected_target_ckpt]["checkpoint_name"],
+    }
+    base_info = {
+        "run_id": selected_run_id,
+        "checkpoint": selected_base_ckpt,
+        "checkpoint_name": ckpt_map[selected_base_ckpt]["checkpoint_name"] if selected_base_ckpt is not None else "None",
+    } if selected_base_ckpt is not None else None
+
+    st.sidebar.markdown("---")
+
+    # Load DataFrames from SQLite
+    target_df = load_probe_traces_from_db(
+        probe=norm_probe,
+        run_id=selected_run_id,
+        checkpoint=selected_target_ckpt,
+        db_path=trace_db_path,
+    )
+
+    base_df = load_probe_traces_from_db(
+        probe=norm_probe,
+        run_id=selected_run_id,
+        checkpoint=selected_base_ckpt,
+        db_path=trace_db_path,
+    ) if selected_base_ckpt is not None else pd.DataFrame()
+
+    diff_df = compute_trace_diff(base_df, target_df)
+
+    if diff_df.empty:
+        st.warning("Selected trace run contains no data rows.")
+        return
+
+    # 6. Sidebar Filters
     show_changed_only = st.sidebar.checkbox(
         "Show only traces changed from base",
         value=False,
         help="Filter items where the selected checkpoint generated a different answer than the baseline.",
     )
 
-    # Load DataFrames
-    target_df = load_trace_file(selected_target_file) if selected_target_file else pd.DataFrame()
-    base_df = load_trace_file(selected_base_file) if selected_base_file else pd.DataFrame()
-
-    diff_df = compute_trace_diff(base_df, target_df)
-
-    if diff_df.empty:
-        st.warning("Selected trace file contains no data rows.")
-        return
-
-    # Subcategory filter if available
+    # Subcategory filter
     available_subcats = sorted([c for c in diff_df["category_display"].unique() if str(c).strip()])
     if available_subcats:
         selected_subcat = st.sidebar.selectbox(
@@ -194,6 +277,17 @@ def main():
         )
         if selected_subcat != "All Categories":
             diff_df = diff_df[diff_df["category_display"] == selected_subcat]
+
+    # Error Category filter (dynamic from DB)
+    available_error_cats = get_distinct_error_categories(norm_probe, db_path=trace_db_path)
+    selected_error_filter = st.sidebar.selectbox(
+        "Filter Error Category",
+        ["All Error Categories"] + available_error_cats,
+        index=0,
+        help="Filter items by assigned error category in the database.",
+    )
+    if selected_error_filter != "All Error Categories":
+        diff_df = diff_df[diff_df["error_category_target"].astype(str).str.strip() == selected_error_filter]
 
     # Search filter
     search_query = st.sidebar.text_input("Search Prompt or Answer", "").strip().lower()
@@ -210,8 +304,11 @@ def main():
 
     total_filtered = len(diff_df)
 
-    # Header and Summary Metrics
-    st.header(f"🔍 {selected_category} Probe Traces")
+    # Header and Summary Metrics (Compact)
+    st.markdown(
+        f"<h3 style='margin: 0.3rem 0 0.5rem 0; font-size: 1.35rem; font-weight: 700;'>🔍 {selected_category} Probe Traces</h3>",
+        unsafe_allow_html=True,
+    )
 
     # Top Metrics Row
     m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
@@ -282,23 +379,23 @@ def main():
 
     # Current Item Record
     row = diff_df.iloc[curr_idx]
-    seq_num = row.get("seq_num", curr_idx + 1)
+    seq_num = int(row.get("seq_num", curr_idx + 1))
     category_val = row.get("category_display", "")
     prompt_text = row.get("prompt_display", "")
     target_answer_text = row.get("target_answer_display", "")
 
-    # Top Prompt Card
+    # Top Prompt Card with explicit dark text color
     st.markdown(
         f"""
-        <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 18px; margin-bottom: 15px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <span style="font-weight: 700; color: #495057;">Sequence #{seq_num}</span>
-                <span style="background: #e9ecef; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem; color: #495057;">Category: {category_val or 'Standard'}</span>
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">Sequence #{seq_num}</span>
+                <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; color: #334155; font-weight: 600;">Category: {category_val or 'Standard'}</span>
             </div>
-            <div style="font-size: 1.05rem; font-weight: 600; color: #212529; margin-bottom: 6px;">Prompt:</div>
-            <div style="background: #ffffff; border: 1px solid #ced4da; border-radius: 4px; padding: 10px; margin-bottom: 10px; font-family: monospace; white-space: pre-wrap;">{prompt_text}</div>
-            <div style="font-size: 0.95rem; font-weight: 600; color: #495057;">Expected Target Answer:</div>
-            <div style="background: #e8f5e9; border: 1px solid #c8e6c9; color: #1b5e20; border-radius: 4px; padding: 8px; font-family: monospace;">{target_answer_text}</div>
+            <div style="font-size: 0.95rem; font-weight: 600; color: #0f172a; margin-bottom: 4px;">Prompt:</div>
+            <div style="background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px; margin-bottom: 8px; font-family: monospace; font-size: 0.92rem; white-space: pre-wrap; word-break: break-word;">{prompt_text}</div>
+            <div style="font-size: 0.9rem; font-weight: 600; color: #0f172a; margin-bottom: 4px;">Expected Target Answer:</div>
+            <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 0.92rem; font-weight: 600; word-break: break-word;">{target_answer_text}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -325,11 +422,18 @@ def main():
 
     output_diff_badge = "🔄 Output Changed" if is_changed else "⚪ Output Identical"
 
+    # Current Error Category in DB
+    current_saved_cat = str(row.get("error_category_target", row.get("error_category", "")) or "").strip()
+    target_res = str(row.get("result_target", "Fail")).strip().capitalize()
+    if not current_saved_cat:
+        current_saved_cat = "Pass" if target_res == "Pass" else "Fail"
+
     st.markdown(
         f"""
-        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 14px;">
-            <span style="font-weight: 700; color: {status_color}; font-size: 1.05rem;">{status_label}</span>
-            <span style="background: #e2e3e5; color: #383d41; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: 600;">{output_diff_badge}</span>
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px;">
+            <span style="font-weight: 700; color: {status_color}; font-size: 1.0rem;">{status_label}</span>
+            <span style="background: #e2e3e5; color: #383d41; padding: 2px 8px; border-radius: 4px; font-size: 0.82rem; font-weight: 600;">{output_diff_badge}</span>
+            <span class="badge-category">Category: <strong>{current_saved_cat}</strong></span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -349,12 +453,12 @@ def main():
         
         st.markdown(
             f"""
-            <div style="border: 1px solid #ced4da; border-radius: 6px; padding: 12px; background: #ffffff; min-height: 180px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; background-color: #ffffff; min-height: 160px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <span class="{b_badge_class}">{base_res}</span>
-                    <span style="font-size: 0.9rem; color: #6c757d;">Score: <strong>{base_score:.4f}</strong></span>
+                    <span style="font-size: 0.85rem; color: #475569;">Score: <strong style="color: #0f172a;">{base_score:.4f}</strong></span>
                 </div>
-                <div style="font-family: monospace; white-space: pre-wrap; font-size: 0.95rem; color: #212529;">{base_out}</div>
+                <div style="font-family: monospace; white-space: pre-wrap; font-size: 0.92rem; color: #0f172a; word-break: break-word;">{base_out}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -362,7 +466,7 @@ def main():
 
     # Right Column: Checkpoint Output
     with col_target:
-        st.subheader("Selected Checkpoint Output")
+        st.subheader("Checkpoint Output")
         tgt_out = str(row.get("model_output_target", "")).strip() or "(No output recorded)"
         tgt_score = row.get("matching_score_target", 0.0)
         tgt_res = str(row.get("result_target", "N/A")).strip().capitalize()
@@ -374,16 +478,79 @@ def main():
 
         st.markdown(
             f"""
-            <div style="border: 2px solid {border_color}; border-radius: 6px; padding: 12px; background: #ffffff; min-height: 180px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="border: 2px solid {border_color}; border-radius: 6px; padding: 12px; background-color: #ffffff; min-height: 160px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <span class="{t_badge_class}">{tgt_res}</span>
-                    <span style="font-size: 0.9rem; color: #6c757d;">Score: <strong>{tgt_score:.4f}</strong></span>
+                    <span style="font-size: 0.85rem; color: #475569;">Score: <strong style="color: #0f172a;">{tgt_score:.4f}</strong></span>
                 </div>
-                <div style="font-family: monospace; white-space: pre-wrap; font-size: 0.95rem; color: #212529;">{tgt_out}</div>
+                <div style="font-family: monospace; white-space: pre-wrap; font-size: 0.92rem; color: #0f172a; word-break: break-word;">{tgt_out}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+
+    # Error Categorization & Annotation Card
+    st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+    with st.expander("🏷️ **Capture Error Category & Notes for this Item**", expanded=True):
+        cat_options = list(available_error_cats)
+        if current_saved_cat not in cat_options:
+            cat_options.append(current_saved_cat)
+        
+        custom_opt = "+ Add New Custom Category..."
+        dropdown_options = cat_options + [custom_opt]
+        
+        # Default index
+        default_idx = cat_options.index(current_saved_cat) if current_saved_cat in cat_options else 0
+
+        c_col1, c_col2, c_col3 = st.columns([3, 4, 2])
+
+        with c_col1:
+            selected_err_cat = st.selectbox(
+                "Error Category",
+                dropdown_options,
+                index=default_idx,
+                key=f"cat_select_{seq_num}_{target_info['run_id']}_{target_info['checkpoint']}",
+            )
+            
+            final_category = selected_err_cat
+            if selected_err_cat == custom_opt:
+                custom_name = st.text_input(
+                    "Enter Custom Category:",
+                    key=f"custom_cat_input_{seq_num}_{target_info['run_id']}",
+                    placeholder="e.g. Inconsistent Terminology",
+                ).strip()
+                if custom_name:
+                    final_category = custom_name
+                else:
+                    final_category = "Fail"
+
+        with c_col2:
+            current_notes = str(row.get("notes_target", row.get("notes", "")) or "")
+            notes_input = st.text_input(
+                "Annotation Notes",
+                value=current_notes,
+                key=f"notes_input_{seq_num}_{target_info['run_id']}_{target_info['checkpoint']}",
+                placeholder="Optional notes describing model behavior...",
+            )
+
+        with c_col3:
+            st.write("")
+            st.write("")
+            if st.button("💾 Save Annotation", key=f"save_btn_{seq_num}", use_container_width=True):
+                success = update_trace_annotation(
+                    probe=norm_probe,
+                    run_id=target_info["run_id"],
+                    checkpoint=target_info["checkpoint"],
+                    seq_num=seq_num,
+                    error_category=final_category,
+                    notes=notes_input,
+                    db_path=trace_db_path,
+                )
+                if success:
+                    st.toast(f"✅ Saved category '{final_category}' for Item #{seq_num}")
+                    st.rerun()
+                else:
+                    st.error("Failed to update database record.")
 
     # Tabular Table View
     with st.expander("📋 View All Filtered Traces in Table"):
@@ -394,6 +561,7 @@ def main():
             "target_answer_display",
             "result_base",
             "result_target",
+            "error_category_target",
             "delta_status",
             "is_output_changed",
             "model_output_base",

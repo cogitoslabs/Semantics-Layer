@@ -404,6 +404,9 @@ class DataConfig:
     pretokenized_bin_path: Path    = field(default_factory=lambda: Path(
         os.environ.get("PRETOKENIZED_BIN_PATH", "data/dapt/train_tokens.npy")
     ))
+    pretokenized_meta_path: Path   = field(default_factory=lambda: Path(
+        os.environ.get("PRETOKENIZED_META_PATH", "data/dapt/pretokenized_metadata.json")
+    ))
     dapt_in_dir: Path              = field(default_factory=lambda: Path(
         os.environ.get("DAPT_IN_DIR", "data/dapt/in")
     ))
@@ -461,6 +464,7 @@ class LoggingConfig:
     model_tracing: bool            = field(default_factory=lambda: get("MODEL_TRACING", False, bool))
     model_trace_file: Path         = field(default_factory=lambda: Path(get("MODEL_TRACE_FILE", "logs/dapt_model_traces.csv")))
     risk_report_path: Path         = field(default_factory=lambda: Path(get("RISK_REPORT_PATH", "logs/dapt_hard_cap_risk_report.json")))
+    trace_db_path: Path            = field(default_factory=lambda: Path(get("TRACE_DB_PATH", "logs/traces.db")))
     log_level: str                 = field(default_factory=lambda: get("LOG_LEVEL", "INFO"))
     log_file: str                  = field(default_factory=lambda: get("LOG_FILE", "pipeline.log"))
 

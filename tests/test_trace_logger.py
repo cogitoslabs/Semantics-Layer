@@ -431,15 +431,8 @@ def test_eval_runner_saves_partitioned_traces():
 
         assert metrics["eval_count"] == 1
 
-        # Check cumulative traces file
-        assert cfg.logging.eval_traces_file.exists()
-
         # Check partitioned trace folders
         traces_dir = cfg.logging.log_dir / "traces"
-        assert (traces_dir / "qa").exists()
-        assert (traces_dir / "cloze").exists()
-        assert (traces_dir / "concept").exists()
-
         qa_files = list_trace_files("qa", base_dir=traces_dir)
         cloze_files = list_trace_files("cloze", base_dir=traces_dir)
         concept_files = list_trace_files("concept", base_dir=traces_dir)

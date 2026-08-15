@@ -1047,6 +1047,95 @@ def test_find_latest_checkpoint_and_restart_flag():
         new_scheduler.load_state_dict.assert_called_once()
 
 
+def test_pretokenization_saves_metadata(mock_tokenizer):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        corpus_file = tmp_path / "corpus.jsonl"
+        with open(corpus_file, "w", encoding="utf-8") as f:
+            for i in range(10):
+                f.write(json.dumps({"text": f"Document {i} text for domain pretraining."}) + "\n")
+
+        mock_tokenizer.vocab_size = 49152
+        mock_tokenizer.__len__ = MagicMock(return_value=49152)
+
+        cfg = PipelineConfig()
+        cfg.build.output_path = corpus_file
+        cfg.data.pretokenized_bin_path = tmp_path / "train_tokens.npy"
+        cfg.data.ppl_corpus_path = tmp_path / "ppl_val.npy"
+        cfg.data.pretokenized_meta_path = tmp_path / "pretokenized_metadata.json"
+
+        with patch("transformers.AutoTokenizer.from_pretrained", return_value=mock_tokenizer):
+            run_pretokenization(cfg)
+
+        assert cfg.data.pretokenized_meta_path.exists()
+        with open(cfg.data.pretokenized_meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+
+        assert meta["base_model_name"] == cfg.model.base_model_name
+        assert meta["train_tokens_count"] > 0
+        assert meta["val_tokens_count"] > 0
+        assert meta["vocab_size"] > 0
+
+
+def test_verify_pretokenized_metadata():
+    from lib.s3_dapt.training_helpers import verify_pretokenized_metadata
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg = PipelineConfig()
+        meta_path = Path(tmpdir) / "pretokenized_metadata.json"
+        cfg.data.pretokenized_meta_path = meta_path
+        cfg.model.base_model_name = "HuggingFaceTB/SmolLM2-135M"
+
+        mock_tok = MagicMock()
+        mock_tok.vocab_size = 49152
+        mock_tok.__len__ = MagicMock(return_value=49152)
+
+        # 1. Missing metadata file should log warning and return without error
+        verify_pretokenized_metadata(cfg, mock_tok)
+
+        # 2. Matching metadata should pass
+        meta_content = {
+            "base_model_name": "HuggingFaceTB/SmolLM2-135M",
+            "vocab_size": 49152,
+            "train_tokens_count": 1000
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta_content, f)
+
+        verify_pretokenized_metadata(cfg, mock_tok)
+
+        # 3. Mismatched model name should raise ValueError
+        cfg.model.base_model_name = "HuggingFaceTB/Qwen3-0.6B"
+        with pytest.raises(ValueError, match="CRITICAL PRE-TOKENIZATION MISMATCH"):
+            verify_pretokenized_metadata(cfg, mock_tok)
+
+        # 4. Matching model name but mismatched vocab size should raise ValueError
+        cfg.model.base_model_name = "HuggingFaceTB/SmolLM2-135M"
+        mock_tok_qwen = MagicMock()
+        mock_tok_qwen.vocab_size = 151643
+        mock_tok_qwen.__len__ = MagicMock(return_value=151643)
+        with pytest.raises(ValueError, match="CRITICAL PRE-TOKENIZATION MISMATCH"):
+            verify_pretokenized_metadata(cfg, mock_tok_qwen)
+
+
+def test_load_ppl_corpus_vocab_range_check():
+    from lib.s3_dapt.probes.perplexity_probe import load_ppl_corpus
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        npy_path = Path(tmpdir) / "ppl_val.npy"
+        # Token IDs up to 60000 (exceeding SmolLM2's 49152 vocab)
+        tokens = np.array([100, 200, 55000, 300], dtype=np.int32)
+        np.save(npy_path, tokens)
+
+        mock_tok = MagicMock()
+        mock_tok.vocab_size = 49152
+        mock_tok.__len__ = MagicMock(return_value=49152)
+
+        with pytest.raises(ValueError, match="exceeds tokenizer vocab size"):
+            load_ppl_corpus(npy_path, tokenizer=mock_tok, max_tokens=1000, seq_len=2)
+
+
+
 
 
 

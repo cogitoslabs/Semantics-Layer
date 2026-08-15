@@ -1,5 +1,6 @@
 import os
 import random
+from typing import Optional, Any
 import numpy as np
 import torch
 from torch.optim import AdamW
@@ -82,6 +83,81 @@ def verify_eval_files(cfg: DAPTConfig) -> None:
         error_msg = "Required evaluation files are missing:\n" + "\n".join(missing_files)
         logger.error(error_msg)
         raise FileNotFoundError(error_msg)
+
+
+def _normalize_model_name(name: str) -> str:
+    """Normalize model path or HF name for comparison (e.g. 'models/smollm2-135m' -> 'smollm2135m')."""
+    from pathlib import Path
+    p = Path(name)
+    base = p.name.lower().replace("-", "").replace("_", "").replace(".", "")
+    return base
+
+
+def verify_pretokenized_metadata(cfg: DAPTConfig, tokenizer: Optional[Any] = None) -> None:
+    """
+    Verify that the offline pre-tokenized binary files match the active training model and tokenizer.
+    Raises ValueError if there is a mismatch.
+    """
+    from pathlib import Path
+    import json
+
+    meta_path = Path(cfg.data.pretokenized_meta_path)
+    current_model = cfg.model.base_model_name
+
+    if not meta_path.exists():
+        logger.warning(
+            f"Pre-tokenization metadata file not found at {meta_path}. "
+            f"Cannot strictly verify if '{cfg.data.pretokenized_bin_path}' matches active model '{current_model}'."
+        )
+        return
+
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not read pre-tokenization metadata file at {meta_path}: {e}")
+        return
+
+    meta_model = meta.get("base_model_name", "")
+    meta_vocab = meta.get("vocab_size", 0)
+
+    # 1. Compare model names
+    norm_meta = _normalize_model_name(meta_model)
+    norm_current = _normalize_model_name(current_model)
+
+    model_name_match = (
+        bool(norm_meta and norm_current) and
+        ((norm_meta == norm_current) or (norm_meta in norm_current) or (norm_current in norm_meta))
+    )
+
+    # 2. Compare vocabulary sizes if tokenizer is provided
+    vocab_match = True
+    current_vocab = None
+    if tokenizer is not None and meta_vocab > 0:
+        try:
+            current_vocab = len(tokenizer)
+        except Exception:
+            current_vocab = getattr(tokenizer, "vocab_size", None)
+
+        if current_vocab is not None and current_vocab != meta_vocab:
+            vocab_match = False
+
+    if not model_name_match or not vocab_match:
+        vocab_info = f" (vocab_size: {meta_vocab} vs current model vocab_size: {current_vocab})" if current_vocab is not None else ""
+        error_msg = (
+            f"CRITICAL PRE-TOKENIZATION MISMATCH: The pre-tokenized corpus at '{cfg.data.pretokenized_bin_path}' "
+            f"was tokenized with '{meta_model}'{vocab_info}, but the current training model is '{current_model}'. "
+            f"Training on mismatched token IDs will cause catastrophic model degradation and huge perplexity (~10,000+). "
+            f"Please re-run pre-tokenization with: python pipeline.py --step s2"
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    logger.info(
+        f"Pre-tokenization metadata verified: '{meta_model}' matches active model '{current_model}' "
+        f"(vocab_size: {meta_vocab:,}, train_tokens: {meta.get('train_tokens_count', 0):,})"
+    )
+
 
 def init_optimizer_scheduler(cfg: DAPTConfig, model: torch.nn.Module, train_dataloader_len: int):
     """Initialize optimizer and scheduler (Adafactor for CPU, AdamW for GPU)."""
